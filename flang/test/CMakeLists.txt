@@ -17,11 +17,9 @@ set(FLANG_TEST_PARAMS
 
 set(FLANG_TEST_DEPENDS
   f18 FileCheck count not module_files
+  tco
+  bbc
 )
-
-if (LINK_WITH_FIR)
-  list(APPEND FLANG_TEST_DEPENDS tco)
-endif()
 
 add_custom_target(flang-test-depends DEPENDS ${FLANG_TEST_DEPENDS})
 
@@ -35,4 +33,3 @@ set_target_properties(check-flang PROPERTIES FOLDER "Tests")
 add_lit_testsuites(FLANG ${CMAKE_CURRENT_SOURCE_DIR}
   PARAMS ${FLANG_TEST_PARAMS}
   DEPENDS ${FLANG_TEST_DEPENDS})
-
