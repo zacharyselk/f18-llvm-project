@@ -16,7 +16,9 @@
 
 #include "constexpr-bitset.h"
 #include "idioms.h"
+#ifndef FORTRAN_IN_RUNTIME
 #include "llvm/Support/raw_ostream.h"
+#endif
 #include <bitset>
 #include <cstddef>
 #include <initializer_list>
@@ -206,6 +208,7 @@ public:
     }
   }
 
+#ifndef FORTRAN_IN_RUNTIME
   llvm::raw_ostream &Dump(
       llvm::raw_ostream &o, std::string EnumToString(enumerationType)) const {
     char sep{'{'};
@@ -215,6 +218,7 @@ public:
     });
     return o << (sep == '{' ? "{}" : "}");
   }
+#endif
 
 private:
   bitsetType bitset_{};
