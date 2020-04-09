@@ -227,6 +227,26 @@ bool IsBindCProcedure(const Scope &scope) {
   }
 }
 
+bool IsProcedure(const Symbol &symbol) {
+  return std::visit(
+      common::visitors{
+          [](const SubprogramDetails &) { return true; },
+          [](const SubprogramNameDetails &) { return true; },
+          [](const ProcEntityDetails &) { return true; },
+          [](const GenericDetails &) { return true; },
+          [](const ProcBindingDetails &) { return true; },
+          [](const UseDetails &x) { return IsProcedure(x.symbol()); },
+          [](const HostAssocDetails &x) { return IsProcedure(x.symbol()); },
+          // TODO: FinalProcDetails?
+          [](const auto &) { return false; },
+      },
+      symbol.details());
+}
+
+bool IsProcedurePointer(const Symbol &symbol) {
+  return symbol.has<ProcEntityDetails>() && IsPointer(symbol);
+}
+
 static const Symbol *FindPointerComponent(
     const Scope &scope, std::set<const Scope *> &visited) {
   if (!scope.IsDerivedType()) {
@@ -1290,6 +1310,15 @@ void LabelEnforce::SayWithConstruct(SemanticsContext &context,
     parser::CharBlock constructLocation) {
   context.Say(stmtLocation, message)
       .Attach(constructLocation, GetEnclosingConstructMsg());
+}
+
+bool HasAlternateReturns(const Symbol &sub) {
+  for (const auto *args : sub.get<SubprogramDetails>().dummyArgs()) {
+    if (!args) {
+      return true;
+    }
+  }
+  return false;
 }
 
 } // namespace Fortran::semantics
