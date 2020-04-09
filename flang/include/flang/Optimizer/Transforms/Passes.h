@@ -53,6 +53,7 @@ using mlir::Pass;
 #include "flang/Optimizer/Transforms/Passes.h.inc"
 }
 
+bool isAlwaysExecuteLoopBody();
 } // namespace fir
 
 #endif // OPTIMIZER_TRANSFORMS_PASSES_H
