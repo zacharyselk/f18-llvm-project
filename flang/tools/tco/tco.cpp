@@ -99,7 +99,7 @@ static int compileFIR() {
     pm.addPass(fir::createFIRToStdPass(kindMap));
     // convert loop dialect to standard
     pm.addPass(mlir::createLowerToCFGPass());
-    pm.addPass(fir::createMemToRegPass());
+    //pm.addPass(fir::createMemToRegPass());
     pm.addPass(fir::createCSEPass());
     pm.addPass(fir::createFIRToLLVMPass(uniquer));
     pm.addPass(fir::createLLVMDialectToLLVMPass(out.os()));
