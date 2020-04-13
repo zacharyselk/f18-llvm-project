@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "flang/Lower/Bridge.h"
+#include "SymbolMap.h"
 #include "flang/Lower/ConvertExpr.h"
 #include "flang/Lower/ConvertType.h"
 #include "flang/Lower/FIRBuilder.h"
@@ -380,12 +381,12 @@ private:
 
   template <typename A>
   mlir::OpBuilder::InsertPoint genWhereCondition(fir::WhereOp &where,
-						 const A *stmt) {
+                                                 const A *stmt) {
     auto cond = createLogicalExprAsI1(
         toLocation(),
         Fortran::semantics::GetExpr(
             std::get<Fortran::parser::ScalarLogicalExpr>(stmt->t)));
-        where = builder->create<fir::WhereOp>(toLocation(), cond, true);
+    where = builder->create<fir::WhereOp>(toLocation(), cond, true);
     auto insPt = builder->saveInsertionPoint();
     switchInsertionPointToWhere(where);
     return insPt;
@@ -1579,36 +1580,6 @@ private:
   }
 
   mlir::Location toLocation() { return toLocation(currentPosition); }
-
-  // TODO: should these be moved to convert-expr?
-  template <mlir::CmpIPredicate ICMPOPC>
-  mlir::Value genCompare(mlir::Value lhs, mlir::Value rhs) {
-    auto lty = lhs.getType();
-    assert(lty == rhs.getType());
-    if (lty.isSignlessIntOrIndex())
-      return builder->create<mlir::CmpIOp>(lhs.getLoc(), ICMPOPC, lhs, rhs);
-    if (fir::LogicalType::kindof(lty.getKind()))
-      return builder->create<mlir::CmpIOp>(lhs.getLoc(), ICMPOPC, lhs, rhs);
-    if (fir::CharacterType::kindof(lty.getKind())) {
-      // FIXME
-      // return builder->create<mlir::CallOp>(lhs->getLoc(), );
-    }
-    mlir::emitError(toLocation(), "cannot generate operation on this type");
-    return {};
-  }
-
-  mlir::Value genGE(mlir::Value lhs, mlir::Value rhs) {
-    return genCompare<mlir::CmpIPredicate::sge>(lhs, rhs);
-  }
-  mlir::Value genLE(mlir::Value lhs, mlir::Value rhs) {
-    return genCompare<mlir::CmpIPredicate::sle>(lhs, rhs);
-  }
-  mlir::Value genEQ(mlir::Value lhs, mlir::Value rhs) {
-    return genCompare<mlir::CmpIPredicate::eq>(lhs, rhs);
-  }
-  mlir::Value genAND(mlir::Value lhs, mlir::Value rhs) {
-    return builder->create<mlir::AndOp>(lhs.getLoc(), lhs, rhs);
-  }
 
   mlir::MLIRContext &mlirContext;
   const Fortran::parser::CookedSource *cooked;
