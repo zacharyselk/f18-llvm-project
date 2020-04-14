@@ -452,7 +452,7 @@ def fir_StoreOp : fir_Op<"store", [MemoryEffects<[MemWrite]>]> {
   }];
 }
 
-def fir_UndefOp : fir_OneResultOp<"undefined", []> {
+def fir_UndefOp : fir_OneResultOp<"undefined", [NoSideEffect]> {
   let summary = "explicit undefined value of some type";
   let description = [{
     Constructs an ssa-value of the specified type with an undefined value.
@@ -1002,7 +1002,7 @@ def fir_HasValueOp : fir_Op<"has_value", [Terminator, HasParent<"GlobalOp">]> {
 
 // Operations on !fir.box<T> type objects
 
-def fir_EmboxOp : fir_Op<"embox", [MemoryEffects<[MemAlloc]>]> {
+def fir_EmboxOp : fir_Op<"embox", [NoSideEffect]> {
   let summary = "boxes a given reference and (optional) dimension information";
 
   let description = [{
@@ -1096,7 +1096,7 @@ def fir_EmboxOp : fir_Op<"embox", [MemoryEffects<[MemAlloc]>]> {
   }];
 }
 
-def fir_EmboxCharOp : fir_Op<"emboxchar", [MemoryEffects<[MemAlloc]>]> {
+def fir_EmboxCharOp : fir_Op<"emboxchar", [NoSideEffect]> {
   let summary = "boxes a given CHARACTER reference and its LEN parameter";
 
   let description = [{
@@ -1134,7 +1134,7 @@ def fir_EmboxCharOp : fir_Op<"emboxchar", [MemoryEffects<[MemAlloc]>]> {
   }];
 }
 
-def fir_EmboxProcOp : fir_Op<"emboxproc", [MemoryEffects<[MemAlloc]>]> {
+def fir_EmboxProcOp : fir_Op<"emboxproc", [NoSideEffect]> {
   let summary = "boxes a given procedure and optional host context";
 
   let description = [{
@@ -1223,7 +1223,7 @@ def fir_EmboxProcOp : fir_Op<"emboxproc", [MemoryEffects<[MemAlloc]>]> {
   }];
 }
 
-def fir_UnboxOp : fir_SimpleOp<"unbox", []> {
+def fir_UnboxOp : fir_SimpleOp<"unbox", [NoSideEffect]> {
   let summary = "unbox the boxed value into a tuple value";
 
   let description = [{
@@ -1251,7 +1251,7 @@ def fir_UnboxOp : fir_SimpleOp<"unbox", []> {
   );
 }
 
-def fir_UnboxCharOp : fir_SimpleOp<"unboxchar", []> {
+def fir_UnboxCharOp : fir_SimpleOp<"unboxchar", [NoSideEffect]> {
   let summary = "unbox a boxchar value into a pair value";
 
   let description = [{
@@ -1269,7 +1269,7 @@ def fir_UnboxCharOp : fir_SimpleOp<"unboxchar", []> {
   let results = (outs fir_ReferenceType, AnyIntegerLike);
 }
 
-def fir_UnboxProcOp : fir_SimpleOp<"unboxproc", []> {
+def fir_UnboxProcOp : fir_SimpleOp<"unboxproc", [NoSideEffect]> {
   let summary = "unbox a boxproc value into a pair value";
 
   let description = [{
@@ -1294,7 +1294,7 @@ def fir_UnboxProcOp : fir_SimpleOp<"unboxproc", []> {
   let results = (outs FunctionType, fir_ReferenceType:$refTuple);
 }
 
-def fir_BoxAddrOp : fir_SimpleOneResultOp<"box_addr", []> {
+def fir_BoxAddrOp : fir_SimpleOneResultOp<"box_addr", [NoSideEffect]> {
   let summary = "return a memory reference to the boxed value";
 
   let description = [{
@@ -1317,7 +1317,7 @@ def fir_BoxAddrOp : fir_SimpleOneResultOp<"box_addr", []> {
   let hasFolder = 1;
 }
 
-def fir_BoxCharLenOp : fir_SimpleOp<"boxchar_len", []> {
+def fir_BoxCharLenOp : fir_SimpleOp<"boxchar_len", [NoSideEffect]> {
   let summary = "return the LEN type parameter from a boxchar value";
 
   let description = [{
@@ -1336,7 +1336,7 @@ def fir_BoxCharLenOp : fir_SimpleOp<"boxchar_len", []> {
   let hasFolder = 1;
 }
 
-def fir_BoxDimsOp : fir_Op<"box_dims", []> {
+def fir_BoxDimsOp : fir_Op<"box_dims", [NoSideEffect]> {
   let summary = "return the dynamic dimension information for the boxed value";
 
   let description = [{
@@ -1367,7 +1367,7 @@ def fir_BoxDimsOp : fir_Op<"box_dims", []> {
   }];
 }
 
-def fir_BoxEleSizeOp : fir_SimpleOneResultOp<"box_elesize", []> {
+def fir_BoxEleSizeOp : fir_SimpleOneResultOp<"box_elesize", [NoSideEffect]> {
   let summary = "return the size of an element of the boxed value";
 
   let description = [{
@@ -1388,7 +1388,7 @@ def fir_BoxEleSizeOp : fir_SimpleOneResultOp<"box_elesize", []> {
   let results = (outs AnyIntegerLike);
 }
 
-def fir_BoxIsAllocOp : fir_SimpleOp<"box_isalloc", []> {
+def fir_BoxIsAllocOp : fir_SimpleOp<"box_isalloc", [NoSideEffect]> {
   let summary = "is the boxed value an ALLOCATABLE?";
 
   let description = [{
@@ -1411,7 +1411,7 @@ def fir_BoxIsAllocOp : fir_SimpleOp<"box_isalloc", []> {
   let results = (outs BoolLike);
 }
 
-def fir_BoxIsArrayOp : fir_SimpleOp<"box_isarray", []> {
+def fir_BoxIsArrayOp : fir_SimpleOp<"box_isarray", [NoSideEffect]> {
   let summary = "is the boxed value an array?";
 
   let description = [{
@@ -1432,7 +1432,7 @@ def fir_BoxIsArrayOp : fir_SimpleOp<"box_isarray", []> {
   let results = (outs BoolLike);
 }
 
-def fir_BoxIsPtrOp : fir_SimpleOp<"box_isptr", []> {
+def fir_BoxIsPtrOp : fir_SimpleOp<"box_isptr", [NoSideEffect]> {
   let summary = "is the boxed value a POINTER?";
 
   let description = [{
@@ -1450,7 +1450,7 @@ def fir_BoxIsPtrOp : fir_SimpleOp<"box_isptr", []> {
   let results = (outs BoolLike);
 }
 
-def fir_BoxProcHostOp : fir_SimpleOp<"boxproc_host", []> {
+def fir_BoxProcHostOp : fir_SimpleOp<"boxproc_host", [NoSideEffect]> {
   let summary = "returns the host instance pointer (or null)";
 
   let description = [{
@@ -1472,7 +1472,7 @@ def fir_BoxProcHostOp : fir_SimpleOp<"boxproc_host", []> {
   let results = (outs fir_ReferenceType);
 }
 
-def fir_BoxRankOp : fir_SimpleOneResultOp<"box_rank", []> {
+def fir_BoxRankOp : fir_SimpleOneResultOp<"box_rank", [NoSideEffect]> {
   let summary = "return the number of dimensions for the boxed value";
 
   let description = [{
@@ -1494,7 +1494,7 @@ def fir_BoxRankOp : fir_SimpleOneResultOp<"box_rank", []> {
   let results = (outs AnyIntegerType);
 }
 
-def fir_BoxTypeDescOp : fir_SimpleOneResultOp<"box_tdesc", []> {
+def fir_BoxTypeDescOp : fir_SimpleOneResultOp<"box_tdesc", [NoSideEffect]> {
   let summary = "return the type descriptor for the boxed value";
 
   let description = [{
@@ -1514,7 +1514,7 @@ def fir_BoxTypeDescOp : fir_SimpleOneResultOp<"box_tdesc", []> {
 
 // Record and array type operations
 
-def fir_CoordinateOp : fir_Op<"coordinate_of", []> {
+def fir_CoordinateOp : fir_Op<"coordinate_of", [NoSideEffect]> {
   let summary = "Finds the coordinate (location) of a value in memory";
 
   let description = [{
@@ -1585,7 +1585,7 @@ def fir_CoordinateOp : fir_Op<"coordinate_of", []> {
   }];
 }
 
-def fir_ExtractValueOp : fir_OneResultOp<"extract_value", []> {
+def fir_ExtractValueOp : fir_OneResultOp<"extract_value", [NoSideEffect]> {
   let summary = "Extract a value from an aggregate SSA-value";
 
   let description = [{
@@ -1613,7 +1613,7 @@ def fir_ExtractValueOp : fir_OneResultOp<"extract_value", []> {
   }];
 }
 
-def fir_FieldIndexOp : fir_OneResultOp<"field_index", []> {
+def fir_FieldIndexOp : fir_OneResultOp<"field_index", [NoSideEffect]> {
   let summary = "create a field index value from a field identifier";
 
   let description = [{
@@ -1699,7 +1699,7 @@ def fir_FieldIndexOp : fir_OneResultOp<"field_index", []> {
   }];
 }
 
-def fir_GenDimsOp : fir_OneResultOp<"gendims", [MemoryEffects<[MemAlloc]>]> {
+def fir_GenDimsOp : fir_OneResultOp<"gendims", [NoSideEffect]> {
 
   let summary = "generate a value of type `!fir.dims`";
 
@@ -1735,7 +1735,7 @@ def fir_GenDimsOp : fir_OneResultOp<"gendims", [MemoryEffects<[MemAlloc]>]> {
   }];
 }
 
-def fir_InsertValueOp : fir_OneResultOp<"insert_value", []> {
+def fir_InsertValueOp : fir_OneResultOp<"insert_value", [NoSideEffect]> {
   let summary = "insert a new sub-value into a copy of an existing aggregate";
 
   let description = [{
@@ -1764,7 +1764,7 @@ def fir_InsertValueOp : fir_OneResultOp<"insert_value", []> {
   }];
 }
 
-def fir_LenParamIndexOp : fir_OneResultOp<"len_param_index", []> {
+def fir_LenParamIndexOp : fir_OneResultOp<"len_param_index", [NoSideEffect]> {
   let summary =
     "create a field index value from a LEN type parameter identifier";
 
@@ -2048,7 +2048,8 @@ def fir_WhereOp :
 
 // Procedure call operations
 
-def fir_CallOp : fir_Op<"call", [MemoryEffects<[MemRead, MemWrite]>]> {
+def fir_CallOp : fir_Op<"call",
+    [MemoryEffects<[MemAlloc, MemFree, MemRead, MemWrite]>]> {
   let summary = "call a procedure";
 
   let description = [{
@@ -2078,7 +2079,8 @@ def fir_CallOp : fir_Op<"call", [MemoryEffects<[MemRead, MemWrite]>]> {
   }];
 }
 
-def fir_DispatchOp : fir_Op<"dispatch", [MemoryEffects<[MemRead, MemWrite]>]> {
+def fir_DispatchOp : fir_Op<"dispatch",
+    [MemoryEffects<[MemAlloc, MemFree, MemRead, MemWrite]>]> {
   let summary = "call a type-bound procedure";
 
   let description = [{
@@ -2152,7 +2154,7 @@ def fir_DispatchOp : fir_Op<"dispatch", [MemoryEffects<[MemRead, MemWrite]>]> {
 
 // Constant operations that support Fortran
 
-def fir_StringLitOp : fir_Op<"string_lit", []> {
+def fir_StringLitOp : fir_Op<"string_lit", [NoSideEffect]> {
   let summary = "create a string literal constant";
 
   let description = [{
@@ -2240,7 +2242,8 @@ def fir_StringLitOp : fir_Op<"string_lit", []> {
 // Complex operations
 
 class fir_ArithmeticOp<string mnemonic, list<OpTrait> traits = []> :
-    fir_Op<mnemonic, !listconcat(traits, [SameOperandsAndResultType])>,
+    fir_Op<mnemonic,
+           !listconcat(traits, [NoSideEffect, SameOperandsAndResultType])>,
     Results<(outs AnyType)> {
   let parser = [{
     return impl::parseOneResultSameOperandTypeOp(parser, result);
@@ -2250,7 +2253,8 @@ class fir_ArithmeticOp<string mnemonic, list<OpTrait> traits = []> :
 }
 
 class fir_UnaryArithmeticOp<string mnemonic, list<OpTrait> traits = []> :
-      fir_Op<mnemonic, !listconcat(traits, [SameOperandsAndResultType])>,
+      fir_Op<mnemonic,
+             !listconcat(traits, [NoSideEffect, SameOperandsAndResultType])>,
       Results<(outs AnyType)> {
   let parser = [{
     return impl::parseOneResultSameOperandTypeOp(parser, result);
@@ -2264,7 +2268,7 @@ def FirRealAttr : Attr<CPred<"$_self.isa<fir::RealAttr>()">, "FIR real attr"> {
   let returnType = [{ llvm::APFloat }];
 }
 
-def fir_ConstfOp : fir_Op<"constf", []> {
+def fir_ConstfOp : fir_Op<"constf", [NoSideEffect]> {
   let summary = "create a floating point constant";
 
   let description = [{
@@ -2308,8 +2312,8 @@ def fir_DivfOp : RealArithmeticOp<"divf">;
 def fir_ModfOp : RealArithmeticOp<"modf">;
 // Pow is a builtin call and not a primitive
 
-def fir_CmpfOp :
-    fir_Op<"cmpf", [SameTypeOperands, SameOperandsAndResultShape]> {
+def fir_CmpfOp : fir_Op<"cmpf",
+    [NoSideEffect, SameTypeOperands, SameOperandsAndResultShape]> {
   let summary = "floating-point comparison operator";
 
   let description = [{
@@ -2344,7 +2348,7 @@ def fir_CmpfOp :
   }];
 }
 
-def fir_ConstcOp : fir_Op<"constc", []>, Results<(outs fir_ComplexType)> {
+def fir_ConstcOp : fir_Op<"constc", [NoSideEffect]> {
   let summary = "create a complex constant";
 
   let description = [{
@@ -2353,6 +2357,8 @@ def fir_ConstcOp : fir_Op<"constc", []>, Results<(outs fir_ComplexType)> {
     the standard dialect.
   }];
 
+  let results = (outs fir_ComplexType);
+  
   let parser = [{
     fir::RealAttr realp;
     fir::RealAttr imagp;
@@ -2412,8 +2418,8 @@ def fir_MulcOp : ComplexArithmeticOp<"mulc", [Commutative]>;
 def fir_DivcOp : ComplexArithmeticOp<"divc">;
 // Pow is a builtin call and not a primitive
 
-def fir_CmpcOp :
-    fir_Op<"cmpc", [SameTypeOperands, SameOperandsAndResultShape]> {
+def fir_CmpcOp : fir_Op<"cmpc",
+    [NoSideEffect, SameTypeOperands, SameOperandsAndResultShape]> {
   let summary = "complex floating-point comparison operator";
 
   let description = [{
@@ -2448,7 +2454,7 @@ def fir_CmpcOp :
 
 // Other misc. operations
 
-def fir_AddrOfOp : fir_OneResultOp<"address_of", []> {
+def fir_AddrOfOp : fir_OneResultOp<"address_of", [NoSideEffect]> {
   let summary = "convert a symbol to an SSA value";
   
   let description = [{
@@ -2467,7 +2473,7 @@ def fir_AddrOfOp : fir_OneResultOp<"address_of", []> {
   let assemblyFormat = "`(` $symbol `)` attr-dict `:` type($resTy)";
 }
 
-def fir_ConvertOp : fir_OneResultOp<"convert", []> {
+def fir_ConvertOp : fir_OneResultOp<"convert", [NoSideEffect]> {
   let summary = "encapsulates all Fortran scalar type conversions";
   
   let description = [{
@@ -2526,7 +2532,7 @@ def FortranTypeAttr : Attr<And<[CPred<"$_self.isa<TypeAttr>()">,
   let convertFromStorage = "$_self.getValue().cast<Type>()";
 }
 
-def fir_GenTypeDescOp : fir_OneResultOp<"gentypedesc", []> {
+def fir_GenTypeDescOp : fir_OneResultOp<"gentypedesc", [NoSideEffect]> {
   let summary = "generate a type descriptor for a given type";
   let description = [{
     Generates a constant object that is an abstract type descriptor of the
@@ -2581,7 +2587,7 @@ def fir_GenTypeDescOp : fir_OneResultOp<"gentypedesc", []> {
 }
 
 def fir_NoReassocOp : fir_OneResultOp<"no_reassoc",
-    [SameOperandsAndResultType]> {
+    [NoSideEffect, SameOperandsAndResultType]> {
   let summary = "synthetic op to prevent reassociation";
   let description = [{
     Primitive operation meant to intrusively prevent operator reassociation.
@@ -2777,8 +2783,8 @@ def fir_GlobalLenOp : fir_Op<"global_len", []> {
   }];
 }
 
-def fir_DispatchTableOp : fir_Op<"dispatch_table", [IsolatedFromAbove, Symbol,
-                                 ImplicitFirTerminator]> {
+def fir_DispatchTableOp : fir_Op<"dispatch_table",
+    [IsolatedFromAbove, Symbol, ImplicitFirTerminator]> {
   let summary = "Dispatch table definition";
 
   let description = [{
