@@ -20,7 +20,6 @@
 #include "flang/Common/Fortran.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Module.h"
-#include <memory>
 
 namespace Fortran {
 namespace common {
