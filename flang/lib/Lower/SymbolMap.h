@@ -16,6 +16,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/SmallVector.h"
 
 namespace Fortran::lower {
 
@@ -49,7 +50,7 @@ struct SymIndex {
     explicit Shaped(mlir::Value addr, llvm::ArrayRef<mlir::Value> s)
         : addr{addr}, shape{s.begin(), s.end()} {}
     mlir::Value addr;
-    std::vector<mlir::Value> shape;
+    llvm::SmallVector<mlir::Value, 4> shape;
   };
 
   // Array variable that uses triple notation
@@ -57,7 +58,7 @@ struct SymIndex {
     explicit FullDim(mlir::Value addr, llvm::ArrayRef<Triple> s)
         : addr{addr}, shape{s.begin(), s.end()} {}
     mlir::Value addr;
-    std::vector<Triple> shape;
+    llvm::SmallVector<Triple, 4> shape;
   };
 
   // CHARACTER type variable with its dependent type LEN parameter
@@ -74,7 +75,7 @@ struct SymIndex {
         : addr{addr}, len{len}, shape{s.begin(), s.end()} {}
     mlir::Value addr;
     mlir::Value len;
-    std::vector<mlir::Value> shape;
+    llvm::SmallVector<mlir::Value, 4> shape;
   };
 
   // CHARACTER array variable using triple notation
@@ -84,7 +85,7 @@ struct SymIndex {
         : addr{addr}, len{len}, shape{s.begin(), s.end()} {}
     mlir::Value addr;
     mlir::Value len;
-    std::vector<Triple> shape;
+    llvm::SmallVector<Triple, 4> shape;
   };
 
   // Generalized derived type variable
@@ -95,9 +96,9 @@ struct SymIndex {
         : addr{addr}, size{size}, shape{s.begin(), s.end()},
           params{parameters.begin(), parameters.end()} {}
     mlir::Value addr;
-    mlir::Value size;                // element size or null
-    std::vector<Triple> shape;       // empty for scalar
-    std::vector<mlir::Value> params; // LEN type parameters, if any
+    mlir::Value size;                         // element size or null
+    llvm::SmallVector<Triple, 4> shape;       // empty for scalar
+    llvm::SmallVector<mlir::Value, 4> params; // LEN type parameters, if any
   };
 
   //===--------------------------------------------------------------------===//
@@ -161,32 +162,23 @@ struct SymIndex {
 /// etc.
 class SymMap {
 public:
-  /// Add `symbol` to the current map and bind an `index`.
-  void addSymbol(semantics::SymbolRef sym, const SymIndex &index,
-                 bool force = false) {
-    if (force)
-      erase(sym);
-    assert(index && "cannot add an undefined symbol index");
-    symbolMap.try_emplace(&*sym, index);
-  }
-
   /// Add a trivial symbol mapping to an address.
   void addSymbol(semantics::SymbolRef sym, mlir::Value value,
                  bool force = false) {
-    addSymbol(sym, SymIndex::Intrinsic(value), force);
+    makeSym(sym, SymIndex::Intrinsic(value), force);
   }
 
   /// Add a scalar CHARACTER mapping to an (address, len).
   void addCharSymbol(semantics::SymbolRef sym, mlir::Value value,
                      mlir::Value len, bool force = false) {
-    addSymbol(sym, SymIndex::Char(value, len), force);
+    makeSym(sym, SymIndex::Char(value, len), force);
   }
 
   /// Add an array mapping with (address, shape).
   void addSymbolWithShape(semantics::SymbolRef sym, mlir::Value value,
                           llvm::ArrayRef<mlir::Value> shape,
                           bool force = false) {
-    addSymbol(sym, SymIndex::Shaped(value, shape), force);
+    makeSym(sym, SymIndex::Shaped(value, shape), force);
   }
 
   /// Add an array of CHARACTER mapping.
@@ -194,14 +186,14 @@ public:
                               mlir::Value len,
                               llvm::ArrayRef<mlir::Value> shape,
                               bool force = false) {
-    addSymbol(sym, SymIndex::CharShaped(value, len, shape), force);
+    makeSym(sym, SymIndex::CharShaped(value, len, shape), force);
   }
 
   /// Add an array mapping with triple notation.
   void addSymbolWithTriples(semantics::SymbolRef sym, mlir::Value value,
                             llvm::ArrayRef<SymIndex::Triple> shape,
                             bool force = false) {
-    addSymbol(sym, SymIndex::FullDim(value, shape), force);
+    makeSym(sym, SymIndex::FullDim(value, shape), force);
   }
 
   /// Add an array of CHARACTER with triple notation.
@@ -209,7 +201,7 @@ public:
                                 mlir::Value len,
                                 llvm::ArrayRef<SymIndex::Triple> shape,
                                 bool force = false) {
-    addSymbol(sym, SymIndex::CharFullDim(value, len, shape), force);
+    makeSym(sym, SymIndex::CharFullDim(value, len, shape), force);
   }
 
   /// Generalized derived type mapping.
@@ -218,7 +210,7 @@ public:
                         llvm::ArrayRef<SymIndex::Triple> shape,
                         llvm::ArrayRef<mlir::Value> params,
                         bool force = false) {
-    addSymbol(sym, SymIndex::Derived(value, size, shape, params), force);
+    makeSym(sym, SymIndex::Derived(value, size, shape, params), force);
   }
 
   /// Find `symbol` and return its value if it appears in the current mappings.
@@ -228,9 +220,19 @@ public:
   }
 
   void erase(semantics::SymbolRef sym) { symbolMap.erase(&*sym); }
+
   void clear() { symbolMap.clear(); }
 
 private:
+  /// Add `symbol` to the current map and bind an `index`.
+  void makeSym(semantics::SymbolRef sym, const SymIndex &index,
+               bool force = false) {
+    if (force)
+      erase(sym);
+    assert(index && "cannot add an undefined symbol index");
+    symbolMap.try_emplace(&*sym, index);
+  }
+
   llvm::DenseMap<const semantics::Symbol *, SymIndex> symbolMap;
 };
 
