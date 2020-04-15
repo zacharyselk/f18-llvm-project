@@ -101,8 +101,10 @@ struct NameUniquer {
                                llvm::StringRef name,
                                llvm::ArrayRef<std::int64_t> kinds);
 
-  /// Unique a (global) variable name
+  /// Unique a (global) variable name. A variable with save attribute
+  /// defined inside a subprogram also needs to be handled here
   std::string doVariable(llvm::ArrayRef<llvm::StringRef> modules,
+                         llvm::Optional<llvm::StringRef> host,
                          llvm::StringRef name);
 
   /// Entry point for the PROGRAM (called by the runtime)
