@@ -210,9 +210,9 @@ class ExprLowering {
   /// Returns a reference to a symbol or its box/boxChar descriptor if it has
   /// one.
   mlir::Value gen(Fortran::semantics::SymbolRef sym) {
-    // FIXME: not all symbols are local
     if (auto val = symMap.lookupSymbol(sym))
       return val;
+    llvm_unreachable("all symbols should be in the map");
     auto addr = builder.createTemporary(getLoc(), converter.genType(sym),
                                         sym->name().ToString());
     symMap.addSymbol(sym, addr);
@@ -229,10 +229,6 @@ class ExprLowering {
   }
 
   mlir::Value genval(const Fortran::evaluate::BOZLiteralConstant &) { TODO(); }
-  mlir::Value genval(const Fortran::evaluate::ProcedureRef &procRef) {
-    llvm::SmallVector<mlir::Type, 1> resTy;
-    return genProcedureRef(procRef, resTy);
-  }
   mlir::Value genval(const Fortran::evaluate::ProcedureDesignator &) { TODO(); }
   mlir::Value genval(const Fortran::evaluate::NullPointer &) { TODO(); }
   mlir::Value genval(const Fortran::evaluate::StructureConstructor &) {
@@ -530,7 +526,6 @@ class ExprLowering {
   genval(const Fortran::evaluate::Constant<Fortran::evaluate::Type<TC, KIND>>
              &con) {
     // TODO:
-    // - character type constant
     // - array constant not handled
     // - derived type constant
     if constexpr (TC == Fortran::lower::IntegerCat) {
@@ -887,6 +882,10 @@ class ExprLowering {
     llvm::SmallVector<mlir::Type, 1> resTy;
     resTy.push_back(converter.genType(TC, KIND));
     return genProcedureRef(funRef, resTy);
+  }
+  mlir::Value genval(const Fortran::evaluate::ProcedureRef &procRef) {
+    llvm::SmallVector<mlir::Type, 1> resTy;
+    return genProcedureRef(procRef, resTy);
   }
 
   template <typename A>
