@@ -89,6 +89,11 @@ Fortran::lower::mangle::mangleName(fir::NameUniquer &uniquer,
             return uniquer.doProcedure(modNames, hostName(ultimateSymbol),
                                        toStringRef(symbolName));
           },
+          [&](const Fortran::semantics::ObjectEntityDetails &) {
+            auto modNames = moduleNames(ultimateSymbol);
+            return uniquer.doVariable(modNames, hostName(ultimateSymbol),
+                                      toStringRef(symbolName));
+          },
           [](const auto &) -> std::string {
             assert(false);
             return {};
