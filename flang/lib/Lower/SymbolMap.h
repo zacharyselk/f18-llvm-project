@@ -36,8 +36,8 @@ struct SymIndex {
   // For lookups that fail, have a monostate
   using None = std::monostate;
 
-  // Capture triple notation ssa-values
-  using Triple = std::tuple<mlir::Value, mlir::Value, mlir::Value>;
+  // Capture bounds notation ssa-values
+  using Bounds = std::tuple<mlir::Value, mlir::Value>;
 
   // Trivial intrinsic type
   struct Intrinsic {
@@ -53,12 +53,12 @@ struct SymIndex {
     llvm::SmallVector<mlir::Value, 4> shape;
   };
 
-  // Array variable that uses triple notation
+  // Array variable that uses bounds notation
   struct FullDim {
-    explicit FullDim(mlir::Value addr, llvm::ArrayRef<Triple> s)
+    explicit FullDim(mlir::Value addr, llvm::ArrayRef<Bounds> s)
         : addr{addr}, shape{s.begin(), s.end()} {}
     mlir::Value addr;
-    llvm::SmallVector<Triple, 4> shape;
+    llvm::SmallVector<Bounds, 4> shape;
   };
 
   // CHARACTER type variable with its dependent type LEN parameter
@@ -78,26 +78,26 @@ struct SymIndex {
     llvm::SmallVector<mlir::Value, 4> shape;
   };
 
-  // CHARACTER array variable using triple notation
+  // CHARACTER array variable using bounds notation
   struct CharFullDim {
     explicit CharFullDim(mlir::Value addr, mlir::Value len,
-                         llvm::ArrayRef<Triple> s)
+                         llvm::ArrayRef<Bounds> s)
         : addr{addr}, len{len}, shape{s.begin(), s.end()} {}
     mlir::Value addr;
     mlir::Value len;
-    llvm::SmallVector<Triple, 4> shape;
+    llvm::SmallVector<Bounds, 4> shape;
   };
 
   // Generalized derived type variable
   struct Derived {
     explicit Derived(mlir::Value addr, mlir::Value size,
-                     llvm::ArrayRef<Triple> s,
+                     llvm::ArrayRef<Bounds> s,
                      llvm::ArrayRef<mlir::Value> parameters)
         : addr{addr}, size{size}, shape{s.begin(), s.end()},
           params{parameters.begin(), parameters.end()} {}
     mlir::Value addr;
     mlir::Value size;                         // element size or null
-    llvm::SmallVector<Triple, 4> shape;       // empty for scalar
+    llvm::SmallVector<Bounds, 4> shape;       // empty for scalar
     llvm::SmallVector<mlir::Value, 4> params; // LEN type parameters, if any
   };
 
@@ -189,17 +189,17 @@ public:
     makeSym(sym, SymIndex::CharShaped(value, len, shape), force);
   }
 
-  /// Add an array mapping with triple notation.
-  void addSymbolWithTriples(semantics::SymbolRef sym, mlir::Value value,
-                            llvm::ArrayRef<SymIndex::Triple> shape,
+  /// Add an array mapping with bounds notation.
+  void addSymbolWithBounds(semantics::SymbolRef sym, mlir::Value value,
+                            llvm::ArrayRef<SymIndex::Bounds> shape,
                             bool force = false) {
     makeSym(sym, SymIndex::FullDim(value, shape), force);
   }
 
-  /// Add an array of CHARACTER with triple notation.
-  void addCharSymbolWithTriples(semantics::SymbolRef sym, mlir::Value value,
+  /// Add an array of CHARACTER with bounds notation.
+  void addCharSymbolWithBounds(semantics::SymbolRef sym, mlir::Value value,
                                 mlir::Value len,
-                                llvm::ArrayRef<SymIndex::Triple> shape,
+                                llvm::ArrayRef<SymIndex::Bounds> shape,
                                 bool force = false) {
     makeSym(sym, SymIndex::CharFullDim(value, len, shape), force);
   }
@@ -207,7 +207,7 @@ public:
   /// Generalized derived type mapping.
   void addDerivedSymbol(semantics::SymbolRef sym, mlir::Value value,
                         mlir::Value size,
-                        llvm::ArrayRef<SymIndex::Triple> shape,
+                        llvm::ArrayRef<SymIndex::Bounds> shape,
                         llvm::ArrayRef<mlir::Value> params,
                         bool force = false) {
     makeSym(sym, SymIndex::Derived(value, size, shape, params), force);
