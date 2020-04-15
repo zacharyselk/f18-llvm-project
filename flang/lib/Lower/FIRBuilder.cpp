@@ -151,12 +151,10 @@ struct CharacterOpsBuilderImpl {
         return boxType.getEleTy();
       if (auto refType = type.dyn_cast<fir::ReferenceType>())
         type = refType.getEleTy();
-      if (auto seqType = type.dyn_cast<fir::SequenceType>()) {
+      if (auto seqType = type.dyn_cast<fir::SequenceType>())
         type = seqType.getEleTy();
-      }
-      if (auto charType = type.dyn_cast<fir::CharacterType>()) {
+      if (auto charType = type.dyn_cast<fir::CharacterType>())
         return charType;
-      }
       llvm_unreachable("Invalid character value type");
     }
 
@@ -412,6 +410,19 @@ void Fortran::lower::CharacterOpsBuilder<T>::createAssign(mlir::Value lhs,
 }
 template void Fortran::lower::CharacterOpsBuilder<
     Fortran::lower::FirOpBuilder>::createAssign(mlir::Value, mlir::Value);
+
+template <typename T>
+void Fortran::lower::CharacterOpsBuilder<T>::createAssign(mlir::Value lptr,
+                                                          mlir::Value llen,
+                                                          mlir::Value rptr,
+                                                          mlir::Value rlen) {
+  CharacterOpsBuilderImpl bimpl = impl();
+  bimpl.createAssign(CharacterOpsBuilderImpl::Char{lptr, llen},
+                     CharacterOpsBuilderImpl::Char{rptr, rlen});
+}
+template void
+Fortran::lower::CharacterOpsBuilder<Fortran::lower::FirOpBuilder>::createAssign(
+    mlir::Value lptr, mlir::Value llen, mlir::Value rptr, mlir::Value rlen);
 
 template <typename T>
 mlir::Value
