@@ -67,9 +67,15 @@ public:
 
   /// Return blank character of given \p type !fir.char<kind>
   mlir::Value createBlankConstant(fir::CharacterType type);
+  
   /// Lower \p lhs = \p rhs where \p lhs and \p rhs are scalar characters.
   /// It handles cases where \p lhs and \p rhs may overlap.
   void createAssign(mlir::Value lhs, mlir::Value rhs);
+
+  /// Lower an assignment where the buffer and LEN parameter are known and do
+  /// not need to be unboxed.
+  void createAssign(mlir::Value lptr, mlir::Value llen, mlir::Value rptr,
+                    mlir::Value rlen);
 
   /// Embox \p addr and \p len and return fir.boxchar.
   /// Take care of type conversions before emboxing.
