@@ -185,6 +185,32 @@ class TypeBuilder {
     return mlir::emitWarning(mlir::UnknownLoc::get(context), message);
   }
 
+  fir::SequenceType::Shape seqShapeHelper(Fortran::semantics::SymbolRef symbol,
+                                          fir::SequenceType::Shape &bounds) {
+    auto &details = symbol->get<Fortran::semantics::ObjectEntityDetails>();
+    const auto size = details.shape().size();
+    for (auto &ss : details.shape()) {
+      auto lb = ss.lbound();
+      auto ub = ss.ubound();
+      if (lb.isAssumed() && ub.isAssumed() && size == 1)
+        return {};
+      if (lb.isExplicit() && ub.isExplicit()) {
+        auto &lbv = lb.GetExplicit();
+        auto &ubv = ub.GetExplicit();
+        if (lbv.has_value() && ubv.has_value() && isConstant(lbv.value()) &&
+            isConstant(ubv.value())) {
+          bounds.emplace_back(toConstant(ubv.value()) -
+                              toConstant(lbv.value()) + 1);
+        } else {
+          bounds.emplace_back(fir::SequenceType::getUnknownExtent());
+        }
+      } else {
+        bounds.emplace_back(fir::SequenceType::getUnknownExtent());
+      }
+    }
+    return bounds;
+  }
+
 public:
   explicit TypeBuilder(
       mlir::MLIRContext *context,
@@ -275,28 +301,15 @@ public:
   fir::SequenceType::Shape genSeqShape(Fortran::semantics::SymbolRef symbol) {
     assert(symbol->IsObjectArray());
     fir::SequenceType::Shape bounds;
-    auto &details = symbol->get<Fortran::semantics::ObjectEntityDetails>();
-    const auto size = details.shape().size();
-    for (auto &ss : details.shape()) {
-      auto lb = ss.lbound();
-      auto ub = ss.ubound();
-      if (lb.isAssumed() && ub.isAssumed() && size == 1)
-        return {};
-      if (lb.isExplicit() && ub.isExplicit()) {
-        auto &lbv = lb.GetExplicit();
-        auto &ubv = ub.GetExplicit();
-        if (lbv.has_value() && ubv.has_value() && isConstant(lbv.value()) &&
-            isConstant(ubv.value())) {
-          bounds.emplace_back(toConstant(ubv.value()) -
-                              toConstant(lbv.value()) + 1);
-        } else {
-          bounds.emplace_back(fir::SequenceType::getUnknownExtent());
-        }
-      } else {
-        bounds.emplace_back(fir::SequenceType::getUnknownExtent());
-      }
-    }
-    return bounds;
+    return seqShapeHelper(symbol, bounds);
+  }
+
+  fir::SequenceType::Shape genSeqShape(Fortran::semantics::SymbolRef symbol,
+                                       fir::SequenceType::Extent charLen) {
+    assert(symbol->IsObjectArray());
+    fir::SequenceType::Shape bounds;
+    bounds.push_back(charLen);
+    return seqShapeHelper(symbol, bounds);
   }
 
   mlir::Type genDummyArgType(const Fortran::semantics::Symbol &dummy) {
@@ -345,9 +358,8 @@ public:
   /// Type consing from a symbol. A symbol's type must be created from the type
   /// discovered by the front-end at runtime.
   mlir::Type gen(Fortran::semantics::SymbolRef symbol) {
-    if (symbol->detailsIf<Fortran::semantics::SubprogramDetails>()) {
+    if (symbol->detailsIf<Fortran::semantics::SubprogramDetails>())
       return genFunctionType(symbol);
-    }
     mlir::Type returnTy;
     if (auto *type{symbol->GetType()}) {
       if (auto *tySpec{type->AsIntrinsic()}) {
@@ -407,11 +419,22 @@ public:
       return {};
     }
     if (symbol->IsObjectArray()) {
-      // FIXME: add bounds info
-      returnTy = fir::SequenceType::get(genSeqShape(symbol), returnTy);
+      if (symbol->GetType()->category() ==
+          Fortran::semantics::DeclTypeSpec::Character) {
+        auto charLen = fir::SequenceType::getUnknownExtent();
+        const auto &lenParam = symbol->GetType()->characterTypeSpec().length();
+        if (auto expr = lenParam.GetExplicit()) {
+          auto len = Fortran::evaluate::AsGenericExpr(std::move(*expr));
+          auto asInt = Fortran::evaluate::ToInt64(len);
+          if (asInt)
+            charLen = *asInt;
+        }
+        return fir::SequenceType::get(genSeqShape(symbol, charLen), returnTy);
+      }
+      return fir::SequenceType::get(genSeqShape(symbol), returnTy);
     } else if (Fortran::semantics::IsPointer(*symbol)) {
       // FIXME: what about allocatable?
-      returnTy = fir::ReferenceType::get(returnTy);
+      return fir::ReferenceType::get(returnTy);
     }
     return returnTy;
   }
