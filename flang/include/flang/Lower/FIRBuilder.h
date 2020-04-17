@@ -94,18 +94,18 @@ public:
   ///   - fir.ref<fir.char<kind>> if str has dynamic length.
   std::pair<mlir::Value, mlir::Value> materializeCharacter(mlir::Value str);
 
-  /// Return true if \p is a character literal (has type
+  /// Return true if \p type is a character literal type (is
   /// fir.array<len x fir.char<kind>>).;
-  bool isCharacterLiteral(mlir::Value str);
+  static bool isCharacterLiteral(mlir::Type type);
 
-  /// Return true if \p val has one of the following type
+  /// Return true if \p type is one of the following type
   /// - fir.boxchar<kind>
   /// - fir.ref<fir.array<len x fir.char<kind>>>
   /// - fir.array<len x fir.char<kind>>
-  bool isCharacter(mlir::Value val);
+  static bool isCharacter(mlir::Type type);
 
-  /// Extract the kind of character \p str.
-  int getCharacterKind(mlir::Value str);
+  /// Extract the kind of a character type
+  static int getCharacterKind(mlir::Type type);
 
   /// Return the integer type that must be used to manipulate
   /// Character lengths.
@@ -146,11 +146,6 @@ public:
 
   mlir::Value createComplexCompare(mlir::Value cplx1, mlir::Value cplx2,
                                    bool eq);
-
-  static bool isComplex(mlir::Value val) {
-    auto ty = val.getType();
-    return ty.isa<fir::CplxType>() || ty.isa<mlir::ComplexType>();
-  }
 
 protected:
   template <Part partId>

@@ -425,11 +425,7 @@ private:
       return r.getFKind() * 4;
     if (auto cplx{t.dyn_cast<fir::CplxType>()})
       return cplx.getFKind() * 4;
-    assert(false && "not a floating-point type");
-    return 0;
-  }
-  static bool isFloatingPointType(mlir::Type t) {
-    return t.isa<mlir::FloatType>() || t.isa<fir::RealType>();
+    llvm_unreachable("not a floating-point type");
   }
   static Conversion conversionBetweenTypes(mlir::Type from, mlir::Type to) {
     if (from == to) {
@@ -441,7 +437,7 @@ private:
                                                          : Conversion::Extend;
       }
     }
-    if (isFloatingPointType(from) && isFloatingPointType(to)) {
+    if (fir::isa_real(from) && fir::isa_real(to)) {
       return getFloatingPointWidth(from) > getFloatingPointWidth(to)
                  ? Conversion::Narrow
                  : Conversion::Extend;
@@ -565,8 +561,7 @@ static std::string typeToString(mlir::Type t) {
   if (auto character{t.dyn_cast<fir::CharacterType>()}) {
     return "c" + std::to_string(character.getFKind());
   }
-  assert(false && "no mangling for type");
-  return ""s;
+  llvm_unreachable("no mangling for type");
 }
 
 static std::string getIntrinsicWrapperName(const llvm::StringRef &intrinsic,
@@ -632,8 +627,7 @@ IntrinsicLibrary::Implementation::genRuntimeCall(Context &context,
         actualFuncType.getNumInputs() != soughtFuncType.getNumInputs() ||
         actualFuncType.getNumInputs() != context.arguments.size() ||
         actualFuncType.getNumResults() != 1) {
-      assert(false); // TODO better error handling
-      return nullptr;
+      llvm_unreachable("Bad intrinsic match"); // TODO better error handling
     }
     llvm::SmallVector<mlir::Value, 2> convertedArguments;
     int i = 0;
@@ -662,7 +656,7 @@ IntrinsicLibrary::Implementation::genRuntimeCall(Context &context,
   } else {
     // could not find runtime function
     llvm::errs() << "missing intrinsic: " << context.name << "\n";
-    assert(false && "no runtime found for this intrinsics");
+    llvm_unreachable("no runtime found for this intrinsics");
     // TODO: better error handling ?
     //  - Try to have compile time check of runtime compltness ?
   }
@@ -685,7 +679,7 @@ IntrinsicLibrary::Implementation::genAbs(Context &genCtxt,
   assert(genCtxt.arguments.size() == 1);
   auto arg = genCtxt.arguments[0];
   auto type = arg.getType();
-  if (type.isa<mlir::FloatType>() || type.isa<fir::RealType>()) {
+  if (fir::isa_real(type)) {
     // Runtime call to fp abs. An alternative would be to use mlir AbsFOp
     // but it does not support all fir floating point types.
     return genRuntimeCall(genCtxt, runtime);
@@ -700,7 +694,7 @@ IntrinsicLibrary::Implementation::genAbs(Context &genCtxt,
     auto xored = genCtxt.builder->create<mlir::XOrOp>(genCtxt.loc, arg, mask);
     return genCtxt.builder->create<mlir::SubIOp>(genCtxt.loc, xored, mask);
   }
-  if (genCtxt.builder->isComplex(arg)) {
+  if (fir::isa_complex(type)) {
     // Use HYPOT to fulfill the no underflow/overflow requirement.
     auto parts = genCtxt.builder->extractParts(arg);
     llvm::SmallVector<mlir::Value, 2> args = {parts.first, parts.second};
@@ -743,8 +737,8 @@ mlir::Value IntrinsicLibrary::Implementation::genIchar(Context &genCtxt,
 
   auto arg = genCtxt.arguments[0];
   auto dataAndLen = builder.createUnboxChar(arg);
-  auto charType = fir::CharacterType::get(builder.getContext(),
-                                          builder.getCharacterKind(arg));
+  auto charType = fir::CharacterType::get(
+      builder.getContext(), builder.getCharacterKind(arg.getType()));
   auto refType = fir::ReferenceType::get(charType);
   auto charAddr =
       builder.create<fir::ConvertOp>(genCtxt.loc, refType, dataAndLen.first);
@@ -759,7 +753,7 @@ mlir::Value IntrinsicLibrary::Implementation::genLenTrim(Context &genCtxt,
   // Optional KIND argument reflected in result type.
   assert(genCtxt.arguments.size() >= 1);
   // FIXME: LEN_TRIM needs actual runtime and to be define in CharRT.h
-  assert(false && "LEN_TRIM TODO");
+  llvm_unreachable("LEN_TRIM TODO");
   // Fake implementation for debugging:
   // return genCtxt.builder->createIntegerConstant(genCtxt.getResultType(), 0);
 }
