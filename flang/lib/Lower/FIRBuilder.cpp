@@ -146,8 +146,7 @@ struct CharacterOpsBuilderImpl {
   /// evaluating character expressions.
   struct Char {
     /// Get fir.char<kind> type with the same kind as inside str.
-    static inline fir::CharacterType getCharacterType(mlir::Value str) {
-      auto type = str.getType();
+    static inline fir::CharacterType getCharacterType(mlir::Type type) {
       if (auto boxType = type.dyn_cast<fir::BoxCharType>())
         return boxType.getEleTy();
       if (auto refType = type.dyn_cast<fir::ReferenceType>())
@@ -159,11 +158,10 @@ struct CharacterOpsBuilderImpl {
         return charType;
       }
       llvm_unreachable("Invalid character value type");
-      return mlir::Type{}.dyn_cast<fir::CharacterType>();
     }
 
     fir::CharacterType getCharacterType() const {
-      return getCharacterType(data);
+      return getCharacterType(data.getType());
     }
     /// Get fir.ref<fir.char<kind>> type.
     fir::ReferenceType getReferenceType() const {
@@ -470,17 +468,16 @@ template std::pair<mlir::Value, mlir::Value>
 
 template <typename T>
 bool Fortran::lower::CharacterOpsBuilder<T>::isCharacterLiteral(
-    mlir::Value str) {
-  if (auto seqType = str.getType().dyn_cast<fir::SequenceType>())
+    mlir::Type type) {
+  if (auto seqType = type.dyn_cast<fir::SequenceType>())
     return seqType.getEleTy().isa<fir::CharacterType>();
   return false;
 }
 template bool Fortran::lower::CharacterOpsBuilder<
-    Fortran::lower::FirOpBuilder>::isCharacterLiteral(mlir::Value);
+    Fortran::lower::FirOpBuilder>::isCharacterLiteral(mlir::Type);
 
 template <typename T>
-bool Fortran::lower::CharacterOpsBuilder<T>::isCharacter(mlir::Value str) {
-  auto type = str.getType();
+bool Fortran::lower::CharacterOpsBuilder<T>::isCharacter(mlir::Type type) {
   if (type.isa<fir::BoxCharType>())
     return true;
   if (auto refType = type.dyn_cast<fir::ReferenceType>())
@@ -491,14 +488,14 @@ bool Fortran::lower::CharacterOpsBuilder<T>::isCharacter(mlir::Value str) {
   return type.isa<fir::CharacterType>();
 }
 template bool Fortran::lower::CharacterOpsBuilder<
-    Fortran::lower::FirOpBuilder>::isCharacter(mlir::Value);
+    Fortran::lower::FirOpBuilder>::isCharacter(mlir::Type);
 
 template <typename T>
-int Fortran::lower::CharacterOpsBuilder<T>::getCharacterKind(mlir::Value str) {
-  return CharacterOpsBuilderImpl::Char::getCharacterType(str).getFKind();
+int Fortran::lower::CharacterOpsBuilder<T>::getCharacterKind(mlir::Type type) {
+  return CharacterOpsBuilderImpl::Char::getCharacterType(type).getFKind();
 }
 template int Fortran::lower::CharacterOpsBuilder<
-    Fortran::lower::FirOpBuilder>::getCharacterKind(mlir::Value);
+    Fortran::lower::FirOpBuilder>::getCharacterKind(mlir::Type);
 
 template <typename T>
 mlir::Type Fortran::lower::CharacterOpsBuilder<T>::getLengthType() {
