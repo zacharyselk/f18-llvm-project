@@ -184,11 +184,12 @@ static mlir::FuncOp getOutputRuntimeFunc(Fortran::lower::FirOpBuilder &builder,
 static llvm::SmallVector<mlir::Value, 4>
 splitArguments(Fortran::lower::FirOpBuilder &builder, mlir::Location loc,
                mlir::Value arg) {
-  if (builder.isCharacter(arg)) {
+  auto type = arg.getType();
+  if (builder.isCharacter(type)) {
     auto dataLen = builder.materializeCharacter(arg);
     return {dataLen.first, dataLen.second};
   }
-  if (builder.isComplex(arg)) {
+  if (fir::isa_complex(type)) {
     auto parts = builder.extractParts(arg);
     return {parts.first, parts.second};
   }
@@ -323,7 +324,7 @@ lowerStringLit(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
   auto buff = builder.create<fir::ConvertOp>(loc, ty0, dataLen.first);
   auto len = builder.create<fir::ConvertOp>(loc, ty1, dataLen.second);
   if (ty2) {
-    auto kindVal = builder.getCharacterKind(str);
+    auto kindVal = builder.getCharacterKind(str.getType());
     auto kind = builder.create<mlir::ConstantOp>(
         loc, builder.getIntegerAttr(ty2, kindVal));
     return {buff, len, kind};
@@ -342,7 +343,7 @@ lowerSourceTextAsStringLit(Fortran::lower::AbstractConverter &converter,
   text = text.take_front(text.rfind(')') + 1);
   auto &builder = converter.getFirOpBuilder();
   auto lit = builder.createStringLit(
-      loc, /*FIXME*/fir::CharacterType::get(builder.getContext(), 1), text);
+      loc, /*FIXME*/ fir::CharacterType::get(builder.getContext(), 1), text);
   auto data = builder.materializeCharacter(lit);
   auto buff = builder.create<fir::ConvertOp>(loc, ty0, data.first);
   auto len = builder.create<fir::ConvertOp>(loc, ty1, data.second);
