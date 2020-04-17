@@ -24,6 +24,8 @@ class hash_code;
 namespace mlir {
 class DialectAsmParser;
 class DialectAsmPrinter;
+class ComplexType;
+class FloatType;
 } // namespace mlir
 
 namespace fir {
@@ -413,6 +415,16 @@ void printFirType(FIROpsDialect *, mlir::Type ty, mlir::DialectAsmPrinter &p);
 /// Guarantee `type` is a scalar integral type (standard Integer, standard
 /// Index, or FIR Int). Aborts execution if condition is false.
 void verifyIntegralType(mlir::Type type);
+
+/// Is `t` a FIR Real or MLIR Float type?
+inline bool isa_real(mlir::Type t) {
+  return t.isa<fir::RealType>() || t.isa<mlir::FloatType>();
+}
+
+/// Is `t` a FIR or MLIR Complex type?
+inline bool isa_complex(mlir::Type t) {
+  return t.isa<fir::CplxType>() || t.isa<mlir::ComplexType>();
+}
 
 } // namespace fir
 
