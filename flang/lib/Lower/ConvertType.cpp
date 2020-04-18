@@ -432,7 +432,8 @@ public:
         return fir::SequenceType::get(genSeqShape(symbol, charLen), returnTy);
       }
       return fir::SequenceType::get(genSeqShape(symbol), returnTy);
-    } else if (Fortran::semantics::IsPointer(*symbol)) {
+    }
+    if (Fortran::semantics::IsPointer(*symbol)) {
       // FIXME: what about allocatable?
       return fir::ReferenceType::get(returnTy);
     }
