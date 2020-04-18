@@ -1612,6 +1612,7 @@ private:
   void instantiateLocal(const Fortran::lower::pft::Variable &var) {
     const auto &sym = var.getSymbol();
     const auto loc = toLocation();
+    builder->setLocation(loc);
     auto idxTy = builder->getIndexType();
     const auto isDummy = Fortran::semantics::IsDummy(sym);
     SymbolIndexAnalyzer sia(sym);
@@ -1623,6 +1624,9 @@ private:
         assert(lookupSymbol(sym) && "must already be in map");
         return;
       }
+      // TODO: What about lower host-associated variables? (They probably need
+      // to be handled as dummy parameters.)
+      
       // Otherwise, it's a local variable.
       auto local = createNewLocal(loc, sym);
       addSymbol(sym, local);
@@ -1643,7 +1647,6 @@ private:
     if (sia.isChar) {
       // if element type is a CHARACTER, determine the LEN value
       if (isDummy) {
-        builder->setLocation(loc);
         auto unboxchar = builder->createUnboxChar(addr);
         auto boxAddr = unboxchar.first;
         if (auto c = sia.getCharLenConst()) {
