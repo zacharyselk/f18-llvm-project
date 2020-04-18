@@ -15,6 +15,7 @@
 #define FIR_DIALECT_FIR_OPS
 
 include "mlir/Interfaces/ControlFlowInterfaces.td"
+include "mlir/Interfaces/LoopLikeInterface.td"
 include "mlir/Interfaces/SideEffects.td"
 
 def fir_Dialect : Dialect {
@@ -195,7 +196,8 @@ class fir_AllocatableBaseOp<string mnemonic, list<OpTrait> traits = []> :
 }
 
 class fir_AllocatableOp<string mnemonic, list<OpTrait> traits = []> :
-    fir_AllocatableBaseOp<mnemonic, traits>,
+    fir_AllocatableBaseOp<mnemonic,
+	!listconcat(traits, [MemoryEffects<[MemAlloc]>])>,
     fir_TwoBuilders<fir_AllocateOpBuilder, fir_NamedAllocateOpBuilder>,
     Arguments<(ins TypeAttr:$in_type, Variadic<AnyIntegerType>:$args)> {
 
@@ -292,9 +294,11 @@ class fir_AllocatableOp<string mnemonic, list<OpTrait> traits = []> :
   }];
 }
 
+//===----------------------------------------------------------------------===//
 // Memory SSA operations
+//===----------------------------------------------------------------------===//
 
-def fir_AllocaOp : fir_AllocatableOp<"alloca", [MemoryEffects<[MemAlloc]>]> {
+def fir_AllocaOp : fir_AllocatableOp<"alloca"> {
   let summary = "allocate storage for a temporary on the stack given a type";
   let description = [{
     This primitive operation is used to allocate an object on the stack.  A
@@ -477,8 +481,7 @@ def fir_UndefOp : fir_OneResultOp<"undefined", [NoSideEffect]> {
   }];
 }
 
-def fir_AllocMemOp :
-    fir_AllocatableOp<"allocmem", [MemoryEffects<[MemAlloc]>]> {
+def fir_AllocMemOp : fir_AllocatableOp<"allocmem"> {
   let summary = "allocate storage on the heap for an object of a given type";
 
   let description = [{
@@ -529,7 +532,8 @@ def fir_FreeMemOp : fir_Op<"freemem", [MemoryEffects<[MemFree]>]> {
   let assemblyFormat = "$heapref attr-dict `:` type($heapref)";
 }
 
-//===----------------------------------------------------------------------===//// Terminator operations
+//===----------------------------------------------------------------------===//
+// Terminator operations
 //===----------------------------------------------------------------------===//
 
 class fir_SwitchTerminatorOp<string mnemonic, list<OpTrait> traits = []> :
@@ -1824,20 +1828,51 @@ def fir_LenParamIndexOp : fir_OneResultOp<"len_param_index", [NoSideEffect]> {
   }];
 }
 
+//===----------------------------------------------------------------------===//
 // Fortran loops
+//===----------------------------------------------------------------------===//
 
-def ImplicitFirTerminator : SingleBlockImplicitTerminator<"FirEndOp">;
+def fir_ResultOp : fir_Op<"result", [Terminator]> {
+  let summary = "special terminator for use in fir region operations";
 
-def fir_LoopOp : fir_Op<"loop", [ImplicitFirTerminator, RecursiveSideEffects]> {
+  let description = [{
+    Result takes a list of ssa-values produced in the block and forwards them
+    as a result to the operation that owns the region of the block. The
+    operation can retain the values or return them to its parent block
+    depending upon its semantics.
+  }];
+
+  let arguments = (ins Variadic<AnyType>:$results);
+  let builders = [
+    OpBuilder<"Builder *builder, OperationState &result", "/* do nothing */">
+  ];
+  let printer = [{ return ::print(p, *this); }];
+  let verifier = [{ return ::verify(*this); }];
+  let parser = [{ return ::parse$cppClass(parser, result); }];
+}
+
+def FirRegionTerminator : SingleBlockImplicitTerminator<"ResultOp">;
+
+class region_Op<string mnemonic, list<OpTrait> traits = []> :
+    fir_Op<mnemonic,
+    !listconcat(traits, [FirRegionTerminator, RecursiveSideEffects])> {
+  let printer = [{ return ::print(p, *this); }];
+  let verifier = [{ return ::verify(*this); }];
+  let parser = [{ return ::parse$cppClass(parser, result); }];
+}
+
+def fir_LoopOp : region_Op<"do_loop",
+    [DeclareOpInterfaceMethods<LoopLikeOpInterface>]> {
   let summary = "generalized loop operation";
   let description = [{
     Generalized high-level looping construct. This operation is similar to
-    MLIR's `loop.for`. An ordered loop will return the final value of `%i`.
+    MLIR's `loop.for`.
 
     ```mlir
       %l = constant 0 : index
       %u = constant 9 : index
-      fir.loop %i = %l to %u unordered {
+      %s = constant 1 : index
+      fir.do_loop %i = %l to %u step %s unordered {
         %x = fir.convert %i : (index) -> i32
         %v = fir.call @compute(%x) : (i32) -> f32
         %p = fir.coordinate_of %A, %i : (!fir.ref<f32>, index) -> !fir.ref<f32>
@@ -1850,121 +1885,61 @@ def fir_LoopOp : fir_Op<"loop", [ImplicitFirTerminator, RecursiveSideEffects]> {
   }];
 
   let arguments = (ins
-    Variadic<Index>:$indexArgs,
-    OptionalAttr<I64Attr>:$constantStep,
-    OptionalAttr<I64Attr>:$constantLowerBound,
-    OptionalAttr<I64Attr>:$constantUpperBound,
+    Index:$lowerBound,
+    Index:$upperBound,
+    Index:$step,
+    Variadic<AnyType>:$initArgs,
     OptionalAttr<UnitAttr>:$unordered
   );
-
-  let results = (outs);
-
+  let results = (outs
+    Variadic<AnyType>:$results
+  );
   let regions = (region SizedRegion<1>:$region);
 
   let skipDefaultBuilders = 1;
   let builders = [
     OpBuilder<"mlir::Builder *builder, OperationState &result,"
-              "int64_t lowerBound, int64_t upperBound, int64_t step = 1,"
-              "bool unordered = false,"
-              "ArrayRef<NamedAttribute> attributes = {}">,
-    OpBuilder<"mlir::Builder *builder, OperationState &result,"
               "mlir::Value lowerBound, mlir::Value upperBound,"
               "mlir::Value step, bool unordered = false,"
-              "ArrayRef<NamedAttribute> attributes = {}">,
-    OpBuilder<"mlir::Builder *builder, OperationState &result,"
-              "mlir::Value lowerBound, mlir::Value upperBound,"
-              "bool unordered = false,"
-              "ArrayRef<NamedAttribute> attributes = {}">,
-    OpBuilder<"mlir::Builder *builder, OperationState &result,"
-              "mlir::Value lowerBound, mlir::Value upperBound,"
-              "int64_t step, bool unordered = false,"
+              "ValueRange iterArgs = llvm::None,"
               "ArrayRef<NamedAttribute> attributes = {}">
   ];
 
-  let parser = "return parseLoopOp(parser, result);";
-
-  let printer = [{
-    p << getOperationName() << ' ' << getInductionVar() << " = ";
-    if (constantLowerBound())
-      p << "(" << *constantLowerBound() << ")";
-    else
-      p.printOperand(getLowerBoundOperand());
-    p << " to ";
-    if (constantUpperBound())
-      p << "(" << *constantUpperBound() << ")";
-    else
-      p.printOperand(getUpperBoundOperand());
-    if (constantStep()) {
-      p << " step (" << *constantStep() << ")";
-    } else {
-      if (indexArgs().size() > 2) {
-        p << " step ";
-        p.printOperand(getStepOperand());
-      }
-    }
-    if (unordered())
-      p << " unordered";
-    p.printRegion(region(), /*printEntryBlockArgs=*/false,
-                            /*printBlockTerminators=*/false);
-    p.printOptionalAttrDict(getAttrs(), {unorderedAttrName(), stepAttrName(),
-                            lowerAttrName(), upperAttrName()});
-  }];
-
-  let verifier = [{
-    const auto argSize = indexArgs().size();
-    if (!((argSize == 0) || (argSize == 2) || (argSize == 3)))
-      return emitOpError("wrong number of ssa arguments");
-    if (argSize > 2) {
-      // FIXME: size of step must be 1
-      auto *s = (*(indexArgs().begin() + 2)).getDefiningOp();
-      if (auto cst = dyn_cast_or_null<mlir::ConstantIndexOp>(s))
-        if (cst.getValue() == 0)
-          return emitOpError("constant step operand must be nonzero");
-    }
-
-    // Check that the body defines as single block argument for the induction
-    // variable.
-    auto *body = getBody();
-    if (body->getNumArguments() != 1 ||
-        !body->getArgument(0).getType().isIndex())
-      return emitOpError("expected body to have a single index argument for "
-                         "the induction variable");
-    return mlir::success();
-  }];
-
   let extraClassDeclaration = [{
     static constexpr llvm::StringRef unorderedAttrName() { return "unordered"; }
-    static constexpr llvm::StringRef stepAttrName() { return "constantStep"; }
-    static constexpr llvm::StringRef upperAttrName() {
-      return "constantUpperBound";
+
+    mlir::Value getInductionVar() { return getBody()->getArgument(0); }
+    mlir::OpBuilder getBodyBuilder() {
+      return OpBuilder(getBody(), std::prev(getBody()->end()));
     }
-    static constexpr llvm::StringRef lowerAttrName() {
-      return "constantLowerBound";
+    mlir::Block::BlockArgListType getRegionIterArgs() {
+      return getBody()->getArguments().drop_front();
+    }
+    mlir::Operation::operand_range getIterOperands() {
+      return getOperands().drop_front(getNumControlOperands());
+    }
+
+    void setLowerBound(Value bound) { getOperation()->setOperand(0, bound); }
+    void setUpperBound(Value bound) { getOperation()->setOperand(1, bound); }
+    void setStep(Value step) { getOperation()->setOperand(2, step); }
+
+    /// Number of region arguments for loop-carried values
+    unsigned getNumRegionIterArgs() {
+      return getBody()->getNumArguments() - 1;
+    }
+    /// Number of operands controlling the loop: lb, ub, step
+    unsigned getNumControlOperands() { return 3; }
+    /// Does the operation hold operands for loop-carried values
+    bool hasIterOperands() {
+      return getOperation()->getNumOperands() > getNumControlOperands();
+    }
+    /// Get Number of loop-carried values
+    unsigned getNumIterOperands() {
+      return getOperation()->getNumOperands() - getNumControlOperands();
     }
 
     /// Get the body of the loop
     mlir::Block *getBody() { return &region().front(); }
-
-    /// Get the block argument corresponding to the loop control value (PHI)
-    mlir::Value getInductionVar() { return getBody()->getArgument(0); }
-
-    mlir::Value getLowerBoundOperand() {
-      if (indexArgs().size() != 0)
-        return *indexArgs().begin();
-      return {};
-    }
-    
-    mlir::Value getUpperBoundOperand() {
-      if (indexArgs().size() != 0)
-        return *(indexArgs().begin() + 1);
-      return {};
-    }
-
-    mlir::Value getStepOperand() {
-      if (indexArgs().size() == 3)
-        return *(indexArgs().begin() + 2);
-      return {};
-    }
 
     void setUnordered() {
       getOperation()->setAttr(unorderedAttrName(),
@@ -1973,62 +1948,38 @@ def fir_LoopOp : fir_Op<"loop", [ImplicitFirTerminator, RecursiveSideEffects]> {
   }];
 }
 
-def fir_WhereOp :
-    fir_Op<"where", [ImplicitFirTerminator, RecursiveSideEffects]> {
-  let summary = "generalized conditional operation";
+def fir_WhereOp : region_Op<"if"> {
+  let summary = "if-then-else conditional operation";
   let description = [{
-    To conditionally execute operations (typically) within the body of a
-    `fir.loop` operation. This operation is similar to `loop.if`.
+    Used to conditionally execute operations. This operation is the FIR
+    dialect's version of `loop.if`.
 
     ```mlir
       %56 = ... : i1
       %78 = ... : !fir.ref<!T>
-      fir.where %56 {
+      fir.if %56 {
         fir.store %76 to %78 : !fir.ref<!T>
-      } otherwise {
+      } else {
         fir.store %77 to %78 : !fir.ref<!T>
       }
     ```
   }];
 
   let arguments = (ins I1:$condition);
+  let results = (outs Variadic<AnyType>:$results);
 
-  let regions = (region SizedRegion<1>:$whereRegion, AnyRegion:$otherRegion);
+  let regions = (region
+    SizedRegion<1>:$whereRegion,
+    AnyRegion:$otherRegion
+  );
 
   let skipDefaultBuilders = 1;
   let builders = [
     OpBuilder<"Builder *builder, OperationState &result, "
-              "Value cond, bool withOtherRegion">
+              "Value cond, bool withOtherRegion">,
+    OpBuilder<"Builder *builder, OperationState &result, "
+              "TypeRange resultTypes, Value cond, bool withOtherRegion">
   ];
-
-  let parser = [{ return parseWhereOp(parser, result); }];
-
-  let printer = [{
-    p << getOperationName() << ' ' << condition();
-    p.printRegion(whereRegion(), /*printEntryBlockArgs=*/false,
-        /*printBlockTerminators=*/false);
-
-    // Print the 'else' regions if it exists and has a block.
-    auto &otherReg = otherRegion();
-    if (!otherReg.empty() && !otherReg.front().empty() &&
-        otherReg.front().front().isKnownNonTerminator()) {
-      p << " otherwise";
-      p.printRegion(otherReg, /*printEntryBlockArgs=*/false,
-          /*printBlockTerminators=*/false);
-    }
-    p.printOptionalAttrDict(getAttrs());
-  }];
-
-  let verifier = [{
-    for (auto &region : getOperation()->getRegions()) {
-      if (region.empty())
-        continue;
-      for (auto &b : region)
-        if (b.getNumArguments() != 0)
-          return emitOpError("requires that child entry blocks have no args");
-    }
-    return mlir::success();
-  }];
 
   let extraClassDeclaration = [{
     mlir::OpBuilder getWhereBodyBuilder() {
@@ -2046,7 +1997,74 @@ def fir_WhereOp :
   let hasFolder = 1;
 }
 
+def fir_IterWhileOp : region_Op<"iterate_while",
+    [DeclareOpInterfaceMethods<LoopLikeOpInterface>]> {
+  let summary = "DO loop with early exit condition";
+  let description = [{
+    This construct is useful for lowering implied-DO loops with "exceptions"
+    that are threaded as a saturating bool value.  A `true` disposition means
+    the next loop iteration should proceed. A `false` indicates that the
+    "iterate_while" operation should terminate and return.
+  }];
+
+  let arguments = (ins
+    Index:$lowerBound,
+    Index:$upperBound,
+    Index:$step,
+    Variadic<AnyType>:$initArgs
+  );
+  let results = (outs
+    Variadic<AnyType>:$results
+  );
+  let regions = (region SizedRegion<1>:$region);
+
+  let skipDefaultBuilders = 1;
+  let builders = [
+    OpBuilder<"mlir::Builder *builder, OperationState &result,"
+              "mlir::Value iterate, mlir::Value lowerBound,"
+	      "mlir::Value upperBound, mlir::Value step,"
+              "ValueRange iterArgs = llvm::None,"
+              "ArrayRef<NamedAttribute> attributes = {}">
+  ];
+  
+  let extraClassDeclaration = [{
+    mlir::Block *getBody() { return &region().front(); }
+    mlir::Value getIterateVar() { return getBody()->getArgument(1); }
+    mlir::Value getInductionVar() { return getBody()->getArgument(0); }
+    mlir::OpBuilder getBodyBuilder() {
+      return mlir::OpBuilder(getBody(), std::prev(getBody()->end()));
+    }
+    mlir::Block::BlockArgListType getRegionIterArgs() {
+      return getBody()->getArguments().drop_front();
+    }
+    mlir::Operation::operand_range getIterOperands() {
+      return getOperands().drop_front(getNumControlOperands());
+    }
+
+    void setLowerBound(Value bound) { getOperation()->setOperand(0, bound); }
+    void setUpperBound(Value bound) { getOperation()->setOperand(1, bound); }
+    void setStep(mlir::Value step) { getOperation()->setOperand(2, step); }
+
+    /// Number of region arguments for loop-carried values
+    unsigned getNumRegionIterArgs() {
+      return getBody()->getNumArguments() - 1;
+    }
+    /// Number of operands controlling the loop
+    unsigned getNumControlOperands() { return 3; }
+    /// Does the operation hold operands for loop-carried values
+    bool hasIterOperands() {
+      return getOperation()->getNumOperands() > getNumControlOperands();
+    }
+    /// Get Number of loop-carried values
+    unsigned getNumIterOperands() {
+      return getOperation()->getNumOperands() - getNumControlOperands();
+    }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
 // Procedure call operations
+//===----------------------------------------------------------------------===//
 
 def fir_CallOp : fir_Op<"call",
     [MemoryEffects<[MemAlloc, MemFree, MemRead, MemWrite]>]> {
@@ -2782,6 +2800,8 @@ def fir_GlobalLenOp : fir_Op<"global_len", []> {
     static constexpr llvm::StringRef intAttrName() { return "intval"; }
   }];
 }
+
+def ImplicitFirTerminator : SingleBlockImplicitTerminator<"FirEndOp">;
 
 def fir_DispatchTableOp : fir_Op<"dispatch_table",
     [IsolatedFromAbove, Symbol, ImplicitFirTerminator]> {

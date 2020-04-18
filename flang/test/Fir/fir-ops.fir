@@ -153,13 +153,13 @@ func @loop() {
   %c1 = constant 1 : index
   %c10 = constant 10 : index
   %ct = constant true
-  // CHECK: fir.loop %{{.*}} = %{{.*}} to %{{.*}} {
-  fir.loop %i = %c1 to %c10 {
-    // CHECK: fir.where %{{.*}} {
-    fir.where %ct {
+  // CHECK: fir.do_loop %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} {
+  fir.do_loop %i = %c1 to %c10 step %c1 {
+    // CHECK: fir.if %{{.*}} {
+    fir.if %ct {
       fir.call @nop() : () -> ()
-    // CHECK: } otherwise {
-    } otherwise {
+    // CHECK: } else {
+    } else {
       fir.call @nop() : () -> ()
     }
   }
@@ -400,4 +400,16 @@ func @character_literal() -> !fir.array<13 x !fir.char<1>> {
   // CHECK: fir.string_lit "Hello, World!"(13) : !fir.char<1>
   %0 = fir.string_lit "Hello, World!"(13) : !fir.char<1>
   return %0 : !fir.array<13 x !fir.char<1>>
+}
+
+// CHECK-LABEL: @early_exit
+func @early_exit(%ok : i1) -> i1 {
+  %c1 = constant 1 : index
+  %c100 = constant 100 : index
+  // CHECK: %{{.*}} = fir.iterate_while %{{.*}} = %{{.*}} iter_args(%{{.*}} = %{{.*}}) -> (i1) {
+  %newOk = fir.iterate_while %i = %c1 to %c100 step %c1 iter_args(%ok_ = %ok) -> (i1) {
+    %stop = constant 0 : i1
+    fir.result %stop : i1
+  }
+  return %newOk : i1
 }

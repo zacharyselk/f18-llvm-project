@@ -17,7 +17,7 @@ subroutine assign1(lhs, rhs)
   ! CHECK: [[tmp:%[0-9]+]] = fir.alloca !fir.char<1>, [[min_len]]
 
   ! Copy of rhs into temp
-  ! CHECK: fir.loop [[i:%[[:alnum:]_]+]]
+  ! CHECK: fir.do_loop [[i:%[[:alnum:]_]+]]
     ! CHECK-DAG: [[rhs_addr:%[0-9]+]] = fir.coordinate_of [[rhs]]#0, [[i]]
     ! CHECK-DAG: [[tmp_addr:%[0-9]+]] = fir.coordinate_of [[tmp]], [[i]]
     ! CHECK-DAG: [[rhs_elt:%[0-9]+]] = fir.load [[rhs_addr]]
@@ -25,7 +25,7 @@ subroutine assign1(lhs, rhs)
   ! CHECK: }
 
   ! Copy of temp into lhs
-  ! CHECK: fir.loop [[i:%[[:alnum:]]+]]
+  ! CHECK: fir.do_loop [[i:%[[:alnum:]]+]]
     ! CHECK-DAG: [[tmp_addr:%[0-9]+]] = fir.coordinate_of [[tmp]], [[i]]
     ! CHECK-DAG: [[lhs_addr:%[0-9]+]] = fir.coordinate_of [[lhs]]#0, [[i]]
     ! CHECK-DAG: [[tmp_elt:%[0-9]+]] = fir.load [[tmp_addr]]
@@ -35,7 +35,7 @@ subroutine assign1(lhs, rhs)
   ! Padding
   ! CHECK: [[c32:%[[:alnum:]_]+]] = constant 32 : i8
   ! CHECK: [[blank:%[0-9]+]] = fir.convert [[c32]] : (i8) -> !fir.char<1>
-  ! CHECK: fir.loop [[i:%[[:alnum:]_]+]]
+  ! CHECK: fir.do_loop [[i:%[[:alnum:]_]+]]
     ! CHECK-DAG: [[lhs_addr:%[0-9]+]] = fir.coordinate_of [[lhs]]#0, [[i]]
     ! CHECK: fir.store [[blank]] to [[lhs_addr]]
   ! CHECK: }
@@ -84,7 +84,7 @@ subroutine assign_constant(lhs)
   ! CHECK-DAG: %[[lhs:.*]]:2 = fir.unboxchar %[[ARG]] :
   ! CHECK-DAG: %[[tmp:.*]] = fir.address_of(@{{.*}}) :
   lhs = "Hello World"
-  ! CHECK: fir.loop %[[i:.*]] = %{{.*}} to %{{.*}} {
+  ! CHECK: fir.do_loop %[[i:.*]] = %{{.*}} to %{{.*}} {
     ! CHECK-DAG: %[[tmp_addr:.*]] = fir.coordinate_of %[[tmp]], %[[i]]
     ! CHECK-DAG: %[[tmp_elt:.*]] = fir.load %[[tmp_addr]]
     ! CHECK-DAG: %[[lhs_addr:.*]] = fir.coordinate_of %[[lhs]]#0, %[[i]]
@@ -94,7 +94,7 @@ subroutine assign_constant(lhs)
   ! Padding
   ! CHECK-DAG: %[[c32:.*]] = constant 32 : i8
   ! CHECK-DAG: %[[blank:.*]] = fir.convert %[[c32]] : (i8) -> !fir.char<1>
-  ! CHECK: fir.loop %[[j:.*]] = %{{.*}} to %{{.*}} {
+  ! CHECK: fir.do_loop %[[j:.*]] = %{{.*}} to %{{.*}} {
     ! CHECK: %[[jhs_addr:.*]] = fir.coordinate_of %[[lhs]]#0, %[[j]]
     ! CHECK: fir.store %[[blank]] to %[[jhs_addr]]
   ! CHECK: }
