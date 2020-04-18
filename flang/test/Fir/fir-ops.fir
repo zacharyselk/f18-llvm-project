@@ -402,14 +402,16 @@ func @character_literal() -> !fir.array<13 x !fir.char<1>> {
   return %0 : !fir.array<13 x !fir.char<1>>
 }
 
+func @earlyexit2(%a : i32) -> i1
+
 // CHECK-LABEL: @early_exit
-func @early_exit(%ok : i1) -> i1 {
+func @early_exit(%ok : i1, %k : i32) -> i1 {
   %c1 = constant 1 : index
   %c100 = constant 100 : index
-  // CHECK: %{{.*}} = fir.iterate_while %{{.*}} = %{{.*}} iter_args(%{{.*}} = %{{.*}}) -> (i1) {
-  %newOk = fir.iterate_while %i = %c1 to %c100 step %c1 iter_args(%ok_ = %ok) -> (i1) {
-    %stop = constant 0 : i1
-    fir.result %stop : i1
+  // CHECK: %{{.*}} = fir.iterate_while (%{{.*}} = %{{.*}} step %{{.*}}) and (%{{.*}} = %{{.*}}) iter_args(%{{.*}} = %{{.*}}) -> (i32) {
+  %newOk:2 = fir.iterate_while (%i = %c1 to %c100 step %c1) and (%ok_ = %ok) iter_args(%v = %k) -> (i32) {
+    %stop = call @earlyexit2(%v) : (i32) -> i1
+    fir.result %stop, %v : i1, i32
   }
-  return %newOk : i1
+  return %newOk#0 : i1
 }

@@ -594,9 +594,9 @@ mlir::ParseResult fir::GlobalOp::verifyValidLinkage(StringRef linkage) {
 //===----------------------------------------------------------------------===//
 
 void fir::IterWhileOp::build(mlir::Builder *builder,
-                             mlir::OperationState &result, mlir::Value iterate,
-                             mlir::Value lb, mlir::Value ub, mlir::Value step,
-                             mlir::ValueRange iterArgs,
+                             mlir::OperationState &result, mlir::Value lb,
+                             mlir::Value ub, mlir::Value step,
+                             mlir::Value iterate, mlir::ValueRange iterArgs,
                              llvm::ArrayRef<mlir::NamedAttribute> attributes) {
   result.addOperands({lb, ub, step, iterate});
   result.addTypes(iterate.getType());
@@ -616,42 +616,58 @@ static mlir::ParseResult parseIterWhileOp(mlir::OpAsmParser &parser,
                                           mlir::OperationState &result) {
   auto &builder = parser.getBuilder();
   mlir::OpAsmParser::OperandType inductionVariable, lb, ub, step;
-  if (parser.parseRegionArgument(inductionVariable) || parser.parseEqual())
+  if (parser.parseLParen() || parser.parseRegionArgument(inductionVariable) ||
+      parser.parseEqual())
     return mlir::failure();
 
   // Parse loop bounds.
   auto indexType = builder.getIndexType();
+  auto i1Type = builder.getIntegerType(1);
   if (parser.parseOperand(lb) ||
       parser.resolveOperand(lb, indexType, result.operands) ||
       parser.parseKeyword("to") || parser.parseOperand(ub) ||
       parser.resolveOperand(ub, indexType, result.operands) ||
       parser.parseKeyword("step") || parser.parseOperand(step) ||
+      parser.parseRParen() ||
       parser.resolveOperand(step, indexType, result.operands))
-    return failure();
+    return mlir::failure();
+
+  mlir::OpAsmParser::OperandType iterateVar, iterateInput;
+  if (parser.parseKeyword("and") || parser.parseLParen() ||
+      parser.parseRegionArgument(iterateVar) || parser.parseEqual() ||
+      parser.parseOperand(iterateInput) || parser.parseRParen() ||
+      parser.resolveOperand(iterateInput, i1Type, result.operands))
+    return mlir::failure();
 
   // Parse the initial iteration arguments.
-  llvm::SmallVector<mlir::OpAsmParser::OperandType, 4> regionArgs, operands;
-  llvm::SmallVector<mlir::Type, 4> argTypes;
+  llvm::SmallVector<mlir::OpAsmParser::OperandType, 4> regionArgs;
   // Induction variable.
   regionArgs.push_back(inductionVariable);
+  regionArgs.push_back(iterateVar);
+  result.addTypes(i1Type);
 
-  if (parser.parseKeyword("iter_args"))
-    return mlir::failure();
-  // Parse assignment list and results type list.
-  if (parser.parseAssignmentList(regionArgs, operands) ||
-      parser.parseArrowTypeList(result.types))
-    return failure();
-  // Resolve input operands.
-  for (auto operand_type : llvm::zip(operands, result.types))
-    if (parser.resolveOperand(std::get<0>(operand_type),
-                              std::get<1>(operand_type), result.operands))
-      return failure();
+  if (mlir::succeeded(parser.parseOptionalKeyword("iter_args"))) {
+    llvm::SmallVector<mlir::OpAsmParser::OperandType, 4> operands;
+    llvm::SmallVector<mlir::Type, 4> regionTypes;
+    // Parse assignment list and results type list.
+    if (parser.parseAssignmentList(regionArgs, operands) ||
+        parser.parseArrowTypeList(regionTypes))
+      return mlir::failure();
+    // Resolve input operands.
+    for (auto operand_type : llvm::zip(operands, regionTypes))
+      if (parser.resolveOperand(std::get<0>(operand_type),
+                                std::get<1>(operand_type), result.operands))
+        return mlir::failure();
+    result.addTypes(regionTypes);
+  }
 
   if (parser.parseOptionalAttrDictWithKeyword(result.attributes))
     return mlir::failure();
 
+  llvm::SmallVector<mlir::Type, 4> argTypes;
+  // Induction variable (hidden)
   argTypes.push_back(indexType);
-  // Loop carried variables
+  // Loop carried variables (including iterate)
   argTypes.append(result.types.begin(), result.types.end());
   // Parse the body region.
   auto *body = result.addRegion();
@@ -712,22 +728,23 @@ static mlir::LogicalResult verify(fir::IterWhileOp op) {
 }
 
 static void print(mlir::OpAsmPrinter &p, fir::IterWhileOp op) {
-  bool printBlockTerminators = false;
-  p << fir::IterWhileOp::getOperationName() << ' ' << op.getInductionVar()
+  p << fir::IterWhileOp::getOperationName() << " (" << op.getInductionVar()
     << " = " << op.lowerBound() << " to " << op.upperBound() << " step "
-    << op.step();
+    << op.step() << ") and (";
   assert(op.hasIterOperands());
-  p << " iter_args(";
   auto regionArgs = op.getRegionIterArgs();
   auto operands = op.getIterOperands();
-  llvm::interleaveComma(llvm::zip(regionArgs, operands), p, [&](auto it) {
-    p << std::get<0>(it) << " = " << std::get<1>(it);
-  });
-  p << ") -> (" << op.getResultTypes() << ')';
-  printBlockTerminators = true;
+  p << regionArgs.front() << " = " << *operands.begin() << ")";
+  if (regionArgs.size() > 1) {
+    p << " iter_args(";
+    llvm::interleaveComma(
+        llvm::zip(regionArgs.drop_front(), operands.drop_front()), p,
+        [&](auto it) { p << std::get<0>(it) << " = " << std::get<1>(it); });
+    p << ") -> (" << op.getResultTypes().drop_front() << ')';
+  }
   p.printOptionalAttrDictWithKeyword(op.getAttrs(), {});
   p.printRegion(op.region(), /*printEntryBlockArgs=*/false,
-                printBlockTerminators);
+                /*printBlockTerminators=*/true);
 }
 
 mlir::Region &fir::IterWhileOp::getLoopBody() { return region(); }

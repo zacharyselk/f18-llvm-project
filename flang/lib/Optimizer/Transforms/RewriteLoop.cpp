@@ -137,18 +137,19 @@ public:
   using OpRewritePattern::OpRewritePattern;
 
   mlir::LogicalResult
-  matchAndRewrite(ResultOp op, mlir::PatternRewriter &rewriter) const override {
+  matchAndRewrite(fir::ResultOp op,
+                  mlir::PatternRewriter &rewriter) const override {
     rewriter.replaceOpWithNewOp<mlir::loop::YieldOp>(op);
     return success();
   }
 };
 
-class LoopIterWhileConv : public mlir::OpRewritePattern<IterWhileOp> {
+class LoopIterWhileConv : public mlir::OpRewritePattern<fir::IterWhileOp> {
 public:
   using OpRewritePattern::OpRewritePattern;
 
   mlir::LogicalResult
-  matchAndRewrite(IterWhileOp whileOp,
+  matchAndRewrite(fir::IterWhileOp whileOp,
                   mlir::PatternRewriter &rewriter) const override {
     mlir::Location loc = whileOp.getLoc();
 
@@ -170,6 +171,7 @@ public:
     auto *lastBodyBlock = &whileOp.region().back();
     rewriter.inlineRegionBefore(whileOp.region(), endBlock);
     auto iv = conditionBlock->getArgument(0);
+    auto iterateVar = conditionBlock->getArgument(1);
 
     // Append the induction variable stepping logic to the last body block and
     // branch back to the condition block. Loop-carried values are taken from
@@ -207,8 +209,7 @@ public:
     auto comp1 =
         rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, iv, upperBound);
     // Remember to AND in the early-exit bool.
-    auto comparison =
-        rewriter.create<AndOp>(loc, comp1, whileOp.getIterateVar());
+    auto comparison = rewriter.create<AndOp>(loc, comp1, iterateVar);
     rewriter.create<CondBranchOp>(loc, comparison, firstBodyBlock,
                                   ArrayRef<Value>(), endBlock,
                                   ArrayRef<Value>());
@@ -228,19 +229,27 @@ public:
       return;
 
     auto *context = &getContext();
-    mlir::OwningRewritePatternList patterns;
-    patterns
-        .insert<LoopLoopConv, LoopWhereConv, LoopResultConv, LoopIterWhileConv>(
-            context);
+    mlir::OwningRewritePatternList patterns1;
+    patterns1.insert<LoopIterWhileConv>(context);
+
+    mlir::OwningRewritePatternList patterns2;
+    patterns2.insert<LoopLoopConv, LoopWhereConv, LoopResultConv>(context);
     mlir::ConversionTarget target = *context;
     target.addLegalDialect<mlir::AffineDialect, FIROpsDialect,
                            mlir::loop::LoopOpsDialect,
                            mlir::StandardOpsDialect>();
-    target.addIllegalOp<ResultOp, LoopOp, WhereOp>();
 
     // apply the patterns
+    target.addIllegalOp<IterWhileOp>();
     if (mlir::failed(mlir::applyPartialConversion(getFunction(), target,
-                                                  std::move(patterns)))) {
+                                                  std::move(patterns1)))) {
+      mlir::emitError(mlir::UnknownLoc::get(context),
+                      "error in converting to CFG\n");
+      signalPassFailure();
+    }
+    target.addIllegalOp<ResultOp, LoopOp, WhereOp>();
+    if (mlir::failed(mlir::applyPartialConversion(getFunction(), target,
+                                                  std::move(patterns2)))) {
       mlir::emitError(mlir::UnknownLoc::get(context),
                       "error in converting to MLIR loop dialect\n");
       signalPassFailure();

@@ -2011,9 +2011,11 @@ def fir_IterWhileOp : region_Op<"iterate_while",
     Index:$lowerBound,
     Index:$upperBound,
     Index:$step,
+    I1:$iterateIn,
     Variadic<AnyType>:$initArgs
   );
   let results = (outs
+    I1:$iterateResult,
     Variadic<AnyType>:$results
   );
   let regions = (region SizedRegion<1>:$region);
@@ -2021,8 +2023,8 @@ def fir_IterWhileOp : region_Op<"iterate_while",
   let skipDefaultBuilders = 1;
   let builders = [
     OpBuilder<"mlir::Builder *builder, OperationState &result,"
-              "mlir::Value iterate, mlir::Value lowerBound,"
-	      "mlir::Value upperBound, mlir::Value step,"
+              "mlir::Value lowerBound, mlir::Value upperBound,"
+	      "mlir::Value step, mlir::Value iterate,"
               "ValueRange iterArgs = llvm::None,"
               "ArrayRef<NamedAttribute> attributes = {}">
   ];
