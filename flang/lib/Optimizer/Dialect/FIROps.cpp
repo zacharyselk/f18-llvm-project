@@ -597,6 +597,177 @@ mlir::ParseResult fir::GlobalOp::verifyValidLinkage(StringRef linkage) {
 }
 
 //===----------------------------------------------------------------------===//
+// IterWhileOp
+//===----------------------------------------------------------------------===//
+
+void fir::IterWhileOp::build(mlir::Builder *builder,
+                             mlir::OperationState &result, mlir::Value lb,
+                             mlir::Value ub, mlir::Value step,
+                             mlir::Value iterate, mlir::ValueRange iterArgs,
+                             llvm::ArrayRef<mlir::NamedAttribute> attributes) {
+  result.addOperands({lb, ub, step, iterate});
+  result.addTypes(iterate.getType());
+  result.addOperands(iterArgs);
+  for (auto v : iterArgs)
+    result.addTypes(v.getType());
+  mlir::Region *bodyRegion = result.addRegion();
+  bodyRegion->push_back(new Block{});
+  bodyRegion->front().addArgument(builder->getIndexType());
+  bodyRegion->front().addArgument(iterate.getType());
+  for (auto v : iterArgs)
+    bodyRegion->front().addArgument(v.getType());
+  result.addAttributes(attributes);
+}
+
+static mlir::ParseResult parseIterWhileOp(mlir::OpAsmParser &parser,
+                                          mlir::OperationState &result) {
+  auto &builder = parser.getBuilder();
+  mlir::OpAsmParser::OperandType inductionVariable, lb, ub, step;
+  if (parser.parseLParen() || parser.parseRegionArgument(inductionVariable) ||
+      parser.parseEqual())
+    return mlir::failure();
+
+  // Parse loop bounds.
+  auto indexType = builder.getIndexType();
+  auto i1Type = builder.getIntegerType(1);
+  if (parser.parseOperand(lb) ||
+      parser.resolveOperand(lb, indexType, result.operands) ||
+      parser.parseKeyword("to") || parser.parseOperand(ub) ||
+      parser.resolveOperand(ub, indexType, result.operands) ||
+      parser.parseKeyword("step") || parser.parseOperand(step) ||
+      parser.parseRParen() ||
+      parser.resolveOperand(step, indexType, result.operands))
+    return mlir::failure();
+
+  mlir::OpAsmParser::OperandType iterateVar, iterateInput;
+  if (parser.parseKeyword("and") || parser.parseLParen() ||
+      parser.parseRegionArgument(iterateVar) || parser.parseEqual() ||
+      parser.parseOperand(iterateInput) || parser.parseRParen() ||
+      parser.resolveOperand(iterateInput, i1Type, result.operands))
+    return mlir::failure();
+
+  // Parse the initial iteration arguments.
+  llvm::SmallVector<mlir::OpAsmParser::OperandType, 4> regionArgs;
+  // Induction variable.
+  regionArgs.push_back(inductionVariable);
+  regionArgs.push_back(iterateVar);
+  result.addTypes(i1Type);
+
+  if (mlir::succeeded(parser.parseOptionalKeyword("iter_args"))) {
+    llvm::SmallVector<mlir::OpAsmParser::OperandType, 4> operands;
+    llvm::SmallVector<mlir::Type, 4> regionTypes;
+    // Parse assignment list and results type list.
+    if (parser.parseAssignmentList(regionArgs, operands) ||
+        parser.parseArrowTypeList(regionTypes))
+      return mlir::failure();
+    // Resolve input operands.
+    for (auto operand_type : llvm::zip(operands, regionTypes))
+      if (parser.resolveOperand(std::get<0>(operand_type),
+                                std::get<1>(operand_type), result.operands))
+        return mlir::failure();
+    result.addTypes(regionTypes);
+  }
+
+  if (parser.parseOptionalAttrDictWithKeyword(result.attributes))
+    return mlir::failure();
+
+  llvm::SmallVector<mlir::Type, 4> argTypes;
+  // Induction variable (hidden)
+  argTypes.push_back(indexType);
+  // Loop carried variables (including iterate)
+  argTypes.append(result.types.begin(), result.types.end());
+  // Parse the body region.
+  auto *body = result.addRegion();
+  if (regionArgs.size() != argTypes.size())
+    return parser.emitError(
+        parser.getNameLoc(),
+        "mismatch in number of loop-carried values and defined values");
+
+  if (parser.parseRegion(*body, regionArgs, argTypes))
+    return failure();
+
+  fir::IterWhileOp::ensureTerminator(*body, builder, result.location);
+
+  return mlir::success();
+}
+
+static mlir::LogicalResult verify(fir::IterWhileOp op) {
+  if (auto cst = dyn_cast_or_null<ConstantIndexOp>(op.step().getDefiningOp()))
+    if (cst.getValue() <= 0)
+      return op.emitOpError("constant step operand must be positive");
+
+  // Check that the body defines as single block argument for the induction
+  // variable.
+  auto *body = op.getBody();
+  if (!body->getArgument(1).getType().isInteger(1))
+    return op.emitOpError(
+        "expected body second argument to be an index argument for "
+        "the induction variable");
+  if (!body->getArgument(0).getType().isIndex())
+    return op.emitOpError(
+        "expected body first argument to be an index argument for "
+        "the induction variable");
+
+  auto opNumResults = op.getNumResults();
+  if (opNumResults == 0)
+    return mlir::failure();
+  if (op.getNumIterOperands() != opNumResults)
+    return op.emitOpError(
+        "mismatch in number of loop-carried values and defined values");
+  if (op.getNumRegionIterArgs() != opNumResults)
+    return op.emitOpError(
+        "mismatch in number of basic block args and defined values");
+  auto iterOperands = op.getIterOperands();
+  auto iterArgs = op.getRegionIterArgs();
+  auto opResults = op.getResults();
+  unsigned i = 0;
+  for (auto e : llvm::zip(iterOperands, iterArgs, opResults)) {
+    if (std::get<0>(e).getType() != std::get<2>(e).getType())
+      return op.emitOpError() << "types mismatch between " << i
+                              << "th iter operand and defined value";
+    if (std::get<1>(e).getType() != std::get<2>(e).getType())
+      return op.emitOpError() << "types mismatch between " << i
+                              << "th iter region arg and defined value";
+
+    i++;
+  }
+  return mlir::success();
+}
+
+static void print(mlir::OpAsmPrinter &p, fir::IterWhileOp op) {
+  p << fir::IterWhileOp::getOperationName() << " (" << op.getInductionVar()
+    << " = " << op.lowerBound() << " to " << op.upperBound() << " step "
+    << op.step() << ") and (";
+  assert(op.hasIterOperands());
+  auto regionArgs = op.getRegionIterArgs();
+  auto operands = op.getIterOperands();
+  p << regionArgs.front() << " = " << *operands.begin() << ")";
+  if (regionArgs.size() > 1) {
+    p << " iter_args(";
+    llvm::interleaveComma(
+        llvm::zip(regionArgs.drop_front(), operands.drop_front()), p,
+        [&](auto it) { p << std::get<0>(it) << " = " << std::get<1>(it); });
+    p << ") -> (" << op.getResultTypes().drop_front() << ')';
+  }
+  p.printOptionalAttrDictWithKeyword(op.getAttrs(), {});
+  p.printRegion(op.region(), /*printEntryBlockArgs=*/false,
+                /*printBlockTerminators=*/true);
+}
+
+mlir::Region &fir::IterWhileOp::getLoopBody() { return region(); }
+
+bool fir::IterWhileOp::isDefinedOutsideOfLoop(mlir::Value value) {
+  return !region().isAncestor(value.getParentRegion());
+}
+
+mlir::LogicalResult
+fir::IterWhileOp::moveOutOfLoop(llvm::ArrayRef<mlir::Operation *> ops) {
+  for (auto op : ops)
+    op->moveBefore(*this);
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // LoadOp
 //===----------------------------------------------------------------------===//
 
@@ -619,124 +790,83 @@ mlir::ParseResult fir::LoadOp::getElementOf(mlir::Type &ele, mlir::Type ref) {
 //===----------------------------------------------------------------------===//
 
 void fir::LoopOp::build(mlir::Builder *builder, mlir::OperationState &result,
-                        int64_t lowerBound, int64_t upperBound, int64_t step,
-                        bool unordered,
-                        llvm::ArrayRef<mlir::NamedAttribute> attributes) {
-  mlir::Region *bodyRegion = result.addRegion();
-  LoopOp::ensureTerminator(*bodyRegion, *builder, result.location);
-  bodyRegion->front().addArgument(builder->getIndexType());
-  result.addAttribute(lowerAttrName(), builder->getI64IntegerAttr(lowerBound));
-  result.addAttribute(upperAttrName(), builder->getI64IntegerAttr(upperBound));
-  result.addAttribute(stepAttrName(), builder->getI64IntegerAttr(step));
-  if (unordered)
-    result.addAttribute(unorderedAttrName(), builder->getUnitAttr());
-  result.addAttributes(attributes);
-}
-
-void fir::LoopOp::build(mlir::Builder *builder, OperationState &result,
-                        mlir::Value lb, mlir::Value ub, int64_t step,
-                        bool unordered, ArrayRef<NamedAttribute> attributes) {
-  result.addOperands({lb, ub});
-  mlir::Region *bodyRegion = result.addRegion();
-  LoopOp::ensureTerminator(*bodyRegion, *builder, result.location);
-  bodyRegion->front().addArgument(builder->getIndexType());
-  result.addAttribute(stepAttrName(), builder->getI64IntegerAttr(step));
-  if (unordered)
-    result.addAttribute(unorderedAttrName(), builder->getUnitAttr());
-  result.addAttributes(attributes);
-}
-
-void fir::LoopOp::build(mlir::Builder *builder, OperationState &result,
-                        mlir::Value lb, mlir::Value ub, bool unordered,
-                        ArrayRef<NamedAttribute> attributes) {
-  result.addOperands({lb, ub});
-  mlir::Region *bodyRegion = result.addRegion();
-  LoopOp::ensureTerminator(*bodyRegion, *builder, result.location);
-  bodyRegion->front().addArgument(builder->getIndexType());
-  if (unordered)
-    result.addAttribute(unorderedAttrName(), builder->getUnitAttr());
-  result.addAttributes(attributes);
-}
-
-void fir::LoopOp::build(mlir::Builder *builder, OperationState &result,
                         mlir::Value lb, mlir::Value ub, mlir::Value step,
-                        bool unordered, ArrayRef<NamedAttribute> attributes) {
+                        bool unordered, mlir::ValueRange iterArgs,
+                        llvm::ArrayRef<mlir::NamedAttribute> attributes) {
   result.addOperands({lb, ub, step});
+  result.addOperands(iterArgs);
+  for (auto v : iterArgs)
+    result.addTypes(v.getType());
   mlir::Region *bodyRegion = result.addRegion();
-  LoopOp::ensureTerminator(*bodyRegion, *builder, result.location);
+  bodyRegion->push_back(new Block{});
+  if (iterArgs.empty())
+    LoopOp::ensureTerminator(*bodyRegion, *builder, result.location);
   bodyRegion->front().addArgument(builder->getIndexType());
+  for (auto v : iterArgs)
+    bodyRegion->front().addArgument(v.getType());
   if (unordered)
     result.addAttribute(unorderedAttrName(), builder->getUnitAttr());
   result.addAttributes(attributes);
 }
 
-/// Parse a `fir.loop` operation.
 static mlir::ParseResult parseLoopOp(mlir::OpAsmParser &parser,
                                      mlir::OperationState &result) {
   auto &builder = parser.getBuilder();
-  OpAsmParser::OperandType inductionVariable, lb, ub, step;
+  mlir::OpAsmParser::OperandType inductionVariable, lb, ub, step;
   // Parse the induction variable followed by '='.
   if (parser.parseRegionArgument(inductionVariable) || parser.parseEqual())
     return mlir::failure();
 
   // Parse loop bounds.
-  // There is a constant form and an operand form.
-  mlir::Type indexType = builder.getIndexType();
-  if (mlir::succeeded(parser.parseOptionalLParen())) {
-    // constant iteration space form (with optional constant step):
-    // `(` int `)` `to` `(` int `)` [`step` `(` int `)`]
-    mlir::IntegerAttr lvalue;
-    mlir::IntegerAttr uvalue;
-    if (parser.parseAttribute(lvalue, fir::LoopOp::lowerAttrName(),
-                              result.attributes) ||
-        parser.parseRParen() || parser.parseKeyword("to") ||
-        parser.parseLParen() ||
-        parser.parseAttribute(uvalue, fir::LoopOp::upperAttrName(),
-                              result.attributes) ||
-        parser.parseRParen())
-      return mlir::failure();
-    if (mlir::succeeded(parser.parseOptionalKeyword("step"))) {
-      mlir::IntegerAttr value;
-      if (parser.parseLParen() ||
-          parser.parseAttribute(value, fir::LoopOp::stepAttrName(),
-                                result.attributes) ||
-          parser.parseRParen())
-        return mlir::failure();
-    }
-  } else {
-    // value iteration space form (with optional value or constant step):
-    // %lb `to` %ub [`step` (%sv | `(` int `)`)]
-    if (parser.parseOperand(lb) || parser.parseKeyword("to") ||
-        parser.parseOperand(ub) ||
-        parser.resolveOperands({lb, ub}, indexType, result.operands))
-      return mlir::failure();
-    if (mlir::succeeded(parser.parseOptionalKeyword("step"))) {
-      if (mlir::succeeded(parser.parseOptionalLParen())) {
-        mlir::IntegerAttr value;
-        if (parser.parseAttribute(value, fir::LoopOp::stepAttrName(),
-                                  result.attributes) ||
-            parser.parseRParen())
-          return mlir::failure();
-      } else if (parser.parseOperand(step) ||
-                 parser.resolveOperand(step, indexType, result.operands)) {
-        return mlir::failure();
-      }
-    }
-  }
-  // Parse the optional `unordered` keyword
-  if (mlir::succeeded(parser.parseOptionalKeyword(LoopOp::unorderedAttrName())))
-    result.addAttribute(LoopOp::unorderedAttrName(), builder.getUnitAttr());
+  auto indexType = builder.getIndexType();
+  if (parser.parseOperand(lb) ||
+      parser.resolveOperand(lb, indexType, result.operands) ||
+      parser.parseKeyword("to") || parser.parseOperand(ub) ||
+      parser.resolveOperand(ub, indexType, result.operands) ||
+      parser.parseKeyword("step") || parser.parseOperand(step) ||
+      parser.resolveOperand(step, indexType, result.operands))
+    return failure();
 
-  // Parse the body region.
-  mlir::Region *body = result.addRegion();
-  if (parser.parseRegion(*body, inductionVariable, indexType))
+  if (mlir::succeeded(parser.parseOptionalKeyword("unordered")))
+    result.addAttribute(fir::LoopOp::unorderedAttrName(),
+                        builder.getUnitAttr());
+
+  // Parse the optional initial iteration arguments.
+  llvm::SmallVector<mlir::OpAsmParser::OperandType, 4> regionArgs, operands;
+  llvm::SmallVector<mlir::Type, 4> argTypes;
+  regionArgs.push_back(inductionVariable);
+
+  if (succeeded(parser.parseOptionalKeyword("iter_args"))) {
+    // Parse assignment list and results type list.
+    if (parser.parseAssignmentList(regionArgs, operands) ||
+        parser.parseArrowTypeList(result.types))
+      return failure();
+    // Resolve input operands.
+    for (auto operand_type : llvm::zip(operands, result.types))
+      if (parser.resolveOperand(std::get<0>(operand_type),
+                                std::get<1>(operand_type), result.operands))
+        return failure();
+  }
+
+  if (parser.parseOptionalAttrDictWithKeyword(result.attributes))
     return mlir::failure();
+
+  // Induction variable.
+  argTypes.push_back(indexType);
+  // Loop carried variables
+  argTypes.append(result.types.begin(), result.types.end());
+  // Parse the body region.
+  auto *body = result.addRegion();
+  if (regionArgs.size() != argTypes.size())
+    return parser.emitError(
+        parser.getNameLoc(),
+        "mismatch in number of loop-carried values and defined values");
+
+  if (parser.parseRegion(*body, regionArgs, argTypes))
+    return failure();
 
   fir::LoopOp::ensureTerminator(*body, builder, result.location);
 
-  // Parse the optional attribute list.
-  if (parser.parseOptionalAttrDict(result.attributes))
-    return mlir::failure();
   return mlir::success();
 }
 
@@ -749,6 +879,81 @@ fir::LoopOp fir::getForInductionVarOwner(mlir::Value val) {
   return dyn_cast_or_null<fir::LoopOp>(containingInst);
 }
 
+// Lifted from loop.loop
+static mlir::LogicalResult verify(fir::LoopOp op) {
+  if (auto cst = dyn_cast_or_null<ConstantIndexOp>(op.step().getDefiningOp()))
+    if (cst.getValue() <= 0)
+      return op.emitOpError("constant step operand must be positive");
+
+  // Check that the body defines as single block argument for the induction
+  // variable.
+  auto *body = op.getBody();
+  if (!body->getArgument(0).getType().isIndex())
+    return op.emitOpError(
+        "expected body first argument to be an index argument for "
+        "the induction variable");
+
+  auto opNumResults = op.getNumResults();
+  if (opNumResults == 0)
+    return success();
+  if (op.getNumIterOperands() != opNumResults)
+    return op.emitOpError(
+        "mismatch in number of loop-carried values and defined values");
+  if (op.getNumRegionIterArgs() != opNumResults)
+    return op.emitOpError(
+        "mismatch in number of basic block args and defined values");
+  auto iterOperands = op.getIterOperands();
+  auto iterArgs = op.getRegionIterArgs();
+  auto opResults = op.getResults();
+  unsigned i = 0;
+  for (auto e : llvm::zip(iterOperands, iterArgs, opResults)) {
+    if (std::get<0>(e).getType() != std::get<2>(e).getType())
+      return op.emitOpError() << "types mismatch between " << i
+                              << "th iter operand and defined value";
+    if (std::get<1>(e).getType() != std::get<2>(e).getType())
+      return op.emitOpError() << "types mismatch between " << i
+                              << "th iter region arg and defined value";
+
+    i++;
+  }
+  return success();
+}
+
+static void print(mlir::OpAsmPrinter &p, fir::LoopOp op) {
+  bool printBlockTerminators = false;
+  p << fir::LoopOp::getOperationName() << ' ' << op.getInductionVar() << " = "
+    << op.lowerBound() << " to " << op.upperBound() << " step " << op.step();
+  if (op.unordered())
+    p << " unordered";
+  if (op.hasIterOperands()) {
+    p << " iter_args(";
+    auto regionArgs = op.getRegionIterArgs();
+    auto operands = op.getIterOperands();
+    llvm::interleaveComma(llvm::zip(regionArgs, operands), p, [&](auto it) {
+      p << std::get<0>(it) << " = " << std::get<1>(it);
+    });
+    p << ") -> (" << op.getResultTypes() << ')';
+    printBlockTerminators = true;
+  }
+  p.printOptionalAttrDictWithKeyword(op.getAttrs(),
+                                     {fir::LoopOp::unorderedAttrName()});
+  p.printRegion(op.region(), /*printEntryBlockArgs=*/false,
+                printBlockTerminators);
+}
+
+mlir::Region &fir::LoopOp::getLoopBody() { return region(); }
+
+bool fir::LoopOp::isDefinedOutsideOfLoop(mlir::Value value) {
+  return !region().isAncestor(value.getParentRegion());
+}
+
+mlir::LogicalResult
+fir::LoopOp::moveOutOfLoop(llvm::ArrayRef<mlir::Operation *> ops) {
+  for (auto op : ops)
+    op->moveBefore(*this);
+  return success();
+}
+
 //===----------------------------------------------------------------------===//
 // MulfOp
 //===----------------------------------------------------------------------===//
@@ -756,6 +961,49 @@ fir::LoopOp fir::getForInductionVarOwner(mlir::Value val) {
 mlir::OpFoldResult fir::MulfOp::fold(llvm::ArrayRef<mlir::Attribute> opnds) {
   return mlir::constFoldBinaryOp<FloatAttr>(
       opnds, [](APFloat a, APFloat b) { return a * b; });
+}
+
+//===----------------------------------------------------------------------===//
+// ResultOp
+//===----------------------------------------------------------------------===//
+
+static mlir::LogicalResult verify(fir::ResultOp op) {
+  auto parentOp = op.getParentOp();
+  auto results = parentOp->getResults();
+  auto operands = op.getOperands();
+
+  if (isa<fir::WhereOp>(parentOp) || isa<fir::LoopOp>(parentOp) ||
+      isa<fir::IterWhileOp>(parentOp)) {
+    if (parentOp->getNumResults() != op.getNumOperands())
+      return op.emitOpError() << "parent of result must have same arity";
+    for (auto e : llvm::zip(results, operands)) {
+      if (std::get<0>(e).getType() != std::get<1>(e).getType())
+        return op.emitOpError()
+               << "types mismatch between result op and its parent";
+    }
+  } else {
+    return op.emitOpError()
+           << "result only terminates if, do_loop, or iterate_while regions";
+  }
+  return success();
+}
+
+static mlir::ParseResult parseResultOp(mlir::OpAsmParser &parser,
+                                       mlir::OperationState &result) {
+  llvm::SmallVector<mlir::OpAsmParser::OperandType, 4> operands;
+  llvm::SmallVector<mlir::Type, 4> types;
+  llvm::SMLoc loc = parser.getCurrentLocation();
+  if (parser.parseOperandList(operands) ||
+      parser.parseOptionalColonTypeList(types) ||
+      parser.resolveOperands(operands, types, loc, result.operands))
+    return failure();
+  return success();
+}
+
+static void print(mlir::OpAsmPrinter &p, fir::ResultOp op) {
+  p << op.getOperationName();
+  if (op.getNumOperands() != 0)
+    p << ' ' << op.getOperands() << " : " << op.getOperandTypes();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1198,7 +1446,7 @@ static mlir::ParseResult parseWhereOp(OpAsmParser &parser,
 
   WhereOp::ensureTerminator(*thenRegion, parser.getBuilder(), result.location);
 
-  if (!parser.parseOptionalKeyword("otherwise")) {
+  if (!parser.parseOptionalKeyword("else")) {
     if (parser.parseRegion(*elseRegion, {}, {}))
       return mlir::failure();
     WhereOp::ensureTerminator(*elseRegion, parser.getBuilder(),
@@ -1224,6 +1472,43 @@ fir::WhereOp::fold(llvm::ArrayRef<mlir::Attribute> opnds,
     return mlir::success();
   }
   return mlir::failure();
+}
+
+static LogicalResult verify(fir::WhereOp op) {
+  // Verify that the entry of each child region does not have arguments.
+  for (auto &region : op.getOperation()->getRegions()) {
+    if (region.empty())
+      continue;
+
+    for (auto &b : region)
+      if (b.getNumArguments() != 0)
+        return op.emitOpError(
+            "requires that child entry blocks have no arguments");
+  }
+  if (op.getNumResults() != 0 && op.otherRegion().empty())
+    return op.emitOpError("must have an else block if defining values");
+
+  return mlir::success();
+}
+
+static void print(mlir::OpAsmPrinter &p, fir::WhereOp op) {
+  bool printBlockTerminators = false;
+  p << fir::WhereOp::getOperationName() << ' ' << op.condition();
+  if (!op.results().empty()) {
+    p << " -> (" << op.getResultTypes() << ')';
+    printBlockTerminators = true;
+  }
+  p.printRegion(op.whereRegion(), /*printEntryBlockArgs=*/false,
+                printBlockTerminators);
+
+  // Print the 'else' regions if it exists and has a block.
+  auto &otherReg = op.otherRegion();
+  if (!otherReg.empty()) {
+    p << " else";
+    p.printRegion(otherReg, /*printEntryBlockArgs=*/false,
+                  printBlockTerminators);
+  }
+  p.printOptionalAttrDict(op.getAttrs());
 }
 
 //===----------------------------------------------------------------------===//
