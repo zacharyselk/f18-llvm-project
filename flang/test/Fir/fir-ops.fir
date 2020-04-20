@@ -600,7 +600,7 @@ func @early_exit(%ok : i1, %k : i32) -> i1 {
     %stop = call @earlyexit2(%v) : (i32) -> i1
     fir.result %stop, %v : i1, i32
   }
-// CHECK: return [[VAL_196:%.*]] : i1
+// CHECK: return [[VAL_190]] : i1
 // CHECK: }
   return %newOk#0 : i1
 }
