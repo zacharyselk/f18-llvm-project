@@ -2001,10 +2001,12 @@ def fir_IterWhileOp : region_Op<"iterate_while",
     [DeclareOpInterfaceMethods<LoopLikeOpInterface>]> {
   let summary = "DO loop with early exit condition";
   let description = [{
-    This construct is useful for lowering implied-DO loops with "exceptions"
-    that are threaded as a saturating bool value.  A `true` disposition means
-    the next loop iteration should proceed. A `false` indicates that the
-    "iterate_while" operation should terminate and return.
+    This construct is useful for lowering implied-DO loops. It is very similar
+    to `fir::LoopOp` with the addition that it requires a single loop-carried
+    bool value that signals an early exit condition to the operation. A `true`
+    disposition means the next loop iteration should proceed. A `false`
+    indicates that the `fir.iterate_while` operation should terminate and
+    return its iteration arguments.
   }];
 
   let arguments = (ins
