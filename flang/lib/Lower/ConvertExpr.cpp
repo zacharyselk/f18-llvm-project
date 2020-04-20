@@ -853,8 +853,16 @@ class ExprLowering {
       } else {
         // create a temp to store the expression value
         auto val = genval(*expr);
-        auto addr = builder.createTemporary(getLoc(), val.getType());
-        builder.create<fir::StoreOp>(getLoc(), val, addr);
+        mlir::Value addr;
+        if (fir::isa_passbyref_type(val.getType())) {
+          // expression is already a reference, so just pass it
+          addr = val;
+        } else {
+          // expression is a value, so store it in a temporary so we can
+          // pass-by-reference
+          addr = builder.createTemporary(getLoc(), val.getType());
+          builder.create<fir::StoreOp>(getLoc(), val, addr);
+        }
         argTypes.push_back(addr.getType());
         operands.push_back(addr);
       }
