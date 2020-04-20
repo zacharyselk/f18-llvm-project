@@ -264,18 +264,27 @@ class fir_AllocatableOp<string mnemonic, list<OpTrait> traits = []> :
     static constexpr llvm::StringRef inType() { return "in_type"; }
     static constexpr llvm::StringRef lenpName() { return "len_param_count"; }
     mlir::Type getAllocatedType();
+    
     bool hasLenParams() { return bool{getAttr(lenpName())}; }
+    
     unsigned numLenParams() {
       if (auto val = getAttrOfType<mlir::IntegerAttr>(lenpName()))
         return val.getInt();
       return 0;
     }
+    
     operand_range getLenParams() {
       return {operand_begin(), operand_begin() + numLenParams()};
     }
+    
+    unsigned numShapeOperands() {
+      return operand_end() - operand_begin() + numLenParams();
+    }
+    
     operand_range getShapeOperands() {
       return {operand_begin() + numLenParams(), operand_end()};
     }
+    
     static mlir::Type getRefTy(mlir::Type ty);
 
     /// Get the input type of the allocation
@@ -287,7 +296,7 @@ class fir_AllocatableOp<string mnemonic, list<OpTrait> traits = []> :
   // Verify checks common to all allocation operations
   string allocVerify = [{
     llvm::SmallVector<llvm::StringRef, 8> visited;
-    if (verifyInType(getInType(), visited))
+    if (verifyInType(getInType(), visited, numShapeOperands()))
       return emitOpError("invalid type for allocation");
     if (verifyRecordLenParams(getInType(), numLenParams()))
       return emitOpError("LEN params do not correspond to type");

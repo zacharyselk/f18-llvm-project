@@ -21,17 +21,24 @@
 
 using namespace fir;
 
-/// return true if the sequence type is abstract or the record type is malformed
-/// or contains an abstract sequence type
+/// Return true if a sequence type is of some incomplete size or a record type
+/// is malformed or contains an incomplete sequence type. An incomplete sequence
+/// type is one with more unknown extents in the type than have been provided
+/// via `dynamicExtents`. Sequence types with an unknown rank are incomplete by
+/// definition.
 static bool verifyInType(mlir::Type inType,
-                         llvm::SmallVectorImpl<llvm::StringRef> &visited) {
+                         llvm::SmallVectorImpl<llvm::StringRef> &visited,
+                         unsigned dynamicExtents = 0) {
   if (auto st = inType.dyn_cast<fir::SequenceType>()) {
     auto shape = st.getShape();
     if (shape.size() == 0)
       return true;
-    for (auto ext : shape)
-      if (ext < 0)
+    for (std::size_t i = 0, end{shape.size()}; i < end; ++i) {
+      if (shape[i] != fir::SequenceType::getUnknownExtent())
+        continue;
+      if (dynamicExtents-- == 0)
         return true;
+    }
   } else if (auto rt = inType.dyn_cast<fir::RecordType>()) {
     // don't recurse if we're already visiting this one
     if (llvm::is_contained(visited, rt.getName()))
