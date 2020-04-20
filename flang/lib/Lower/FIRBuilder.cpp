@@ -192,6 +192,12 @@ struct CharacterOpsBuilderImpl {
           builder.createHere<fir::UnboxCharOp>(refType, lenType, character);
       return {unboxed.getResult(0), unboxed.getResult(1)};
     }
+    if (auto seqType = type.dyn_cast<fir::CharacterType>()) {
+      // Materialize length for usage into character manipulations.
+      auto len = builder.createIntegerConstant(lenType, shape[0]);
+      return {character, len};
+      // FIXME: JEAN I STOPED HERE.
+    }
     if (auto refType = type.dyn_cast<fir::ReferenceType>())
       type = refType.getEleTy();
     if (auto seqType = type.dyn_cast<fir::SequenceType>()) {

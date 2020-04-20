@@ -192,6 +192,7 @@ private:
   static mlir::Value genAbs(Context &, MathRuntimeLibrary &);
   static mlir::Value genAimag(Context &, MathRuntimeLibrary &);
   static mlir::Value genConjg(Context &, MathRuntimeLibrary &);
+  static mlir::Value genCeiling(Context &, MathRuntimeLibrary &);
   template <Extremum, ExtremumBehavior>
   static mlir::Value genExtremum(Context &, MathRuntimeLibrary &);
   static mlir::Value genIchar(Context &, MathRuntimeLibrary &);
@@ -212,6 +213,8 @@ private:
   static constexpr IntrinsicHanlder handlers[]{
       {"abs", &I::genAbs},
       {"aimag", &I::genAimag},
+      {"ceiling", &I::genCeiling},
+      {"char", &I::genConversion},
       {"conjg", &I::genConjg},
       {"dble", &I::genConversion},
       {"ichar", &I::genIchar},
@@ -263,15 +266,34 @@ static constexpr MathsRuntimeStaticDescription llvmRuntime[] = {
     {"atan", "atan2", RType::f64, Args::create<RType::f64, RType::f64>()},
     {"sqrt", "llvm.sqrt.f32", RType::f32, Args::create<RType::f32>()},
     {"sqrt", "llvm.sqrt.f64", RType::f64, Args::create<RType::f64>()},
+    // ceil is used for CEILING but is different, it returns a real.
+    {"ceil", "llvm.ceil.f32", RType::f32, Args::create<RType::f32>()},
+    {"ceil", "llvm.ceil.f64", RType::f64, Args::create<RType::f64>()},
     {"cos", "llvm.cos.f32", RType::f32, Args::create<RType::f32>()},
     {"cos", "llvm.cos.f64", RType::f64, Args::create<RType::f64>()},
+    {"log", "llvm.log.f32", RType::f32, Args::create<RType::f32>()},
+    {"log", "llvm.log.f64", RType::f64, Args::create<RType::f64>()},
+    {"log10", "llvm.log10.f32", RType::f32, Args::create<RType::f32>()},
+    {"log10", "llvm.log10.f64", RType::f64, Args::create<RType::f64>()},
     {"sin", "llvm.sin.f32", RType::f32, Args::create<RType::f32>()},
     {"sin", "llvm.sin.f64", RType::f64, Args::create<RType::f64>()},
 };
 
 static constexpr MathsRuntimeStaticDescription pgmathPreciseRuntime[] = {
+    {"acos", "__ps_acos_1", RType::f32, Args::create<RType::f32>()},
+    {"acos", "__pd_acos_1", RType::f64, Args::create<RType::f64>()},
     {"acos", "__pc_acos_1", RType::c32, Args::create<RType::c32>()},
     {"acos", "__pz_acos_1", RType::c64, Args::create<RType::c64>()},
+    {"acosh", "__ps_acosh_1", RType::f32, Args::create<RType::f32>()},
+    {"acosh", "__pd_acosh_1", RType::f64, Args::create<RType::f64>()},
+    {"asin", "__ps_asin_1", RType::f32, Args::create<RType::f32>()},
+    {"asin", "__pd_asin_1", RType::f64, Args::create<RType::f64>()},
+    {"asin", "__pc_asin_1", RType::c32, Args::create<RType::c32>()},
+    {"asin", "__pz_asin_1", RType::c64, Args::create<RType::c64>()},
+    {"atan", "__ps_atan_1", RType::f32, Args::create<RType::f32>()},
+    {"atan", "__pd_atan_1", RType::f64, Args::create<RType::f64>()},
+    {"atan", "__pc_atan_1", RType::c32, Args::create<RType::c32>()},
+    {"atan", "__pz_atan_1", RType::c64, Args::create<RType::c64>()},
     {"hypot", "__mth_i_hypot", RType::f32,
      Args::create<RType::f32, RType::f32>()},
     {"hypot", "__mth_i_dhypot", RType::f64,
@@ -710,6 +732,22 @@ mlir::Value IntrinsicLibrary::Implementation::genAimag(Context &genCtxt,
   assert(genCtxt.arguments.size() == 1);
   return genCtxt.builder->extractComplexPart(genCtxt.arguments[0],
                                              true /* isImagPart */);
+}
+
+// CEILING
+mlir::Value
+IntrinsicLibrary::Implementation::genCeiling(Context &genCtxt,
+                                             MathRuntimeLibrary &runtime) {
+  // Optional KIND argument.
+  assert(genCtxt.arguments.size() >= 1);
+  // Use ceil that is not an actual Fortran intrinsic but that is
+  // an llvm intrinsic that does the same, but return a floating
+  // point.
+  auto arg = genCtxt.arguments[0];
+  auto ceil = genval(genCtxt.loc, *genCtxt.builder, "ceil", arg.getType(),
+                     {arg}, runtime);
+  return genCtxt.builder->create<fir::ConvertOp>(genCtxt.loc,
+                                                 genCtxt.getResultType(), ceil);
 }
 
 // CONJG
