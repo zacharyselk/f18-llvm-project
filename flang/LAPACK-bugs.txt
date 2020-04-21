@@ -17,8 +17,9 @@ ______________
 
 [unassigned]
 
-  unexpected character type
-  lapack/BLAS/SRC/dznrm2.f":112:11): error: 'fir.convert' op invalid type conversion
+  . unexpected character type
+  
+  . lapack/BLAS/SRC/dznrm2.f":112:11): error: 'fir.convert' op invalid type conversion
 
 FIXED
 _____
