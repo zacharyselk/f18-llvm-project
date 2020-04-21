@@ -857,6 +857,7 @@ class ExprLowering {
         if (fir::isa_ref_type(val.getType())) {
           // expression is already a reference, so just pass it
           // FIXME: check box types here as well
+          // FIXME: pointer/heap may actually need to be passed by reference
           addr = val;
         } else {
           // expression is a value, so store it in a temporary so we can
