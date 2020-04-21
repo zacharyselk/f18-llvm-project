@@ -854,10 +854,8 @@ class ExprLowering {
         // create a temp to store the expression value
         auto val = genval(*expr);
         mlir::Value addr;
-        if (fir::isa_ref_type(val.getType())) {
+        if (fir::isa_passbyref_type(val.getType())) {
           // expression is already a reference, so just pass it
-          // FIXME: check box types here as well
-          // FIXME: pointer/heap may actually need to be passed by reference
           addr = val;
         } else {
           // expression is a value, so store it in a temporary so we can
