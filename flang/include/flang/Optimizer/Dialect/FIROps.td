@@ -2541,6 +2541,8 @@ def fir_ConvertOp : fir_OneResultOp<"convert", [NoSideEffect]> {
   let verifier = [{
     auto inType = value().getType();
     auto outType = getType();
+    if (inType == outType)
+      return mlir::success();
     if ((isPointerCompatible(inType) && isPointerCompatible(outType)) ||
         (isIntegerCompatible(inType) && isIntegerCompatible(outType)) ||
         (isIntegerCompatible(inType) && isFloatCompatible(outType)) ||
