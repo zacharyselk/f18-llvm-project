@@ -1566,6 +1566,16 @@ def fir_CoordinateOp : fir_Op<"coordinate_of", [NoSideEffect]> {
   }];
   
   let verifier = [{
+    auto refTy = ref().getType();
+    if (fir::isa_ref_type(refTy)) {
+      auto eleTy = fir::dyn_cast_ptrEleTy(refTy);
+      if (auto arrTy = eleTy.dyn_cast<fir::SequenceType>()) {
+        if (arrTy.hasUnknownShape())
+          return emitOpError("cannot find coordinate in unknown shape");
+        if (arrTy.getConstantRows() < arrTy.getDimension() - 1)
+          return emitOpError("cannot find coordinate with unknown extents");
+      }
+    }
     // Recovering a LEN type parameter only makes sense from a boxed value
     for (auto co : coor())
       if (dyn_cast_or_null<LenParamIndexOp>(co.getDefiningOp())) {
@@ -2531,6 +2541,8 @@ def fir_ConvertOp : fir_OneResultOp<"convert", [NoSideEffect]> {
   let verifier = [{
     auto inType = value().getType();
     auto outType = getType();
+    if (inType == outType)
+      return mlir::success();
     if ((isPointerCompatible(inType) && isPointerCompatible(outType)) ||
         (isIntegerCompatible(inType) && isIntegerCompatible(outType)) ||
         (isIntegerCompatible(inType) && isFloatCompatible(outType)) ||
