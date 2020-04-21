@@ -1406,7 +1406,8 @@ private:
   }
   void genFIR(Fortran::lower::pft::Evaluation &eval,
               const Fortran::parser::DataStmt &) {
-    TODO();
+    llvm::errs() << "Serious bug! Ignoring DATA statement handling!\n";
+    //TODO();
   }
   void genFIR(Fortran::lower::pft::Evaluation &eval,
               const Fortran::parser::NamelistStmt &) {

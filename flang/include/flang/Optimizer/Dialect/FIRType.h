@@ -91,6 +91,19 @@ bool isa_fir_or_std_type(mlir::Type t);
 /// Is `t` a FIR dialect type that implies a memory (de)reference?
 bool isa_ref_type(mlir::Type t);
 
+/// Is `t` a type that is always trivially pass-by-reference?
+bool isa_passbyref_type(mlir::Type t);
+
+/// Is `t` a boxed type?
+bool isa_box_type(mlir::Type t);
+
+/// Is `t` a type that can conform to be pass-by-reference? Depending on the
+/// context, these types may simply demote to pass-by-reference or a reference
+/// to them may have to be passed instead.
+inline bool conformsWithPassByRef(mlir::Type t) {
+  return isa_ref_type(t) || isa_box_type(t);
+}
+
 /// Is `t` a FIR dialect aggregate type?
 bool isa_aggregate(mlir::Type t);
 

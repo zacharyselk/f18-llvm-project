@@ -839,6 +839,14 @@ bool isa_ref_type(mlir::Type t) {
   return t.isa<ReferenceType>() || t.isa<PointerType>() || t.isa<HeapType>();
 }
 
+bool isa_box_type(mlir::Type t) {
+  return t.isa<BoxType>() || t.isa<BoxCharType>() || t.isa<BoxProcType>();
+}
+
+bool isa_passbyref_type(mlir::Type t) {
+  return t.isa<ReferenceType>() || isa_box_type(t);
+}
+
 bool isa_aggregate(mlir::Type t) {
   return t.isa<SequenceType>() || t.isa<RecordType>();
 }
