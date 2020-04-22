@@ -1,4 +1,5 @@
 //===-- lib/Evaluate/intrinsics-library.cpp -------------------------------===//
+
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -171,6 +172,7 @@ enum class L { F, R, P };
 template <L Lib>
 static void AddLibpgmathFloatHostProcedures(
     HostIntrinsicProceduresLibrary &hostIntrinsicLibrary) {
+  // FIXME: atan / atan2 !
   if constexpr (Lib == L::F) {
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_FAST
@@ -205,6 +207,7 @@ static void AddLibpgmathFloatHostProcedures(
 template <L Lib>
 static void AddLibpgmathDoubleHostProcedures(
     HostIntrinsicProceduresLibrary &hostIntrinsicLibrary) {
+  // FIXME: atan / atan2 !
   if constexpr (Lib == L::F) {
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_FAST
