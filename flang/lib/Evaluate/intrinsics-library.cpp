@@ -53,18 +53,30 @@ static void AddLibmRealHostProcedures(
   using F = FuncPointer<HostT, HostT>;
   using F2 = FuncPointer<HostT, HostT, HostT>;
   HostRuntimeIntrinsicProcedure libmSymbols[]{
-      {"acos", F{std::acos}, true},        {"acosh", F{std::acosh}, true},
-      {"asin", F{std::asin}, true},        {"asinh", F{std::asinh}, true},
-      {"atan", F{std::atan}, true},        {"atan", F2{std::atan2}, true},
-      {"atanh", F{std::atanh}, true},      {"cos", F{std::cos}, true},
-      {"cosh", F{std::cosh}, true},        {"erf", F{std::erf}, true},
-      {"erfc", F{std::erfc}, true},        {"exp", F{std::exp}, true},
-      {"gamma", F{std::tgamma}, true},     {"hypot", F2{std::hypot}, true},
-      {"log", F{std::log}, true},          {"log10", F{std::log10}, true},
-      {"log_gamma", F{std::lgamma}, true}, {"mod", F2{std::fmod}, true},
-      {"pow", F2{std::pow}, true},         {"sin", F{std::sin}, true},
-      {"sinh", F{std::sinh}, true},        {"sqrt", F{std::sqrt}, true},
-      {"tan", F{std::tan}, true},          {"tanh", F{std::tanh}, true},
+      {"acos", F{std::acos}, true},
+      {"acosh", F{std::acosh}, true},
+      {"asin", F{std::asin}, true},
+      {"asinh", F{std::asinh}, true},
+      {"atan", F{std::atan}, true},
+      {"atan2", F2{std::atan2}, true},
+      {"atanh", F{std::atanh}, true},
+      {"cos", F{std::cos}, true},
+      {"cosh", F{std::cosh}, true},
+      {"erf", F{std::erf}, true},
+      {"erfc", F{std::erfc}, true},
+      {"exp", F{std::exp}, true},
+      {"gamma", F{std::tgamma}, true},
+      {"hypot", F2{std::hypot}, true},
+      {"log", F{std::log}, true},
+      {"log10", F{std::log10}, true},
+      {"log_gamma", F{std::lgamma}, true},
+      {"mod", F2{std::fmod}, true},
+      {"pow", F2{std::pow}, true},
+      {"sin", F{std::sin}, true},
+      {"sinh", F{std::sinh}, true},
+      {"sqrt", F{std::sqrt}, true},
+      {"tan", F{std::tan}, true},
+      {"tanh", F{std::tanh}, true},
   };
   // Note: cmath does not have modulo and erfc_scaled equivalent
 
@@ -90,11 +102,11 @@ static void AddLibmComplexHostProcedures(
     HostIntrinsicProceduresLibrary &hostIntrinsicLibrary) {
   using F = FuncPointer<std::complex<HostT>, const std::complex<HostT> &>;
   using F2 = FuncPointer<std::complex<HostT>, const std::complex<HostT> &,
-                         const std::complex<HostT> &>;
+      const std::complex<HostT> &>;
   using F2a = FuncPointer<std::complex<HostT>, const HostT &,
-                          const std::complex<HostT> &>;
+      const std::complex<HostT> &>;
   using F2b = FuncPointer<std::complex<HostT>, const std::complex<HostT> &,
-                          const HostT &>;
+      const HostT &>;
   HostRuntimeIntrinsicProcedure libmSymbols[]{
       {"abs", FuncPointer<HostT, const std::complex<HostT> &>{std::abs}, true},
       {"acos", F{std::acos}, true},
@@ -124,8 +136,8 @@ static void AddLibmComplexHostProcedures(
   }
 }
 
-[[maybe_unused]] static void
-InitHostIntrinsicLibraryWithLibm(HostIntrinsicProceduresLibrary &lib) {
+[[maybe_unused]] static void InitHostIntrinsicLibraryWithLibm(
+    HostIntrinsicProceduresLibrary &lib) {
   if constexpr (host::FortranTypeExists<float>()) {
     AddLibmRealHostProcedures<float>(lib);
   }
@@ -245,18 +257,18 @@ static std::complex<double> ComplexCFuncWrapper(std::complex<double> &arg) {
 }
 
 template <FuncPointer<float _Complex, float _Complex, float _Complex> func>
-static std::complex<float> ComplexCFuncWrapper(std::complex<float> &arg1,
-                                               std::complex<float> &arg2) {
+static std::complex<float> ComplexCFuncWrapper(
+    std::complex<float> &arg1, std::complex<float> &arg2) {
   float _Complex res{func(*reinterpret_cast<float _Complex *>(&arg1),
-                          *reinterpret_cast<float _Complex *>(&arg2))};
+      *reinterpret_cast<float _Complex *>(&arg2))};
   return *reinterpret_cast<std::complex<float> *>(&res);
 }
 
 template <FuncPointer<double _Complex, double _Complex, double _Complex> func>
-static std::complex<double> ComplexCFuncWrapper(std::complex<double> &arg1,
-                                                std::complex<double> &arg2) {
+static std::complex<double> ComplexCFuncWrapper(
+    std::complex<double> &arg1, std::complex<double> &arg2) {
   double _Complex res{func(*reinterpret_cast<double _Complex *>(&arg1),
-                           *reinterpret_cast<double _Complex *>(&arg2))};
+      *reinterpret_cast<double _Complex *>(&arg2))};
   return *reinterpret_cast<std::complex<double> *>(&res);
 }
 
@@ -266,7 +278,7 @@ static void AddLibpgmathComplexHostProcedures(
   if constexpr (Lib == L::F) {
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_FAST
-#define PGMATH_USE_C(name, function)                                           \
+#define PGMATH_USE_C(name, function) \
   {#name, ComplexCFuncWrapper<function>, true},
 #include "../runtime/pgmath.h.inc"
     };
@@ -276,7 +288,7 @@ static void AddLibpgmathComplexHostProcedures(
   } else if constexpr (Lib == L::R) {
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_RELAXED
-#define PGMATH_USE_C(name, function)                                           \
+#define PGMATH_USE_C(name, function) \
   {#name, ComplexCFuncWrapper<function>, true},
 #include "../runtime/pgmath.h.inc"
     };
@@ -287,7 +299,7 @@ static void AddLibpgmathComplexHostProcedures(
     static_assert(Lib == L::P && "unexpected libpgmath version");
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_PRECISE
-#define PGMATH_USE_C(name, function)                                           \
+#define PGMATH_USE_C(name, function) \
   {#name, ComplexCFuncWrapper<function>, true},
 #include "../runtime/pgmath.h.inc"
     };
@@ -313,7 +325,7 @@ static void AddLibpgmathDoubleComplexHostProcedures(
   if constexpr (Lib == L::F) {
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_FAST
-#define PGMATH_USE_Z(name, function)                                           \
+#define PGMATH_USE_Z(name, function) \
   {#name, ComplexCFuncWrapper<function>, true},
 #include "../runtime/pgmath.h.inc"
     };
@@ -323,7 +335,7 @@ static void AddLibpgmathDoubleComplexHostProcedures(
   } else if constexpr (Lib == L::R) {
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_RELAXED
-#define PGMATH_USE_Z(name, function)                                           \
+#define PGMATH_USE_Z(name, function) \
   {#name, ComplexCFuncWrapper<function>, true},
 #include "../runtime/pgmath.h.inc"
     };
@@ -334,7 +346,7 @@ static void AddLibpgmathDoubleComplexHostProcedures(
     static_assert(Lib == L::P && "unexpected libpgmath version");
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_PRECISE
-#define PGMATH_USE_Z(name, function)                                           \
+#define PGMATH_USE_Z(name, function) \
   {#name, ComplexCFuncWrapper<function>, true},
 #include "../runtime/pgmath.h.inc"
     };
@@ -355,8 +367,8 @@ static void AddLibpgmathDoubleComplexHostProcedures(
 }
 
 template <L Lib>
-static void
-InitHostIntrinsicLibraryWithLibpgmath(HostIntrinsicProceduresLibrary &lib) {
+static void InitHostIntrinsicLibraryWithLibpgmath(
+    HostIntrinsicProceduresLibrary &lib) {
   if constexpr (host::FortranTypeExists<float>()) {
     AddLibpgmathFloatHostProcedures<Lib>(lib);
   }
