@@ -130,10 +130,6 @@ struct IntrinsicLibrary {
                                llvm::ArrayRef<mlir::Value> args);
 
   Fortran::lower::FirOpBuilder &builder;
-  // TODO use builder location instead ?
-  // The only case where that would be an issue is when outlining
-  // intrinsic into its own function.
-  mlir::Location loc;
 };
 
 /// Table that drives the fir generation depending on the intrinsic.
@@ -429,22 +425,21 @@ getRuntimeFunction(Fortran::lower::FirOpBuilder &builder, llvm::StringRef name,
                    mlir::FunctionType funcType) {
   const RuntimeFunction *bestNearMatch = nullptr;
   FunctionDistance bestMatchDistance{};
-
-  if (mathRuntimeVersion == fastVersion)
-    if (auto exactMatch =
-            searchFunctionInLibrary(builder, pgmathFast, name, funcType,
-                                    &bestNearMatch, bestMatchDistance))
-      return exactMatch;
-  if (mathRuntimeVersion == relaxedVersion)
-    if (auto exactMatch =
-            searchFunctionInLibrary(builder, pgmathRelaxed, name, funcType,
-                                    &bestNearMatch, bestMatchDistance))
-      return exactMatch;
-  if (mathRuntimeVersion == preciseVersion)
-    if (auto exactMatch =
-            searchFunctionInLibrary(builder, pgmathPrecise, name, funcType,
-                                    &bestNearMatch, bestMatchDistance))
-      return exactMatch;
+  llvm::Optional<mlir::FuncOp> match;
+  if (mathRuntimeVersion == fastVersion) {
+    match = searchFunctionInLibrary(builder, pgmathFast, name, funcType,
+                                    &bestNearMatch, bestMatchDistance);
+  } else if (mathRuntimeVersion == relaxedVersion) {
+    match = searchFunctionInLibrary(builder, pgmathRelaxed, name, funcType,
+                                    &bestNearMatch, bestMatchDistance);
+  } else if (mathRuntimeVersion == preciseVersion) {
+    match = searchFunctionInLibrary(builder, pgmathPrecise, name, funcType,
+                                    &bestNearMatch, bestMatchDistance);
+  } else {
+    assert(mathRuntimeVersion == llvmOnly && "unknown math runtime");
+  }
+  if (match)
+    return match;
 
   // Go through llvm intrinsics if not exact match in libpgmath or if
   // mathRuntimeVersion == llvmOnly
@@ -555,18 +550,21 @@ IntrinsicLibrary::outlineInWrapper(Generator generator, llvm::StringRef name,
     for (mlir::BlockArgument bArg : function.front().getArguments())
       localArguments.push_back(bArg);
 
+    // Location of code inside wrapper of the wrapper is independent from
+    // the location of the intrinsic call.
     auto localLoc = mlir::UnknownLoc::get(mlirContext);
-    IntrinsicLibrary localLib{*localBuilder, localLoc};
+    localBuilder->setLocation(localLoc);
+    IntrinsicLibrary localLib{*localBuilder};
     mlir::Value result =
         generator ? std::invoke(generator, localLib, resultType, localArguments)
                   : std::invoke(&IntrinsicLibrary::genRuntimeCall, localLib,
                                 name, resultType, localArguments);
-    localBuilder->create<mlir::ReturnOp>(localLoc, result);
+    localBuilder->createHere<mlir::ReturnOp>(result);
   } else {
     // Wrapper was already built, ensure it has the sought type
     assert(function.getType() == funcType);
   }
-  auto call = builder.create<mlir::CallOp>(loc, function, args);
+  auto call = builder.createHere<mlir::CallOp>(function, args);
   return call.getResult(0);
 }
 
@@ -589,18 +587,18 @@ mlir::Value IntrinsicLibrary::genRuntimeCall(llvm::StringRef name,
     for (mlir::Value arg : args) {
       auto actualType = actualFuncType.getInput(i);
       if (soughtFuncType.getInput(i) != actualType) {
-        auto castedArg = builder.create<fir::ConvertOp>(loc, actualType, arg);
+        auto castedArg = builder.createHere<fir::ConvertOp>(actualType, arg);
         convertedArguments.push_back(castedArg.getResult());
       } else {
         convertedArguments.push_back(arg);
       }
       ++i;
     }
-    auto call = builder.create<mlir::CallOp>(loc, *funcOp, convertedArguments);
+    auto call = builder.createHere<mlir::CallOp>(*funcOp, convertedArguments);
     mlir::Type soughtType = soughtFuncType.getResult(0);
     mlir::Value res = call.getResult(0);
     if (actualFuncType.getResult(0) != soughtType) {
-      auto castedRes = builder.create<fir::ConvertOp>(loc, soughtType, res);
+      auto castedRes = builder.createHere<fir::ConvertOp>(soughtType, res);
       return castedRes.getResult();
     } else {
       return res;
@@ -619,7 +617,7 @@ mlir::Value IntrinsicLibrary::genConversion(mlir::Type resultType,
                                             llvm::ArrayRef<mlir::Value> args) {
   // There can be an optional kind in second argument.
   assert(args.size() >= 1);
-  return builder.create<fir::ConvertOp>(loc, resultType, args[0]);
+  return builder.createHere<fir::ConvertOp>(resultType, args[0]);
 }
 
 // ABS
@@ -637,9 +635,9 @@ mlir::Value IntrinsicLibrary::genAbs(mlir::Type resultType,
     // At the time of this implementation there is no abs op in mlir.
     // So, implement abs here without branching.
     auto shift = builder.createIntegerConstant(intType, intType.getWidth() - 1);
-    auto mask = builder.create<mlir::SignedShiftRightOp>(loc, arg, shift);
-    auto xored = builder.create<mlir::XOrOp>(loc, arg, mask);
-    return builder.create<mlir::SubIOp>(loc, xored, mask);
+    auto mask = builder.createHere<mlir::SignedShiftRightOp>(arg, shift);
+    auto xored = builder.createHere<mlir::XOrOp>(arg, mask);
+    return builder.createHere<mlir::SubIOp>(xored, mask);
   }
   if (fir::isa_complex(type)) {
     // Use HYPOT to fulfill the no underflow/overflow requirement.
@@ -667,7 +665,7 @@ mlir::Value IntrinsicLibrary::genCeiling(mlir::Type resultType,
   // an llvm intrinsic that does the same, but return a floating
   // point.
   auto ceil = genIntrinsicCall("ceil", arg.getType(), {arg});
-  return builder.create<fir::ConvertOp>(loc, resultType, ceil);
+  return builder.createHere<fir::ConvertOp>(resultType, ceil);
 }
 
 // CONJG
@@ -676,11 +674,10 @@ mlir::Value IntrinsicLibrary::genConjg(mlir::Type resultType,
   assert(args.size() == 1);
   if (resultType != args[0].getType())
     llvm_unreachable("argument type mismatch");
-  builder.setLocation(loc);
 
   mlir::Value cplx = args[0];
   auto imag = builder.extractComplexPart(cplx, /*isImagPart=*/true);
-  auto negImag = builder.create<fir::NegfOp>(loc, imag);
+  auto negImag = builder.createHere<fir::NegfOp>(imag);
   return builder.insertComplexPart(cplx, negImag, /*isImagPart=*/true);
 }
 
@@ -695,10 +692,9 @@ mlir::Value IntrinsicLibrary::genIchar(mlir::Type resultType,
   auto charType = fir::CharacterType::get(
       builder.getContext(), builder.getCharacterKind(arg.getType()));
   auto refType = fir::ReferenceType::get(charType);
-  auto charAddr =
-      builder.create<fir::ConvertOp>(loc, refType, dataAndLen.first);
-  auto charVal = builder.create<fir::LoadOp>(loc, charType, charAddr);
-  return builder.create<fir::ConvertOp>(loc, resultType, charVal);
+  auto charAddr = builder.createHere<fir::ConvertOp>(refType, dataAndLen.first);
+  auto charVal = builder.createHere<fir::LoadOp>(charType, charAddr);
+  return builder.createHere<fir::ConvertOp>(resultType, charVal);
 }
 
 // LEN_TRIM
@@ -718,8 +714,8 @@ mlir::Value IntrinsicLibrary::genMerge(mlir::Type,
   assert(args.size() == 3);
 
   auto i1Type = mlir::IntegerType::get(1, builder.getContext());
-  auto mask = builder.create<fir::ConvertOp>(loc, i1Type, args[2]);
-  return builder.create<mlir::SelectOp>(loc, mask, args[0], args[1]);
+  auto mask = builder.createHere<fir::ConvertOp>(i1Type, args[2]);
+  return builder.createHere<mlir::SelectOp>(mask, args[0], args[1]);
 }
 
 // MOD
@@ -727,7 +723,7 @@ mlir::Value IntrinsicLibrary::genMod(mlir::Type resultType,
                                      llvm::ArrayRef<mlir::Value> args) {
   assert(args.size() == 2);
   if (resultType.isa<mlir::IntegerType>())
-    return builder.create<mlir::SignedRemIOp>(loc, args[0], args[1]);
+    return builder.createHere<mlir::SignedRemIOp>(args[0], args[1]);
 
   // Use runtime. Note that mlir::RemFOp alos implement floating point
   // remainder, but it does not work with fir::Real type.
@@ -741,24 +737,23 @@ mlir::Value IntrinsicLibrary::genSign(mlir::Type resultType,
   auto abs = genAbs(resultType, {args[0]});
   if (resultType.isa<mlir::IntegerType>()) {
     auto zero = builder.createIntegerConstant(resultType, 0);
-    auto neg = builder.create<mlir::SubIOp>(loc, zero, abs);
-    auto cmp = builder.create<mlir::CmpIOp>(loc, mlir::CmpIPredicate::slt,
-                                            args[1], zero);
-    return builder.create<mlir::SelectOp>(loc, cmp, neg, abs);
+    auto neg = builder.createHere<mlir::SubIOp>(zero, abs);
+    auto cmp = builder.createHere<mlir::CmpIOp>(mlir::CmpIPredicate::slt,
+                                                args[1], zero);
+    return builder.createHere<mlir::SelectOp>(cmp, neg, abs);
   }
   // TODO: Requirements when second argument is +0./0.
   auto zeroAttr = builder.getZeroAttr(resultType);
-  auto zero = builder.create<mlir::ConstantOp>(loc, resultType, zeroAttr);
-  auto neg = builder.create<fir::NegfOp>(loc, abs);
+  auto zero = builder.createHere<mlir::ConstantOp>(resultType, zeroAttr);
+  auto neg = builder.createHere<fir::NegfOp>(abs);
   auto cmp =
-      builder.create<fir::CmpfOp>(loc, mlir::CmpFPredicate::OLT, args[1], zero);
-  return builder.create<mlir::SelectOp>(loc, cmp, neg, abs);
+      builder.createHere<fir::CmpfOp>(mlir::CmpFPredicate::OLT, args[1], zero);
+  return builder.createHere<mlir::SelectOp>(cmp, neg, abs);
 }
 
 // Compare two FIR values and return boolean result as i1.
 template <Extremum extremum, ExtremumBehavior behavior>
-static mlir::Value createExtremumCompare(mlir::Location loc,
-                                         Fortran::lower::FirOpBuilder &builder,
+static mlir::Value createExtremumCompare(Fortran::lower::FirOpBuilder &builder,
                                          mlir::Value left, mlir::Value right) {
   static constexpr auto integerPredicate = extremum == Extremum::Max
                                                ? mlir::CmpIPredicate::sgt
@@ -775,33 +770,33 @@ static mlir::Value createExtremumCompare(mlir::Location loc,
       // Return the number if one of the inputs is NaN and the other is
       // a number.
       auto leftIsResult =
-          builder.create<fir::CmpfOp>(loc, orderedCmp, left, right);
-      auto rightIsNan = builder.create<fir::CmpfOp>(
-          loc, mlir::CmpFPredicate::UNE, right, right);
-      result = builder.create<mlir::OrOp>(loc, leftIsResult, rightIsNan);
+          builder.createHere<fir::CmpfOp>(orderedCmp, left, right);
+      auto rightIsNan = builder.createHere<fir::CmpfOp>(
+          mlir::CmpFPredicate::UNE, right, right);
+      result = builder.createHere<mlir::OrOp>(leftIsResult, rightIsNan);
     } else if constexpr (behavior == ExtremumBehavior::IeeeMinMaximum) {
       // Always return NaNs if one the input is NaNs
       auto leftIsResult =
-          builder.create<fir::CmpfOp>(loc, orderedCmp, left, right);
-      auto leftIsNan = builder.create<fir::CmpfOp>(
-          loc, mlir::CmpFPredicate::UNE, left, left);
-      result = builder.create<mlir::OrOp>(loc, leftIsResult, leftIsNan);
+          builder.createHere<fir::CmpfOp>(orderedCmp, left, right);
+      auto leftIsNan =
+          builder.createHere<fir::CmpfOp>(mlir::CmpFPredicate::UNE, left, left);
+      result = builder.createHere<mlir::OrOp>(leftIsResult, leftIsNan);
     } else if constexpr (behavior == ExtremumBehavior::MinMaxss) {
       // If the left is a NaN, return the right whatever it is.
-      result = builder.create<fir::CmpfOp>(loc, orderedCmp, left, right);
+      result = builder.createHere<fir::CmpfOp>(orderedCmp, left, right);
     } else if constexpr (behavior == ExtremumBehavior::PgfortranLlvm) {
       // If one of the operand is a NaN, return left whatever it is.
       static constexpr auto unorderedCmp = extremum == Extremum::Max
                                                ? mlir::CmpFPredicate::UGT
                                                : mlir::CmpFPredicate::ULT;
-      result = builder.create<fir::CmpfOp>(loc, unorderedCmp, left, right);
+      result = builder.createHere<fir::CmpfOp>(unorderedCmp, left, right);
     } else {
       // TODO: ieeeMinNum/ieeeMaxNum
       static_assert(behavior == ExtremumBehavior::IeeeMinMaxNum,
                     "ieeeMinNum/ieeeMaxNum behavior not implemented");
     }
   } else if (type.isa<mlir::IntegerType>()) {
-    result = builder.create<mlir::CmpIOp>(loc, integerPredicate, left, right);
+    result = builder.createHere<mlir::CmpIOp>(integerPredicate, left, right);
   } else if (type.isa<fir::CharacterType>()) {
     // TODO: ! character min and max is tricky because the result
     // length is the length of the longest argument!
@@ -818,9 +813,8 @@ mlir::Value IntrinsicLibrary::genExtremum(mlir::Type,
   assert(args.size() >= 2);
   mlir::Value result = args[0];
   for (auto arg : args.drop_front()) {
-    auto mask =
-        createExtremumCompare<extremum, behavior>(loc, builder, result, arg);
-    result = builder.create<mlir::SelectOp>(loc, mask, result, arg);
+    auto mask = createExtremumCompare<extremum, behavior>(builder, result, arg);
+    result = builder.createHere<mlir::SelectOp>(mask, result, arg);
   }
   return result;
 }
@@ -833,8 +827,7 @@ template <typename T>
 mlir::Value Fortran::lower::IntrinsicCallOpsBuilder<T>::genIntrinsicCall(
     llvm::StringRef name, mlir::Type resultType,
     llvm::ArrayRef<mlir::Value> args) {
-  return IntrinsicLibrary{impl(), impl().getLoc()}.genIntrinsicCall(
-      name, resultType, args);
+  return IntrinsicLibrary{impl()}.genIntrinsicCall(name, resultType, args);
 }
 template mlir::Value
     Fortran::lower::IntrinsicCallOpsBuilder<Fortran::lower::FirOpBuilder>::
