@@ -11,6 +11,7 @@
 
 #include "flang/Common/idioms.h"
 #include "flang/Common/reference.h"
+#include "flang/Optimizer/Dialect/FIRType.h"
 #include "flang/Semantics/symbol.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -150,6 +151,12 @@ struct SymIndex {
            std::holds_alternative<CharShaped>(v);
   }
 
+  bool hasConstantShape() const {
+    if (auto arrTy = getAddr().getType().dyn_cast<fir::SequenceType>())
+      return arrTy.hasConstantShape();
+    return false;
+  }
+
   std::variant<Intrinsic, Shaped, FullDim, Char, CharShaped, CharFullDim,
                Derived, None>
       v;
@@ -191,16 +198,16 @@ public:
 
   /// Add an array mapping with bounds notation.
   void addSymbolWithBounds(semantics::SymbolRef sym, mlir::Value value,
-                            llvm::ArrayRef<SymIndex::Bounds> shape,
-                            bool force = false) {
+                           llvm::ArrayRef<SymIndex::Bounds> shape,
+                           bool force = false) {
     makeSym(sym, SymIndex::FullDim(value, shape), force);
   }
 
   /// Add an array of CHARACTER with bounds notation.
   void addCharSymbolWithBounds(semantics::SymbolRef sym, mlir::Value value,
-                                mlir::Value len,
-                                llvm::ArrayRef<SymIndex::Bounds> shape,
-                                bool force = false) {
+                               mlir::Value len,
+                               llvm::ArrayRef<SymIndex::Bounds> shape,
+                               bool force = false) {
     makeSym(sym, SymIndex::CharFullDim(value, len, shape), force);
   }
 
