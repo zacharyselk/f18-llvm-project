@@ -11,15 +11,17 @@ add_flang_library(FortranLower
   Mangler.cpp
   PFTBuilder.cpp
   Runtime.cpp
+
+  DEPENDS
+  MLIROpAsmInterfacesIncGen
+  MLIRControlFlowInterfaces
+  MLIRLinalgStructuredOpsInterfaceIncGen
 )
 
 target_link_libraries(FortranLower
   FIRSupport
-  MLIRAffine
+  MLIRAffineToStandard
   MLIRLLVMIR
   MLIRLoopToStandard
   MLIRStandardOps
-
-  LINK_COMPONENTS
-  Support
 )
