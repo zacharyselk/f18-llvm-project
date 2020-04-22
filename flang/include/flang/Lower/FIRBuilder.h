@@ -173,6 +173,30 @@ protected:
   }
 };
 
+/// Extension class to facilitate lowering of COMPLEX manipulations in FIR.
+template <typename T>
+class IntrinsicCallOpsBuilder {
+public:
+  // access the implementation
+  T &impl() { return *static_cast<T *>(this); }
+
+  // TODO: Expose interface to get specific intrinsic function address.
+  // TODO: Handle intrinsic subroutine.
+  // TODO: Intrinsics that do not require their arguments to be defined
+  //   (e.g shape inquiries) might not fit in the current interface that
+  //   requires mlir::Value to be provided.
+  // TODO: Error handling interface ?
+  // TODO: Implementation is incomplete. Many intrinsics to tbd.
+  // TODO: Provide direct access to useful intrinsics for the rest
+  // of the code gen (e.g abs, max, pow).
+
+  /// Generate the FIR+MLIR operations for the generic intrinsic \p name
+  /// with arguments \p args and expected result type \p resultType.
+  /// Returned mlir::Value is the returned Fortran intrinsic value.
+  mlir::Value genIntrinsicCall(llvm::StringRef name, mlir::Type resultType,
+                               llvm::ArrayRef<mlir::Value> args);
+};
+
 //===----------------------------------------------------------------------===//
 // FirOpBuilder
 //===----------------------------------------------------------------------===//
@@ -181,7 +205,8 @@ protected:
 /// patterns.
 class FirOpBuilder : public mlir::OpBuilder,
                      public CharacterOpsBuilder<FirOpBuilder>,
-                     public ComplexOpsBuilder<FirOpBuilder> {
+                     public ComplexOpsBuilder<FirOpBuilder>,
+                     public IntrinsicCallOpsBuilder<FirOpBuilder> {
 public:
   using OpBuilder::OpBuilder;
 

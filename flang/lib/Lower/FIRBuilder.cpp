@@ -1,4 +1,4 @@
-//===-- OpBuilder.cpp -----------------------------------------------------===//
+//===-- FIRBuilder.cpp ----------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -194,9 +194,8 @@ struct CharacterOpsBuilderImpl {
     }
     if (auto seqType = type.dyn_cast<fir::CharacterType>()) {
       // Materialize length for usage into character manipulations.
-      auto len = builder.createIntegerConstant(lenType, shape[0]);
+      auto len = builder.createIntegerConstant(lenType, 1);
       return {character, len};
-      // FIXME: JEAN I STOPED HERE.
     }
     if (auto refType = type.dyn_cast<fir::ReferenceType>())
       type = refType.getEleTy();
