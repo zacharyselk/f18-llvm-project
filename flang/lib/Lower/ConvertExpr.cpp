@@ -730,97 +730,50 @@ class ExprLowering {
     auto idxTy = builder.getIndexType();
     auto one = builder.createIntegerConstant(idxTy, 1);
     auto zero = builder.createIntegerConstant(idxTy, 0);
+    auto genShaped = [&](const auto &arr, mlir::Value delta) -> mlir::Value {
+      mlir::Value total = zero;
+      assert(arr.shape.size() == aref.subscript().size());
+      for (const auto &pair : llvm::zip(arr.shape, aref.subscript())) {
+        auto val = builder.create<fir::ConvertOp>(loc, idxTy,
+                                                  genval(std::get<1>(pair)));
+        auto diff = builder.create<mlir::SubIOp>(loc, val, one);
+        auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
+        total = builder.create<mlir::AddIOp>(loc, prod, total);
+        delta = builder.create<mlir::MulIOp>(loc, delta, std::get<0>(pair));
+      }
+      return builder.create<fir::CoordinateOp>(
+          loc, refTy, base, llvm::ArrayRef<mlir::Value>{total});
+    };
+    auto genFullDim = [&](const auto &arr, mlir::Value delta) -> mlir::Value {
+      mlir::Value total = zero;
+      assert(arr.shape.size() == aref.subscript().size());
+      for (const auto &pair : llvm::zip(arr.shape, aref.subscript())) {
+        auto val = builder.create<fir::ConvertOp>(loc, idxTy,
+                                                  genval(std::get<1>(pair)));
+        auto lb = builder.create<fir::ConvertOp>(
+            loc, idxTy, std::get<0>(std::get<0>(pair)));
+        auto diff = builder.create<mlir::SubIOp>(loc, val, lb);
+        auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
+        total = builder.create<mlir::AddIOp>(loc, prod, total);
+        if (auto ext = std::get<1>(std::get<0>(pair)))
+          delta = builder.create<mlir::MulIOp>(loc, delta, ext);
+      }
+      return builder.create<fir::CoordinateOp>(
+          loc, refTy, base, llvm::ArrayRef<mlir::Value>{total});
+    };
     return std::visit(
         Fortran::common::visitors{
             [&](const Fortran::lower::SymIndex::Shaped &arr) {
-              mlir::Value delta = one;
-              mlir::Value total = zero;
-              assert(arr.shape.size() == aref.subscript().size());
-              for (const auto &pair : llvm::zip(arr.shape, aref.subscript())) {
-                auto val = builder.create<fir::ConvertOp>(loc, idxTy,genval(std::get<1>(pair)));
-                auto diff = builder.create<mlir::SubIOp>(loc, val, one);
-                auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
-                total = builder.create<mlir::AddIOp>(loc, prod, total);
-                delta =
-                    builder.create<mlir::MulIOp>(loc, delta, std::get<0>(pair));
-              }
-              return builder
-                  .create<fir::CoordinateOp>(loc, refTy, base,
-                                             llvm::ArrayRef<mlir::Value>{total})
-                  .getResult();
+              return genShaped(arr, one);
             },
             [&](const Fortran::lower::SymIndex::FullDim &arr) {
-              mlir::Value delta = one;
-              mlir::Value total = zero;
-              auto subct = aref.subscript().size();
-              auto asiter = arr.shape.begin();
-              auto subiter = aref.subscript().begin();
-              for (auto asct = arr.shape.size(); asct;
-                   --asct, ++asiter, ++subiter, --subct) {
-                auto val = builder.create<fir::ConvertOp>(loc, idxTy,genval(*subiter));
-                auto lb = builder.create<fir::ConvertOp>(loc, idxTy, std::get<0>(*asiter));
-                auto diff = builder.create<mlir::SubIOp>(loc, val, lb);
-                auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
-                total = builder.create<mlir::AddIOp>(loc, prod, total);
-                delta = builder.create<mlir::MulIOp>(loc, delta,
-                                                     std::get<1>(*asiter));
-              }
-              if (subct) {
-                assert(subct == 1);
-                auto val = builder.create<fir::ConvertOp>(loc, idxTy,genval(*subiter));
-                auto diff = builder.create<mlir::SubIOp>(loc, val, one);
-                auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
-                total = builder.create<mlir::AddIOp>(loc, prod, total);
-              }
-              return builder
-                  .create<fir::CoordinateOp>(loc, refTy, base,
-                                             llvm::ArrayRef<mlir::Value>{total})
-                  .getResult();
+              return genFullDim(arr, one);
             },
             [&](const Fortran::lower::SymIndex::CharShaped &arr) {
-              mlir::Value delta = arr.len;
-              mlir::Value total = zero;
-              assert(arr.shape.size() == aref.subscript().size());
-              for (const auto &pair : llvm::zip(arr.shape, aref.subscript())) {
-                auto val = builder.create<fir::ConvertOp>(loc, idxTy,genval(std::get<1>(pair)));
-                auto diff = builder.create<mlir::SubIOp>(loc, val, one);
-                auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
-                total = builder.create<mlir::AddIOp>(loc, prod, total);
-                delta =
-                    builder.create<mlir::MulIOp>(loc, delta, std::get<0>(pair));
-              }
-              return builder
-                  .create<fir::CoordinateOp>(loc, refTy, base,
-                                             llvm::ArrayRef<mlir::Value>{total})
-                  .getResult();
+              return genShaped(arr, arr.len);
             },
             [&](const Fortran::lower::SymIndex::CharFullDim &arr) {
-              mlir::Value delta = arr.len;
-              mlir::Value total = zero;
-              auto subct = aref.subscript().size();
-              auto asiter = arr.shape.begin();
-              auto subiter = aref.subscript().begin();
-              for (auto asct = arr.shape.size(); asct;
-                   --asct, ++asiter, ++subiter, --subct) {
-                auto val = builder.create<fir::ConvertOp>(loc, idxTy, genval(*subiter));
-                auto lb = builder.create<fir::ConvertOp>(loc, idxTy,std::get<0>(*asiter));
-                auto diff = builder.create<mlir::SubIOp>(loc, val, lb);
-                auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
-                total = builder.create<mlir::AddIOp>(loc, prod, total);
-                delta = builder.create<mlir::MulIOp>(loc, delta,
-                                                     std::get<1>(*asiter));
-              }
-              if (subct) {
-                assert(subct == 1);
-                auto val = builder.create<fir::ConvertOp>(loc, idxTy,genval(*subiter));
-                auto diff = builder.create<mlir::SubIOp>(loc, val, one);
-                auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
-                total = builder.create<mlir::AddIOp>(loc, prod, total);
-              }
-              return builder
-                  .create<fir::CoordinateOp>(loc, refTy, base,
-                                             llvm::ArrayRef<mlir::Value>{total})
-                  .getResult();
+              return genFullDim(arr, arr.len);
             },
             [&](const Fortran::lower::SymIndex::Derived &arr) {
               TODO();
