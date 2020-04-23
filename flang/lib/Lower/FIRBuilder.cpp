@@ -166,12 +166,12 @@ struct CharacterOpsBuilderImpl {
       return fir::ReferenceType::get(getCharacterType());
     }
 
-    bool isNotInMemory() const {
+    bool needToMaterialize() const {
       return data.getType().isa<fir::SequenceType>() ||
              data.getType().isa<fir::CharacterType>();
     }
 
-    std::optional<fir::SequenceType::Extent> getCompileTimeLenght() const {
+    std::optional<fir::SequenceType::Extent> getCompileTimeLength() const {
       auto type = data.getType();
       if (type.isa<fir::CharacterType>())
         return 1;
@@ -195,7 +195,7 @@ struct CharacterOpsBuilderImpl {
   };
 
   Char materializeValue(Char str) {
-    if (!str.isNotInMemory())
+    if (!str.needToMaterialize())
       return str;
     auto variable = builder.createHere<fir::AllocaOp>(str.data.getType());
     builder.createHere<fir::StoreOp>(str.data, variable);
@@ -233,7 +233,7 @@ struct CharacterOpsBuilderImpl {
 
   mlir::Value createEmbox(Char str) {
     // BoxChar require a reference.
-    if (str.isNotInMemory())
+    if (str.needToMaterialize())
       str = materializeValue(str);
     auto kind = str.getCharacterType().getFKind();
     auto boxCharType = fir::BoxCharType::get(builder.getContext(), kind);
@@ -257,7 +257,7 @@ struct CharacterOpsBuilderImpl {
     return builder.createHere<fir::LoadOp>(addr);
   }
   void createStoreCharAt(Char str, mlir::Value index, mlir::Value c) {
-    assert(!str.isNotInMemory() && "cannot store into constant");
+    assert(!str.needToMaterialize() && "not in memory");
     auto addr = builder.createHere<fir::CoordinateOp>(str.getReferenceType(),
                                                       str.data, index);
     builder.createHere<fir::StoreOp>(c, addr);
@@ -307,7 +307,7 @@ struct CharacterOpsBuilderImpl {
     addr = builder.createHere<fir::ConvertOp>(refType, addr);
 
     auto val = rhs.data;
-    if (!rhs.isNotInMemory()) {
+    if (!rhs.needToMaterialize()) {
       mlir::Value rhsAddr = rhs.data;
       rhsAddr = builder.createHere<fir::ConvertOp>(refType, rhsAddr);
       val = builder.createHere<fir::LoadOp>(rhsAddr);
@@ -317,8 +317,8 @@ struct CharacterOpsBuilderImpl {
   }
 
   void createAssign(Char lhs, Char rhs) {
-    auto rhsCstLen = rhs.getCompileTimeLenght();
-    auto lhsCstLen = lhs.getCompileTimeLenght();
+    auto rhsCstLen = rhs.getCompileTimeLength();
+    auto lhsCstLen = lhs.getCompileTimeLength();
     bool compileTimeSameLength =
         lhsCstLen && rhsCstLen && *lhsCstLen == *rhsCstLen;
 
@@ -334,7 +334,7 @@ struct CharacterOpsBuilderImpl {
       copyCount = builder.genMin({lhs.len, rhs.len});
 
     Char safeRhs{rhs};
-    if (rhs.isNotInMemory()) {
+    if (rhs.needToMaterialize()) {
       // TODO: revisit now that character constant handling changed.
       // Need to materialize the constant to get its elements.
       // (No equivalent of fir.coordinate_of for array value).
@@ -368,7 +368,7 @@ struct CharacterOpsBuilderImpl {
 
   Char createSubstring(Char str, llvm::ArrayRef<mlir::Value> bounds) {
     // Constant need to be materialize in memory to use fir.coordinate_of.
-    if (str.isNotInMemory())
+    if (str.needToMaterialize())
       str = materializeValue(str);
 
     auto nbounds{bounds.size()};
@@ -524,7 +524,7 @@ std::pair<mlir::Value, mlir::Value>
 Fortran::lower::CharacterOpsBuilder<T>::materializeCharacter(mlir::Value str) {
   CharacterOpsBuilderImpl bimpl{impl()};
   auto c = bimpl.toDataLengthPair(str);
-  if (c.isNotInMemory())
+  if (c.needToMaterialize())
     c = bimpl.materializeValue(c);
   return {c.data, c.len};
 }
