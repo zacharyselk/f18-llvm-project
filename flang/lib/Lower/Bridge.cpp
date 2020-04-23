@@ -1776,10 +1776,15 @@ private:
           bounds.emplace_back(lb, idx);
           continue;
         }
+        if (low && spec->ubound().isAssumed()) {
+          // An assumed size array. The extent is not computed.
+          auto lb = genExprValue(Fortran::semantics::SomeExpr{*low});
+          bounds.emplace_back(lb, mlir::Value{});
+        }
         break;
       }
 
-      auto unzip =
+      auto unzipInto =
           [&](llvm::SmallVectorImpl<mlir::Value> &shape,
               llvm::ArrayRef<Fortran::lower::SymIndex::Bounds> bounds) {
             std::for_each(bounds.begin(), bounds.end(), [&](const auto &pair) {
@@ -1797,7 +1802,7 @@ private:
         assert(!mustBeDummy);
         llvm::SmallVector<mlir::Value, 8> shape;
         shape.push_back(len);
-        unzip(shape, bounds);
+        unzipInto(shape, bounds);
         auto local = createNewLocal(loc, sym, shape);
         localSymbols.addCharSymbolWithBounds(sym, local, len, bounds);
         return;
@@ -1809,7 +1814,7 @@ private:
       // local array with computed bounds
       assert(!mustBeDummy);
       llvm::SmallVector<mlir::Value, 8> shape;
-      unzip(shape, bounds);
+      unzipInto(shape, bounds);
       auto local = createNewLocal(loc, sym, shape);
       localSymbols.addSymbolWithBounds(sym, local, bounds);
       return;
