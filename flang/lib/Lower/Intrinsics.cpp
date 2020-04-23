@@ -404,7 +404,8 @@ searchFunctionInLibrary(Fortran::lower::FirOpBuilder &builder,
                         mlir::FunctionType funcType,
                         const RuntimeFunction **bestNearMatch,
                         FunctionDistance &bestMatchDistance) {
-  auto range = Fortran::lower::StaticMultimapView(lib).equal_range(name);
+  auto map = Fortran::lower::StaticMultimapView(lib);
+  auto range = map.equal_range(name);
   for (auto iter{range.first}; iter != range.second && iter; ++iter) {
     const auto &impl = *iter;
     auto implType = impl.typeGenerator(builder.getContext());
