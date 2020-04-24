@@ -525,61 +525,86 @@ private:
   }
 
   template <Fortran::common::TypeCategory TC, int KIND>
+  mlir::Value genScalarLit(
+      const Fortran::evaluate::Scalar<Fortran::evaluate::Type<TC, KIND>>
+          &value) {
+    if constexpr (TC == Fortran::lower::IntegerCat) {
+      return genIntegerConstant<KIND>(builder.getContext(), value.ToInt64());
+    } else if constexpr (TC == Fortran::lower::LogicalCat) {
+      return genLogicalConstantAsI1(builder.getContext(), value.IsTrue());
+    } else if constexpr (TC == Fortran::lower::RealCat) {
+      std::string str = value.DumpHexadecimal();
+      if constexpr (KIND == 2) {
+        llvm::APFloat floatVal{llvm::APFloatBase::IEEEhalf(), str};
+        return genRealConstant<KIND>(builder.getContext(), floatVal);
+      } else if constexpr (KIND == 4) {
+        llvm::APFloat floatVal{llvm::APFloatBase::IEEEsingle(), str};
+        return genRealConstant<KIND>(builder.getContext(), floatVal);
+      } else if constexpr (KIND == 10) {
+        llvm::APFloat floatVal{llvm::APFloatBase::x87DoubleExtended(), str};
+        return genRealConstant<KIND>(builder.getContext(), floatVal);
+      } else if constexpr (KIND == 16) {
+        llvm::APFloat floatVal{llvm::APFloatBase::IEEEquad(), str};
+        return genRealConstant<KIND>(builder.getContext(), floatVal);
+      } else {
+        // convert everything else to double
+        llvm::APFloat floatVal{llvm::APFloatBase::IEEEdouble(), str};
+        return genRealConstant<KIND>(builder.getContext(), floatVal);
+      }
+    } else if constexpr (TC == Fortran::lower::ComplexCat) {
+      using TR = Fortran::evaluate::Type<Fortran::lower::RealCat, KIND>;
+      return genval(Fortran::evaluate::ComplexConstructor<KIND>{
+          Fortran::evaluate::Expr<TR>{
+              Fortran::evaluate::Constant<TR>{value.REAL()}},
+          Fortran::evaluate::Expr<TR>{
+              Fortran::evaluate::Constant<TR>{value.AIMAG()}}});
+    } else {
+      llvm_unreachable("unhandled constant");
+    }
+  }
+
+  template <Fortran::common::TypeCategory TC, int KIND>
+  mlir::Value genArrayLit(
+      const Fortran::evaluate::Constant<Fortran::evaluate::Type<TC, KIND>>
+          &con) {
+    // TODO:
+    // - Multi-dimensional array
+    if (con.Rank() > 1) {
+      TODO(); // "Multi dimensional array not yet supported"
+    }
+    fir::SequenceType::Shape shape(1, con.shape()[0]);
+    auto arrayTy = fir::SequenceType::get(shape, converter.genType(TC, KIND));
+    auto idxTy = builder.getIndexType();
+    mlir::Value array = builder.create<fir::UndefOp>(getLoc(), arrayTy);
+    Fortran::evaluate::ConstantSubscripts subscripts = con.lbounds();
+    std::int64_t counter = 0;
+    do {
+      auto constant = genScalarLit<TC, KIND>(con.At(subscripts));
+      auto idx = builder.createIntegerConstant(idxTy, counter++);
+      array = builder.create<fir::InsertValueOp>(getLoc(), arrayTy, array,
+                                                 constant, idx);
+    } while (con.IncrementSubscripts(subscripts));
+    return array;
+  }
+
+  template <Fortran::common::TypeCategory TC, int KIND>
   mlir::Value
   genval(const Fortran::evaluate::Constant<Fortran::evaluate::Type<TC, KIND>>
              &con) {
     // TODO:
-    // - array constant not handled
     // - derived type constant
-    if constexpr (TC == Fortran::lower::IntegerCat) {
-      auto opt = con.GetScalarValue();
-      if (opt.has_value())
-        return genIntegerConstant<KIND>(builder.getContext(), opt->ToInt64());
-      llvm_unreachable("integer constant has no value");
-    } else if constexpr (TC == Fortran::lower::LogicalCat) {
-      auto opt = con.GetScalarValue();
-      if (opt.has_value())
-        return genLogicalConstantAsI1(builder.getContext(), opt->IsTrue());
-      llvm_unreachable("logical constant has no value");
-    } else if constexpr (TC == Fortran::lower::RealCat) {
-      auto opt = con.GetScalarValue();
-      if (opt.has_value()) {
-        std::string str = opt.value().DumpHexadecimal();
-        if constexpr (KIND == 2) {
-          llvm::APFloat floatVal{llvm::APFloatBase::IEEEhalf(), str};
-          return genRealConstant<KIND>(builder.getContext(), floatVal);
-        } else if constexpr (KIND == 4) {
-          llvm::APFloat floatVal{llvm::APFloatBase::IEEEsingle(), str};
-          return genRealConstant<KIND>(builder.getContext(), floatVal);
-        } else if constexpr (KIND == 10) {
-          llvm::APFloat floatVal{llvm::APFloatBase::x87DoubleExtended(), str};
-          return genRealConstant<KIND>(builder.getContext(), floatVal);
-        } else if constexpr (KIND == 16) {
-          llvm::APFloat floatVal{llvm::APFloatBase::IEEEquad(), str};
-          return genRealConstant<KIND>(builder.getContext(), floatVal);
-        } else {
-          // convert everything else to double
-          llvm::APFloat floatVal{llvm::APFloatBase::IEEEdouble(), str};
-          return genRealConstant<KIND>(builder.getContext(), floatVal);
-        }
-      }
-      llvm_unreachable("real constant has no value");
-    } else if constexpr (TC == Fortran::lower::ComplexCat) {
-      auto opt = con.GetScalarValue();
-      if (opt.has_value()) {
-        using TR = Fortran::evaluate::Type<Fortran::lower::RealCat, KIND>;
-        return genval(Fortran::evaluate::ComplexConstructor<KIND>{
-            Fortran::evaluate::Expr<TR>{
-                Fortran::evaluate::Constant<TR>{opt->REAL()}},
-            Fortran::evaluate::Expr<TR>{
-                Fortran::evaluate::Constant<TR>{opt->AIMAG()}}});
-      }
-      llvm_unreachable("array of complex unhandled");
-    } else if constexpr (TC == Fortran::lower::CharacterCat) {
-      return genCharLit<KIND>(con.GetScalarValue().value(), con.LEN());
-    } else {
-      llvm_unreachable("unhandled constant");
+    if (con.Rank() > 0)
+      return genArrayLit(con);
+
+    using T = Fortran::evaluate::Type<TC, KIND>;
+    const std::optional<Fortran::evaluate::Scalar<T>> &opt =
+        con.GetScalarValue();
+    if (!opt.has_value())
+      llvm_unreachable("constant has no value");
+    if constexpr (TC == Fortran::lower::CharacterCat) {
+      return genCharLit<KIND>(opt.value(), con.LEN());
     }
+    return genScalarLit<TC, KIND>(opt.value());
   }
 
   template <Fortran::common::TypeCategory TC>
@@ -927,7 +952,8 @@ private:
         assert(argRef && "could not get symbol reference");
         if (builder.isCharacter(argRef.getType())) {
           argTypes.push_back(fir::BoxCharType::get(
-              builder.getContext(), builder.getCharacterKind(argRef.getType())));
+              builder.getContext(), 
+              builder.getCharacterKind(argRef.getType())));
           auto ch = builder.materializeCharacter(argRef);
           operands.push_back(builder.createEmboxChar(ch.first, ch.second));
         } else {
