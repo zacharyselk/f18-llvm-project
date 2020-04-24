@@ -132,14 +132,19 @@ public:
   /// Type helper. They do not create MLIR operations.
   mlir::Type getComplexPartType(mlir::Value cplx);
   mlir::Type getComplexPartType(mlir::Type complexType);
-  mlir::Type getComplexPartType(fir::KindTy complexKind);
 
   /// Complex operation creation helper. They create MLIR operations.
   mlir::Value createComplex(fir::KindTy kind, mlir::Value real,
                             mlir::Value imag);
+
+  /// Create a complex value.
+  mlir::Value createComplex(mlir::Location loc, mlir::Type complexType,
+                            mlir::Value real, mlir::Value imag);
+
   mlir::Value extractComplexPart(mlir::Value cplx, bool isImagPart) {
     return isImagPart ? extract<Part::Imag>(cplx) : extract<Part::Real>(cplx);
   }
+
   /// Returns (Real, Imag) pair of \p cplx
   std::pair<mlir::Value, mlir::Value> extractParts(mlir::Value cplx) {
     return {extract<Part::Real>(cplx), extract<Part::Imag>(cplx)};
@@ -253,6 +258,9 @@ public:
 
   /// Create an integer constant of type \p type and value \p i.
   mlir::Value createIntegerConstant(mlir::Type integerType, std::int64_t i);
+
+  mlir::Value createRealConstant(mlir::Location loc, mlir::Type realType,
+                                 const llvm::APFloat &val);
 
   /// Create a temporary. A temp is allocated using `fir.alloca` and can be read
   /// and written using `fir.load` and `fir.store`, resp.  The temporary can be
