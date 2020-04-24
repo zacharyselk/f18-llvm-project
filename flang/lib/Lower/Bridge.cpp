@@ -234,7 +234,7 @@ public:
                         fir::NameUniquer &uniquer)
       : mlirContext{bridge.getMLIRContext()}, cooked{bridge.getCookedSource()},
         module{bridge.getModule()}, defaults{bridge.getDefaultKinds()},
-        uniquer{uniquer} {}
+        kindMap{bridge.getKindMap()}, uniquer{uniquer} {}
   virtual ~FirConverter() = default;
 
   /// Convert the PFT to FIR
@@ -1264,6 +1264,33 @@ private:
     }
   }
 
+  /// The LHS and RHS on assignments are not always in agreement in terms of
+  /// type. In some cases, the disagreement is between COMPLEX and REAL types.
+  /// In that case, the assignment must insert/extract out of a COMPLEX value to
+  /// be correct and strongly typed.
+  mlir::Value convertOnAssign(mlir::Location loc, mlir::Type toTy,
+                              mlir::Value val) {
+    assert(toTy && "store location must be typed");
+    auto fromTy = val.getType();
+    if (fromTy == toTy)
+      return val;
+    if (fir::isa_real(fromTy) && fir::isa_complex(toTy)) {
+      // imaginary part is zero
+      auto eleTy = builder->getComplexPartType(toTy);
+      auto cast = builder->create<fir::ConvertOp>(loc, eleTy, val);
+      llvm::APFloat zero{
+          kindMap.getFloatSemantics(toTy.cast<fir::CplxType>().getFKind()), 0};
+      auto imag = builder->createRealConstant(loc, eleTy, zero);
+      return builder->createComplex(loc, toTy, cast, imag);
+    }
+    if (fir::isa_complex(fromTy) && fir::isa_real(toTy)) {
+      // drop the imaginary part
+      auto rp = builder->extractComplexPart(val, /*isImagPart=*/false);
+      return builder->create<fir::ConvertOp>(loc, toTy, rp);
+    }
+    return builder->create<fir::ConvertOp>(loc, toTy, val);
+  }
+
   /// Shared for both assignments and pointer assignments.
   void genFIR(const Fortran::evaluate::Assignment &assignment) {
     std::visit(
@@ -1308,8 +1335,7 @@ private:
                   auto addr = genExprAddr(assignment.lhs);
                   auto val = genExprValue(assignment.rhs);
                   auto toTy = fir::dyn_cast_ptrEleTy(addr.getType());
-                  assert(toTy && "store location must be typed");
-                  auto cast = builder->create<fir::ConvertOp>(loc, toTy, val);
+                  auto cast = convertOnAssign(loc, toTy, val);
                   builder->create<fir::StoreOp>(loc, cast, addr);
                 } else if (isCharacterCategory(lhsType->category())) {
                   // Fortran 2018 10.2.1.3 p10 and p11
@@ -2022,6 +2048,7 @@ private:
   mlir::ModuleOp &module;
   const Fortran::common::IntrinsicTypeDefaultKinds &defaults;
   Fortran::lower::FirOpBuilder *builder = nullptr;
+  const fir::KindMapping &kindMap;
   fir::NameUniquer &uniquer;
   Fortran::lower::SymMap localSymbols;
   Fortran::parser::CharBlock currentPosition;
@@ -2048,8 +2075,8 @@ void Fortran::lower::LoweringBridge::parseSourceFile(llvm::SourceMgr &srcMgr) {
 Fortran::lower::LoweringBridge::LoweringBridge(
     const Fortran::common::IntrinsicTypeDefaultKinds &defaultKinds,
     const Fortran::parser::CookedSource *cooked)
-    : defaultKinds{defaultKinds}, cooked{cooked} {
-  context = std::make_unique<mlir::MLIRContext>();
+    : defaultKinds{defaultKinds}, cooked{cooked},
+      context{std::make_unique<mlir::MLIRContext>()}, kindMap{context.get()} {
   module = std::make_unique<mlir::ModuleOp>(
       mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get())));
 }

@@ -42,6 +42,11 @@ Fortran::lower::FirOpBuilder::createIntegerConstant(mlir::Type intType,
   return createHere<mlir::ConstantOp>(intType, getIntegerAttr(intType, cst));
 }
 
+mlir::Value Fortran::lower::FirOpBuilder::createRealConstant(
+    mlir::Location loc, mlir::Type realType, const llvm::APFloat &val) {
+  return create<mlir::ConstantOp>(loc, realType, getFloatAttr(realType, val));
+}
+
 /// Create a temporary variable on the stack. Anonymous temporaries have no
 /// `name` value.
 mlir::Value Fortran::lower::FirOpBuilder::createTemporary(
@@ -569,22 +574,16 @@ mlir::Type Fortran::lower::CharacterOpsBuilder<T>::getLengthType() {
 }
 template mlir::Type Fortran::lower::CharacterOpsBuilder<
     Fortran::lower::FirOpBuilder>::getLengthType();
+
 //===----------------------------------------------------------------------===//
 // ComplexOpsBuilder implementation
 //===----------------------------------------------------------------------===//
 
 template <typename T>
 mlir::Type Fortran::lower::ComplexOpsBuilder<T>::getComplexPartType(
-    fir::KindTy complexKind) {
-  return convertReal(impl().getContext(), complexKind);
-}
-template mlir::Type Fortran::lower::ComplexOpsBuilder<
-    Fortran::lower::FirOpBuilder>::getComplexPartType(fir::KindTy);
-
-template <typename T>
-mlir::Type Fortran::lower::ComplexOpsBuilder<T>::getComplexPartType(
     mlir::Type complexType) {
-  return getComplexPartType(complexType.cast<fir::CplxType>().getFKind());
+  return Fortran::lower::convertReal(
+      complexType.getContext(), complexType.cast<fir::CplxType>().getFKind());
 }
 template mlir::Type Fortran::lower::ComplexOpsBuilder<
     Fortran::lower::FirOpBuilder>::getComplexPartType(mlir::Type);
@@ -607,6 +606,16 @@ mlir::Value Fortran::lower::ComplexOpsBuilder<T>::createComplex(
 template mlir::Value Fortran::lower::ComplexOpsBuilder<
     Fortran::lower::FirOpBuilder>::createComplex(fir::KindTy, mlir::Value,
                                                  mlir::Value);
+
+template <typename T>
+mlir::Value Fortran::lower::ComplexOpsBuilder<T>::createComplex(
+    mlir::Location loc, mlir::Type cplxTy, mlir::Value real, mlir::Value imag) {
+  mlir::Value und = impl().template create<fir::UndefOp>(loc, cplxTy);
+  return insert<Part::Imag>(insert<Part::Real>(und, real), imag);
+}
+template mlir::Value Fortran::lower::ComplexOpsBuilder<
+    Fortran::lower::FirOpBuilder>::createComplex(mlir::Location, mlir::Type,
+                                                 mlir::Value, mlir::Value);
 
 template <typename T>
 mlir::Value Fortran::lower::ComplexOpsBuilder<T>::createComplexCompare(
