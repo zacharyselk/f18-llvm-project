@@ -1662,9 +1662,9 @@ private:
         for (unsigned i = 0, end = arrTy.getDimension(); i < end; ++i)
           if (typeShape[i] == fir::SequenceType::getUnknownExtent())
             args.push_back(shape[i]);
-        return builder->create<fir::AllocaOp>(loc, ty, nm, llvm::None, args);
+        return builder->allocateLocal(loc, ty, nm, args);
       }
-    return builder->create<fir::AllocaOp>(loc, ty, nm, llvm::None, shape);
+    return builder->allocateLocal(loc, ty, nm, shape);
   }
 
   /// Instantiate a local variable. Precondition: Each variable will be visited
@@ -1776,8 +1776,14 @@ private:
       } else {
         // cast to the known constant parts from the declaration
         auto castTy = fir::ReferenceType::get(genType(sym));
-        if (addr)
-          addr = builder->create<fir::ConvertOp>(loc, castTy, addr);
+        if (addr) {
+          // XXX: special handling for boxchar; see proviso above
+          if (auto box =
+                  dyn_cast_or_null<fir::EmboxCharOp>(addr.getDefiningOp()))
+            addr = builder->create<fir::ConvertOp>(loc, castTy, box.memref());
+          else
+            addr = builder->create<fir::ConvertOp>(loc, castTy, addr);
+        }
       }
       // construct constants and populate `bounds`
       for (const auto &i : llvm::zip(sia.staticLBound, sia.staticShape)) {
@@ -1853,7 +1859,10 @@ private:
         return;
       }
       assert(!mustBeDummy);
-      auto local = createNewLocal(loc, sym);
+      auto charTy = genType(sym);
+      auto c = sia.getCharLenConst();
+      mlir::Value local = c ? builder->createCharacterTemp(charTy, *c)
+                            : builder->createCharacterTemp(charTy, len);
       addCharSymbol(sym, local, len);
       return;
     }
