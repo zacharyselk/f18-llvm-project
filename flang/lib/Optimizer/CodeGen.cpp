@@ -1089,7 +1089,7 @@ struct ConvertOpConversion : public FIROpConversion<fir::ConvertOp> {
   static mlir::Type getComplexEleTy(mlir::Type complex) {
     if (auto cc = complex.dyn_cast<mlir::ComplexType>())
       return cc.getElementType();
-    return complex.cast<fir::CplxType>().getEleTy();
+    return complex.cast<fir::CplxType>().getElementType();
   }
 };
 
