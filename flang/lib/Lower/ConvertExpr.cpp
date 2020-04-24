@@ -126,9 +126,7 @@ class ExprLowering {
     return res.getResult();
   }
 
-  mlir::Type getSomeKindInteger() {
-    return mlir::IndexType::get(builder.getContext());
-  }
+  mlir::Type getSomeKindInteger() { return builder.getIndexType(); }
 
   template <typename OpTy, typename A>
   mlir::Value createBinaryOp(const A &ex, mlir::Value lhs, mlir::Value rhs) {
