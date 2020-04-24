@@ -47,6 +47,29 @@ mlir::Value Fortran::lower::FirOpBuilder::createRealConstant(
   return create<mlir::ConstantOp>(loc, realType, getFloatAttr(realType, val));
 }
 
+// This seems a bit hacky. The scaling ssa-values must be type `index`. Should
+// these just be constructed with the correct type, rather than massaged lazily
+// here?
+mlir::Value
+Fortran::lower::FirOpBuilder::allocateLocal(mlir::Location loc, mlir::Type ty,
+                                            llvm::StringRef nm,
+                                            llvm::ArrayRef<mlir::Value> shape) {
+  llvm::SmallVector<mlir::Value, 8> indices;
+  auto idxTy = getIndexType();
+  llvm::for_each(shape, [&](mlir::Value sh) {
+    if (sh.getType().isa<mlir::IndexType>()) {
+      indices.push_back(sh);
+    } else {
+      auto cast = create<fir::ConvertOp>(loc, idxTy, sh);
+      indices.push_back(cast);
+    }
+  });
+  // FIXME: have the builder drop the attribute when the name is empty
+  if (nm.size())
+    return create<fir::AllocaOp>(loc, ty, nm, llvm::None, indices);
+  return create<fir::AllocaOp>(loc, ty, llvm::None, indices);
+}
+
 /// Create a temporary variable on the stack. Anonymous temporaries have no
 /// `name` value.
 mlir::Value Fortran::lower::FirOpBuilder::createTemporary(
@@ -109,11 +132,11 @@ void Fortran::lower::FirOpBuilder::createLoop(
   assert(step && "step must be an actual Value");
   auto inc = convertToIndexType(step);
   auto loop = createHere<fir::LoopOp>(lbi, ubi, inc);
-  auto *insPt = getInsertionBlock();
+  auto insertPt = saveInsertionPoint();
   setInsertionPointToStart(loop.getBody());
   auto index = loop.getInductionVar();
   bodyGenerator(*this, index);
-  setInsertionPointToEnd(insPt);
+  restoreInsertionPoint(insertPt);
 }
 
 void Fortran::lower::FirOpBuilder::createLoop(
@@ -230,10 +253,12 @@ struct CharacterOpsBuilderImpl {
       assert(shape.size() == 1 && "only scalar character supported");
       // Materialize length for usage into character manipulations.
       auto len = builder.createIntegerConstant(lenType, shape[0]);
+      // FIXME: this seems to work for tests, but don't think it is correct
+      if (auto load = dyn_cast<fir::LoadOp>(character.getDefiningOp()))
+        return {load.memref(), len};
       return {character, len};
     }
     llvm_unreachable("unexpected character type");
-    return {};
   }
 
   mlir::Value createEmbox(Char str) {
@@ -291,9 +316,9 @@ struct CharacterOpsBuilderImpl {
 
   Char createTemp(mlir::Type type, mlir::Value len) {
     assert(type.isa<fir::CharacterType>() && "expected fir character type");
-    llvm::SmallVector<mlir::Value, 0> lengths;
     llvm::SmallVector<mlir::Value, 3> sizes{len};
-    auto ref = builder.createHere<fir::AllocaOp>(type, lengths, sizes);
+    auto ref =
+        builder.allocateLocal(builder.getLoc(), type, llvm::StringRef{}, sizes);
     return {ref, len};
   }
 
@@ -570,7 +595,8 @@ template int Fortran::lower::CharacterOpsBuilder<
 
 template <typename T>
 mlir::Type Fortran::lower::CharacterOpsBuilder<T>::getLengthType() {
-  return mlir::IntegerType::get(64, impl().getContext());
+  // FIXME: make this IndexType? Breaks some tests though.
+  return impl().getIntegerType(64);
 }
 template mlir::Type Fortran::lower::CharacterOpsBuilder<
     Fortran::lower::FirOpBuilder>::getLengthType();

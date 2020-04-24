@@ -3,8 +3,6 @@ ______________
 
 [Eric]
 
-  . unexpected character type
-
 [Varun]
 
   DATA statement
@@ -21,6 +19,8 @@ ______________
   
 FIXED
 _____
+
+unexpected character type [xerbla]
 
 error: 'fir.convert' related to assignments
 
