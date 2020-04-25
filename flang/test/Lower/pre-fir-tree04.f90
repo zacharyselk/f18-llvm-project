@@ -1,4 +1,5 @@
-! RUN: %f18_with_includes -fdebug-pre-fir-tree -fparse-only %s | FileCheck %s
+! RUN: bbc -pft-test -o %t %s | FileCheck %s
+! XFAIL: *
 
 ! Test Pre-FIR Tree captures all the coarray related statements
 
