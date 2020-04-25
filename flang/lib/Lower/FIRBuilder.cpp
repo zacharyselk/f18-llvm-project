@@ -153,6 +153,38 @@ void Fortran::lower::FirOpBuilder::createLoop(
   createLoop(zero, up, one, bodyGenerator);
 }
 
+/// The LHS and RHS on assignments are not always in agreement in terms of
+/// type. In some cases, the disagreement is between COMPLEX and REAL types.
+/// In that case, the assignment must insert/extract out of a COMPLEX value to
+/// be correct and strongly typed.
+mlir::Value Fortran::lower::FirOpBuilder::convertOnAssign(mlir::Location loc,
+                                                          mlir::Type toTy,
+                                                          mlir::Value val) {
+  assert(toTy && "store location must be typed");
+  auto fromTy = val.getType();
+  if (fromTy == toTy)
+    return val;
+  // FIXME: add a fir::is_integer() test
+  if ((fir::isa_real(fromTy) || fromTy.isSignlessInteger()) &&
+      fir::isa_complex(toTy)) {
+    // imaginary part is zero
+    auto eleTy = getComplexPartType(toTy);
+    auto cast = create<fir::ConvertOp>(loc, eleTy, val);
+    llvm::APFloat zero{
+        kindMap.getFloatSemantics(toTy.cast<fir::CplxType>().getFKind()), 0};
+    auto imag = createRealConstant(loc, eleTy, zero);
+    return createComplex(loc, toTy, cast, imag);
+  }
+  // FIXME: add a fir::is_integer() test
+  if ((fir::isa_complex(fromTy) || fromTy.isSignlessInteger()) &&
+      fir::isa_real(toTy)) {
+    // drop the imaginary part
+    auto rp = extractComplexPart(val, /*isImagPart=*/false);
+    return create<fir::ConvertOp>(loc, toTy, rp);
+  }
+  return create<fir::ConvertOp>(loc, toTy, val);
+}
+
 mlir::Value
 Fortran::lower::FirOpBuilder::convertToIndexType(mlir::Value integer) {
   // abort now if not an integral type
