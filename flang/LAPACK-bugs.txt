@@ -17,10 +17,9 @@ ______________
 FIXED
 _____
 
-
 unexpected character type [xerbla]
 
-intrinsics: zhemm.f:304:27: 'fir.convert' op invalid type conversion
+intrinsics: 'fir.convert' op invalid type conversion
 
 error: 'fir.convert' related to assignments
 
