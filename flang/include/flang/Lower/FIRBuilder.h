@@ -19,6 +19,7 @@
 #include "flang/Common/reference.h"
 #include "flang/Optimizer/Dialect/FIROps.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
+#include "flang/Optimizer/Support/KindMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Function.h"
 #include "mlir/IR/Module.h"
@@ -222,7 +223,8 @@ class FirOpBuilder : public mlir::OpBuilder,
                      public ComplexOpsBuilder<FirOpBuilder>,
                      public IntrinsicCallOpsBuilder<FirOpBuilder> {
 public:
-  using OpBuilder::OpBuilder;
+  explicit FirOpBuilder(mlir::Operation *op, const fir::KindMapping &kindMap)
+      : OpBuilder{op}, kindMap{kindMap} {}
 
   /// TODO: remove this as caching the location may have the location
   /// unexpectedly overridden along the way.
@@ -250,6 +252,11 @@ public:
   mlir::FuncOp getFunction() {
     return getRegion().getParentOfType<mlir::FuncOp>();
   }
+
+  const fir::KindMapping &getKindMap() { return kindMap; }
+
+  mlir::Value convertOnAssign(mlir::Location loc, mlir::Type toTy,
+                              mlir::Value val);
 
   /// Get the entry block of the current Function
   mlir::Block *getEntryBlock() { return &getFunction().front(); }
@@ -394,6 +401,7 @@ public:
 
 private:
   llvm::Optional<mlir::Location> currentLoc{};
+  const fir::KindMapping &kindMap;
 };
 
 } // namespace Fortran::lower
