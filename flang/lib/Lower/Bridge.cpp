@@ -71,7 +71,7 @@ struct IncrementLoopInfo {
       : loopVariableSym{sym}, lowerExpr{lowerExpr}, upperExpr{upperExpr},
         stepExpr{stepExpr}, loopVariableType{type} {}
 
-  bool isStructured() const { return headerBlock == nullptr; }
+  bool isStructured() const { return !headerBlock; }
 
   // Data members for both structured and unstructured loops.
   Fortran::semantics::Symbol *loopVariableSym;
@@ -79,6 +79,7 @@ struct IncrementLoopInfo {
   const Fortran::parser::ScalarExpr &upperExpr;
   const std::optional<Fortran::parser::ScalarExpr> &stepExpr;
   mlir::Type loopVariableType;
+
   mlir::Value loopVariable{};
   mlir::Value stepValue{}; // possible uses in multiple blocks
 
@@ -137,6 +138,8 @@ struct SymbolIndexAnalyzer {
   SymbolIndexAnalyzer() = delete;
   SymbolIndexAnalyzer(const SymbolIndexAnalyzer &) = delete;
 
+  /// Run the analysis on the symbol. Used to determine the type of index to
+  /// save in the symbol map.
   void analyze() {
     isChar = symIsChar(sym);
     if (isChar) {
@@ -173,6 +176,7 @@ struct SymbolIndexAnalyzer {
     }
   }
 
+  /// Get the shape of an analyzed symbol.
   const Fortran::semantics::ArraySpec &getSymShape() {
     return sym.get<Fortran::semantics::ObjectEntityDetails>().shape();
   }
@@ -198,8 +202,10 @@ struct SymbolIndexAnalyzer {
     return isChar && std::holds_alternative<int64_t>(charLen);
   }
 
+  /// Symbol is neither a CHARACTER nor an array.
   bool isTrivial() const { return !(isChar || isArray); }
 
+  /// Return true iff all the lower bound values are the constant 1.
   bool lboundIsAllOnes() const {
     return staticSize &&
            llvm::all_of(staticLBound, [](int64_t v) { return v == 1; });
@@ -358,10 +364,6 @@ private:
                             const Fortran::semantics::SomeExpr *expr) {
     return createSomeExpression(loc, *this, *expr, localSymbols);
   }
-  mlir::Value createLogicalExprAsI1(mlir::Location loc,
-                                    const Fortran::semantics::SomeExpr *expr) {
-    return createI1LogicalExpression(loc, *this, *expr, localSymbols);
-  }
 
   /// Find the symbol in the local map or return null.
   mlir::Value lookupSymbol(const Fortran::semantics::Symbol &sym) {
@@ -441,8 +443,7 @@ private:
                                Fortran::lower::pft::Evaluation *falseTarget) {
     assert(trueTarget && "missing conditional branch true block");
     assert(falseTarget && "missing conditional branch true block");
-    mlir::Value cond =
-        createLogicalExprAsI1(toLocation(), Fortran::semantics::GetExpr(expr));
+    mlir::Value cond = genExprValue(*Fortran::semantics::GetExpr(expr));
     genFIRConditionalBranch(cond, trueTarget->block, falseTarget->block);
   }
 
@@ -502,16 +503,14 @@ private:
   //
 
   template <typename A>
-  mlir::OpBuilder::InsertPoint
-  genWhereCondition(fir::WhereOp &where, const A *stmt, bool withElse = true) {
-    auto cond = createLogicalExprAsI1(
-        toLocation(),
-        Fortran::semantics::GetExpr(
-            std::get<Fortran::parser::ScalarLogicalExpr>(stmt->t)));
-    where = builder->create<fir::WhereOp>(toLocation(), cond, withElse);
+  std::pair<mlir::OpBuilder::InsertPoint, fir::WhereOp>
+  genWhereCondition(const A *stmt, bool withElse = true) {
+    auto cond = genExprValue(*Fortran::semantics::GetExpr(
+        std::get<Fortran::parser::ScalarLogicalExpr>(stmt->t)));
+    auto where = builder->create<fir::WhereOp>(toLocation(), cond, withElse);
     auto insPt = builder->saveInsertionPoint();
     builder->setInsertionPointToStart(&where.whereRegion().front());
-    return insPt;
+    return {insPt, where};
   }
 
   mlir::Value genFIRLoopIndex(const Fortran::parser::ScalarExpr &x,
@@ -551,11 +550,10 @@ private:
     }
 
     // Generate fir.where.
-    fir::WhereOp where;
-    auto insPt = genWhereCondition(where, &stmt, /*withElse=*/false);
+    auto pair = genWhereCondition(&stmt, /*withElse=*/false);
     genFIR(*eval.lexicalSuccessor, /*unstructuredContext=*/false);
     eval.lexicalSuccessor->skip = true;
-    builder->restoreInsertionPoint(insPt);
+    builder->restoreInsertionPoint(pair.first);
   }
 
   void genFIR(Fortran::lower::pft::Evaluation &eval,
@@ -863,11 +861,11 @@ private:
       for (auto &e : *eval.evaluationList) {
         if (auto *s = e.getIf<Fortran::parser::IfThenStmt>()) {
           // fir.where op
-          insPt = genWhereCondition(underWhere, s);
+          std::tie(insPt, underWhere) = genWhereCondition(s);
         } else if (auto *s = e.getIf<Fortran::parser::ElseIfStmt>()) {
           // otherwise block, then nested fir.where
           builder->setInsertionPointToStart(&underWhere.otherRegion().front());
-          genWhereCondition(underWhere, s);
+          std::tie(std::ignore, underWhere) = genWhereCondition(s);
         } else if (e.isA<Fortran::parser::ElseStmt>()) {
           // otherwise block
           builder->setInsertionPointToStart(&underWhere.otherRegion().front());
@@ -1144,11 +1142,9 @@ private:
     TODO();
   }
 
-  //
-  // Statements that do not have control-flow semantics
-  //
-
+  //===--------------------------------------------------------------------===//
   // IO statements (see io.h)
+  //===--------------------------------------------------------------------===//
 
   void genFIR(Fortran::lower::pft::Evaluation &eval,
               const Fortran::parser::BackspaceStmt &stmt) {
@@ -1194,18 +1190,51 @@ private:
                       eval.getOwningProcedure()->labelEvaluationMap);
   }
 
+  //===--------------------------------------------------------------------===//
+  // Memory allocation and deallocation
+  //===--------------------------------------------------------------------===//
+
   void genFIR(Fortran::lower::pft::Evaluation &eval,
               const Fortran::parser::AllocateStmt &) {
     TODO();
   }
 
   void genFIR(Fortran::lower::pft::Evaluation &eval,
-              const Fortran::parser::ContinueStmt &) {
-    // do nothing
-  }
-  void genFIR(Fortran::lower::pft::Evaluation &eval,
               const Fortran::parser::DeallocateStmt &) {
     TODO();
+  }
+
+  /// Nullify pointer object list
+  ///
+  /// For each pointer object, reset the pointer to a disassociated status.
+  /// We do this by setting each pointer to null.
+  void genFIR(Fortran::lower::pft::Evaluation &eval,
+              const Fortran::parser::NullifyStmt &stmt) {
+    for (auto &po : stmt.v) {
+      std::visit(
+          Fortran::common::visitors{
+              [&](const Fortran::parser::Name &sym) {
+                auto ty = genType(*sym.symbol);
+                auto load = builder->create<fir::LoadOp>(
+                    toLocation(), lookupSymbol(*sym.symbol));
+                auto idxTy = mlir::IndexType::get(&mlirContext);
+                auto zero = builder->create<mlir::ConstantOp>(
+                    toLocation(), idxTy, builder->getIntegerAttr(idxTy, 0));
+                auto cast =
+                    builder->create<fir::ConvertOp>(toLocation(), ty, zero);
+                builder->create<fir::StoreOp>(toLocation(), cast, load);
+              },
+              [&](const Fortran::parser::StructureComponent &) { TODO(); },
+          },
+          po.u);
+    }
+  }
+
+  //===--------------------------------------------------------------------===//
+
+  void genFIR(Fortran::lower::pft::Evaluation &,
+              const Fortran::parser::ContinueStmt &) {
+    // do nothing
   }
 
   // We don't have runtime library support for various features. When they are
@@ -1236,32 +1265,6 @@ private:
               const Fortran::parser::LockStmt &) {
     // FIXME: There is no runtime call to make for this yet.
     noRuntimeSupport("LOCK");
-  }
-
-  /// Nullify pointer object list
-  ///
-  /// For each pointer object, reset the pointer to a disassociated status.
-  /// We do this by setting each pointer to null.
-  void genFIR(Fortran::lower::pft::Evaluation &eval,
-              const Fortran::parser::NullifyStmt &stmt) {
-    for (auto &po : stmt.v) {
-      std::visit(
-          Fortran::common::visitors{
-              [&](const Fortran::parser::Name &sym) {
-                auto ty = genType(*sym.symbol);
-                auto load = builder->create<fir::LoadOp>(
-                    toLocation(), lookupSymbol(*sym.symbol));
-                auto idxTy = mlir::IndexType::get(&mlirContext);
-                auto zero = builder->create<mlir::ConstantOp>(
-                    toLocation(), idxTy, builder->getIntegerAttr(idxTy, 0));
-                auto cast =
-                    builder->create<fir::ConvertOp>(toLocation(), ty, zero);
-                builder->create<fir::StoreOp>(toLocation(), cast, load);
-              },
-              [&](const Fortran::parser::StructureComponent &) { TODO(); },
-          },
-          po.u);
-    }
   }
 
   /// The LHS and RHS on assignments are not always in agreement in terms of
@@ -1309,9 +1312,11 @@ private:
                 auto lhsType = assignment.lhs.GetType();
                 assert(lhsType && "lhs cannot be typeless");
                 if (isNumericScalarCategory(lhsType->category())) {
-                  builder->create<fir::StoreOp>(toLocation(),
-                                                genExprValue(assignment.rhs),
-                                                genExprValue(assignment.lhs));
+                  auto val = genExprValue(assignment.rhs);
+                  auto addr = genExprValue(assignment.lhs);
+                  auto toTy = fir::dyn_cast_ptrEleTy(addr.getType());
+                  auto cast = convertOnAssign(toLocation(), toTy, val);
+                  builder->create<fir::StoreOp>(toLocation(), cast, addr);
                 } else if (isCharacterCategory(lhsType->category())) {
                   TODO();
                 } else {
