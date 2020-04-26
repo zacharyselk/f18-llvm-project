@@ -43,12 +43,24 @@ namespace {
 
 /// Lowering of Fortran::evaluate::Expr<T> expressions
 class ExprLowering {
+public:
+  explicit ExprLowering(mlir::Location loc,
+                        Fortran::lower::AbstractConverter &converter,
+                        const Fortran::lower::SomeExpr &vop,
+                        Fortran::lower::SymMap &map)
+      : location{loc}, converter{converter},
+        builder{converter.getFirOpBuilder()}, expr{vop}, symMap{map} {}
+
+  /// Lower the expression `expr` into MLIR standard dialect
+  mlir::Value gen() { return gen(expr); }
+  mlir::Value genval() { return genval(expr); }
+
+private:
   mlir::Location location;
   Fortran::lower::AbstractConverter &converter;
   Fortran::lower::FirOpBuilder &builder;
   const Fortran::lower::SomeExpr &expr;
   Fortran::lower::SymMap &symMap;
-  bool genLogicalAsI1{false};
 
   mlir::Location getLoc() { return location; }
 
@@ -106,13 +118,12 @@ class ExprLowering {
                                  std::int64_t value) {
     auto type = converter.genType(Fortran::lower::IntegerCat, KIND);
     auto attr = builder.getIntegerAttr(type, value);
-    auto res = builder.create<mlir::ConstantOp>(getLoc(), type, attr);
-    return res.getResult();
+    return builder.create<mlir::ConstantOp>(getLoc(), type, attr);
   }
 
   /// Generate a logical/boolean constant of `value`
   mlir::Value genLogicalConstantAsI1(mlir::MLIRContext *context, bool value) {
-    auto i1Type = mlir::IntegerType::get(1, builder.getContext());
+    auto i1Type = builder.getI1Type();
     auto attr = builder.getIntegerAttr(i1Type, value ? 1 : 0);
     return builder.create<mlir::ConstantOp>(getLoc(), i1Type, attr).getResult();
   }
@@ -218,10 +229,18 @@ class ExprLowering {
 
   mlir::Value gendef(Fortran::semantics::SymbolRef sym) { return gen(sym); }
 
+  /// Loading a LOGICAL immediately converts to an `i1` bool value.
+  mlir::Value genLoad(mlir::Value addr) {
+    auto val = builder.create<fir::LoadOp>(getLoc(), addr);
+    if (val.getType().isa<fir::LogicalType>())
+      return builder.create<fir::ConvertOp>(getLoc(), builder.getI1Type(), val);
+    return val;
+  }
+
   mlir::Value genval(Fortran::semantics::SymbolRef sym) {
     auto var = gen(sym);
     if (fir::isReferenceLike(var.getType()))
-      return builder.create<fir::LoadOp>(getLoc(), var);
+      return genLoad(var);
     return var;
   }
 
@@ -232,6 +251,7 @@ class ExprLowering {
     TODO();
   }
   mlir::Value genval(const Fortran::evaluate::ImpliedDoIndex &) { TODO(); }
+
   mlir::Value genval(const Fortran::evaluate::DescriptorInquiry &desc) {
     auto descRef = symMap.lookupSymbol(desc.base().GetLastSymbol());
     assert(descRef && "no mlir::Value associated to Symbol");
@@ -240,7 +260,7 @@ class ExprLowering {
     switch (desc.field()) {
     case Fortran::evaluate::DescriptorInquiry::Field::Len:
       if (descType.isa<fir::BoxCharType>()) {
-        auto lenType{mlir::IntegerType::get(64, builder.getContext())};
+        auto lenType = builder.getLengthType();
         res = builder.create<fir::BoxCharLenOp>(getLoc(), lenType, descRef);
       } else if (descType.isa<fir::BoxType>()) {
         TODO();
@@ -416,7 +436,7 @@ class ExprLowering {
                                           TC2> &convert) {
     auto ty = converter.genType(TC1, KIND);
     auto operand = genval(convert.left());
-    if (TC1 == Fortran::lower::LogicalCat && genLogicalAsI1) {
+    if (TC1 == Fortran::lower::LogicalCat) {
       // If an i1 result is needed, it does not make sens to convert between
       // `fir.logical` types to later convert back to the result to i1.
       return operand;
@@ -433,7 +453,6 @@ class ExprLowering {
   template <int KIND>
   mlir::Value genval(const Fortran::evaluate::Not<KIND> &op) {
     // Request operands to be generated as `i1` and restore after this scope.
-    auto restorer = Fortran::common::ScopedSet(genLogicalAsI1, true);
     auto *context = builder.getContext();
     auto logical = genval(op.left());
     auto one = genLogicalConstantAsI1(context, true);
@@ -443,7 +462,6 @@ class ExprLowering {
   template <int KIND>
   mlir::Value genval(const Fortran::evaluate::LogicalOperation<KIND> &op) {
     // Request operands to be generated as `i1` and restore after this scope.
-    auto restorer = Fortran::common::ScopedSet(genLogicalAsI1, true);
     mlir::Value result;
     switch (op.logicalOperator) {
     case Fortran::evaluate::LogicalOperator::And:
@@ -675,7 +693,7 @@ class ExprLowering {
     return gen(cmpt);
   }
   mlir::Value genval(const Fortran::evaluate::Component &cmpt) {
-    return builder.create<fir::LoadOp>(getLoc(), gen(cmpt));
+    return genLoad(gen(cmpt));
   }
 
   // Determine the result type after removing `dims` dimensions from the array
@@ -814,7 +832,7 @@ class ExprLowering {
   }
 
   mlir::Value genval(const Fortran::evaluate::ArrayRef &aref) {
-    return builder.create<fir::LoadOp>(getLoc(), gen(aref));
+    return genLoad(gen(aref));
   }
 
   // Return a coordinate of the coarray reference. This is necessary as a
@@ -828,7 +846,7 @@ class ExprLowering {
     return gen(coref);
   }
   mlir::Value genval(const Fortran::evaluate::CoarrayRef &coref) {
-    return builder.create<fir::LoadOp>(getLoc(), gen(coref));
+    return genLoad(gen(coref));
   }
 
   template <typename A>
@@ -872,7 +890,6 @@ class ExprLowering {
     // conversions (e.g scalar MASK of MERGE will be converted to `i1`), but
     // the generated code is at least correct. To improve this, the intrinsic
     // lowering facility should control argument lowering.
-    auto restorer = Fortran::common::ScopedSet(genLogicalAsI1, false);
     for (const auto &arg : procRef.arguments()) {
       if (auto *expr = Fortran::evaluate::UnwrapExpr<
               Fortran::evaluate::Expr<Fortran::evaluate::SomeType>>(arg)) {
@@ -898,7 +915,6 @@ class ExprLowering {
     llvm::SmallVector<mlir::Value, 2> operands;
     // Logical arguments of user functions must be lowered to `fir.logical`
     // and not `i1`.
-    auto restorer = Fortran::common::ScopedSet(genLogicalAsI1, false);
     for (const auto &arg : procRef.arguments()) {
       if (!arg.has_value())
         TODO(); // optional arguments
@@ -975,30 +991,7 @@ class ExprLowering {
   mlir::Value
   genval(const Fortran::evaluate::Expr<
          Fortran::evaluate::Type<Fortran::lower::LogicalCat, KIND>> &exp) {
-    auto result = std::visit([&](const auto &e) { return genval(e); }, exp.u);
-    // Handle the `i1` to `fir.logical` conversions as needed.
-    if (result) {
-      mlir::Type type = result.getType();
-      if (type.isa<fir::LogicalType>()) {
-        if (genLogicalAsI1)
-          result = builder.create<fir::ConvertOp>(getLoc(), builder.getI1Type(),
-                                                  result);
-      } else if (type.isa<mlir::IntegerType>()) {
-        if (!genLogicalAsI1) {
-          auto firLogicalType =
-              converter.genType(Fortran::lower::LogicalCat, KIND);
-          result =
-              builder.create<fir::ConvertOp>(getLoc(), firLogicalType, result);
-        }
-      } else if (auto seqType{type.dyn_cast_or_null<fir::SequenceType>()}) {
-        // TODO: Conversions at array level should probably be avoided.
-        // This depends on how array expressions will be lowered.
-        llvm_unreachable("logical array loads not yet implemented");
-      } else {
-        llvm_unreachable("unexpected logical type in expression");
-      }
-    }
-    return result;
+    return std::visit([&](const auto &e) { return genval(e); }, exp.u);
   }
 
   template <typename A>
@@ -1015,19 +1008,6 @@ class ExprLowering {
            "expected intrinsic procedure in designator");
     return proc.GetName();
   }
-
-public:
-  explicit ExprLowering(mlir::Location loc,
-                        Fortran::lower::AbstractConverter &converter,
-                        const Fortran::lower::SomeExpr &vop,
-                        Fortran::lower::SymMap &map, bool logicalAsI1 = false)
-      : location{loc}, converter{converter},
-        builder{converter.getFirOpBuilder()}, expr{vop}, symMap{map},
-        genLogicalAsI1{logicalAsI1} {}
-
-  /// Lower the expression `expr` into MLIR standard dialect
-  mlir::Value gen() { return gen(expr); }
-  mlir::Value genval() { return genval(expr); }
 };
 
 } // namespace
@@ -1036,14 +1016,7 @@ mlir::Value Fortran::lower::createSomeExpression(
     mlir::Location loc, Fortran::lower::AbstractConverter &converter,
     const Fortran::evaluate::Expr<Fortran::evaluate::SomeType> &expr,
     Fortran::lower::SymMap &symMap) {
-  return ExprLowering{loc, converter, expr, symMap, false}.genval();
-}
-
-mlir::Value Fortran::lower::createI1LogicalExpression(
-    mlir::Location loc, Fortran::lower::AbstractConverter &converter,
-    const Fortran::evaluate::Expr<Fortran::evaluate::SomeType> &expr,
-    Fortran::lower::SymMap &symMap) {
-  return ExprLowering{loc, converter, expr, symMap, true}.genval();
+  return ExprLowering{loc, converter, expr, symMap}.genval();
 }
 
 mlir::Value Fortran::lower::createSomeAddress(
