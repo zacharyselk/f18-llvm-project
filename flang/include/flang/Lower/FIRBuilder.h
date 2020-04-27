@@ -78,6 +78,8 @@ public:
   void createAssign(mlir::Value lptr, mlir::Value llen, mlir::Value rptr,
                     mlir::Value rlen);
 
+  mlir::Value createLenTrim(mlir::Value str);
+
   /// Embox \p addr and \p len and return fir.boxchar.
   /// Take care of type conversions before emboxing.
   /// \p len is converted to the integer type for character lengths if needed.
