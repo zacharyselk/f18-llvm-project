@@ -163,7 +163,6 @@ private:
     return builder.createFunction(name, funTy);
   }
 
-  // FIXME binary operation :: ('a, 'a) -> 'a
   template <Fortran::common::TypeCategory TC, int KIND>
   mlir::FunctionType createFunctionType() {
     if constexpr (TC == Fortran::lower::IntegerCat) {
@@ -229,12 +228,8 @@ private:
 
   mlir::Value gendef(Fortran::semantics::SymbolRef sym) { return gen(sym); }
 
-  /// Loading a LOGICAL immediately converts to an `i1` bool value.
   mlir::Value genLoad(mlir::Value addr) {
-    auto val = builder.create<fir::LoadOp>(getLoc(), addr);
-    if (val.getType().isa<fir::LogicalType>())
-      return builder.create<fir::ConvertOp>(getLoc(), builder.getI1Type(), val);
-    return val;
+    return builder.create<fir::LoadOp>(getLoc(), addr);
   }
 
   mlir::Value genval(Fortran::semantics::SymbolRef sym) {
@@ -436,11 +431,6 @@ private:
                                           TC2> &convert) {
     auto ty = converter.genType(TC1, KIND);
     auto operand = genval(convert.left());
-    if (TC1 == Fortran::lower::LogicalCat) {
-      // If an i1 result is needed, it does not make sens to convert between
-      // `fir.logical` types to later convert back to the result to i1.
-      return operand;
-    }
     return builder.create<fir::ConvertOp>(getLoc(), ty, operand);
   }
 
@@ -452,34 +442,38 @@ private:
 
   template <int KIND>
   mlir::Value genval(const Fortran::evaluate::Not<KIND> &op) {
-    // Request operands to be generated as `i1` and restore after this scope.
     auto *context = builder.getContext();
     auto logical = genval(op.left());
     auto one = genLogicalConstantAsI1(context, true);
-    return builder.create<mlir::XOrOp>(getLoc(), logical, one).getResult();
+    auto val =
+        builder.create<fir::ConvertOp>(getLoc(), builder.getI1Type(), logical);
+    return builder.create<mlir::XOrOp>(getLoc(), val, one);
   }
 
   template <int KIND>
   mlir::Value genval(const Fortran::evaluate::LogicalOperation<KIND> &op) {
-    // Request operands to be generated as `i1` and restore after this scope.
     mlir::Value result;
+    auto i1Type = builder.getI1Type();
+    auto lhs =
+        builder.create<fir::ConvertOp>(getLoc(), i1Type, genval(op.left()));
+    auto rhs =
+        builder.create<fir::ConvertOp>(getLoc(), i1Type, genval(op.right()));
     switch (op.logicalOperator) {
     case Fortran::evaluate::LogicalOperator::And:
-      result = createBinaryOp<mlir::AndOp>(op);
+      result = createBinaryOp<mlir::AndOp>(op, lhs, rhs);
       break;
     case Fortran::evaluate::LogicalOperator::Or:
-      result = createBinaryOp<mlir::OrOp>(op);
+      result = createBinaryOp<mlir::OrOp>(op, lhs, rhs);
       break;
     case Fortran::evaluate::LogicalOperator::Eqv:
-      result = createCompareOp<mlir::CmpIOp>(op, mlir::CmpIPredicate::eq);
+      result = createCompareOp<mlir::CmpIOp>(mlir::CmpIPredicate::eq, lhs, rhs);
       break;
     case Fortran::evaluate::LogicalOperator::Neqv:
-      result = createCompareOp<mlir::CmpIOp>(op, mlir::CmpIPredicate::ne);
+      result = createCompareOp<mlir::CmpIOp>(mlir::CmpIPredicate::ne, lhs, rhs);
       break;
     case Fortran::evaluate::LogicalOperator::Not:
       // lib/evaluate expression for .NOT. is Fortran::evaluate::Not<KIND>.
       llvm_unreachable(".NOT. is not a binary operator");
-      break;
     }
     if (!result)
       llvm_unreachable("unhandled logical operation");
@@ -494,7 +488,7 @@ private:
     // FIXME: for wider char types, use an array of i16 or i32
     // for now, just fake it that it's a i8 to get it past the C++ compiler
     if constexpr (KIND == 1) {
-      std::string globalName = converter.uniqueCGIdent(data);
+      std::string globalName = converter.uniqueCGIdent("cl", data);
       auto global = builder.getNamedGlobal(globalName);
       if (!global)
         global = builder.createGlobalConstant(
@@ -913,8 +907,7 @@ private:
     // evaluate::IntrinsicProcTable is required to use it.
     llvm::SmallVector<mlir::Type, 2> argTypes;
     llvm::SmallVector<mlir::Value, 2> operands;
-    // Logical arguments of user functions must be lowered to `fir.logical`
-    // and not `i1`.
+    // Arguments of user functions must be lowered to the correct type.
     for (const auto &arg : procRef.arguments()) {
       if (!arg.has_value())
         TODO(); // optional arguments
