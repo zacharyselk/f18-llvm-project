@@ -494,7 +494,7 @@ private:
     // FIXME: for wider char types, use an array of i16 or i32
     // for now, just fake it that it's a i8 to get it past the C++ compiler
     if constexpr (KIND == 1) {
-      std::string globalName = converter.uniqueCGIdent(data);
+      std::string globalName = converter.uniqueCGIdent("cl", data);
       auto global = builder.getNamedGlobal(globalName);
       if (!global)
         global = builder.createGlobalConstant(
