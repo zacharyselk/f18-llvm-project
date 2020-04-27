@@ -1851,7 +1851,7 @@ def fir_LenParamIndexOp : fir_OneResultOp<"len_param_index", [NoSideEffect]> {
 // Fortran loops
 //===----------------------------------------------------------------------===//
 
-def fir_ResultOp : fir_Op<"result", [Terminator]> {
+def fir_ResultOp : fir_Op<"result", [NoSideEffect, ReturnLike, Terminator]> {
   let summary = "special terminator for use in fir region operations";
 
   let description = [{
