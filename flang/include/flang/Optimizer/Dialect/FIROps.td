@@ -2012,8 +2012,6 @@ def fir_WhereOp : region_Op<"if"> {
       return mlir::OpBuilder(&body, std::prev(body.end()));
     }
   }];
-
-  let hasFolder = 1;
 }
 
 def fir_IterWhileOp : region_Op<"iterate_while",
