@@ -240,7 +240,8 @@ struct CharacterOpsBuilderImpl {
       if (auto seqType = type.dyn_cast<fir::SequenceType>()) {
         auto shape = seqType.getShape();
         assert(shape.size() == 1 && "only scalar character supported");
-        return shape[0];
+        if (shape[0] != fir::SequenceType::getUnknownExtent())
+          return shape[0];
       }
       return {};
     }
@@ -422,10 +423,17 @@ struct CharacterOpsBuilderImpl {
     }
   }
 
+  // Returns integer with code for blank. The integer has the same
+  // size as the character. Blank has ascii space code for all kinds.
+  mlir::Value createBlankConstantCode(fir::CharacterType type) {
+    auto bits = builder.getKindMap().getCharacterBitsize(type.getFKind());
+    auto intType = builder.getIntegerType(bits);
+    return builder.createIntegerConstant(intType, 0x20);
+  }
+
   mlir::Value createBlankConstant(fir::CharacterType type) {
-    auto byteTy = mlir::IntegerType::get(8, builder.getContext());
-    auto asciiSpace = builder.createIntegerConstant(byteTy, 0x20);
-    return builder.createHere<fir::ConvertOp>(type, asciiSpace);
+    auto blank = createBlankConstantCode(type);
+    return builder.createHere<fir::ConvertOp>(type, blank);
   }
 
   Char createSubstring(Char str, llvm::ArrayRef<mlir::Value> bounds) {
@@ -439,23 +447,29 @@ struct CharacterOpsBuilderImpl {
                       "Incorrect number of bounds in substring");
       return {mlir::Value{}, mlir::Value{}};
     }
-    auto indexType = mlir::IndexType::get(builder.getContext());
-    auto lowerBound = builder.createHere<fir::ConvertOp>(indexType, bounds[0]);
+    mlir::SmallVector<mlir::Value, 2> castBounds;
+    // Convert bounds to length type to do safe arithmetic on it.
+    for (auto bound : bounds)
+      castBounds.push_back(
+          builder.createHere<fir::ConvertOp>(builder.getLengthType(), bound));
+    auto lowerBound = castBounds[0];
     // FIR CoordinateOp is zero based but Fortran substring are one based.
-    auto oneIndex = builder.createIntegerConstant(indexType, 1);
-    auto offsetIndex =
-        builder.createHere<mlir::SubIOp>(lowerBound, oneIndex).getResult();
+    auto one = builder.createIntegerConstant(lowerBound.getType(), 1);
+    auto offset = builder.createHere<mlir::SubIOp>(lowerBound, one).getResult();
+    auto idxType = builder.getIndexType();
+    if (offset.getType() != idxType)
+      offset = builder.createHere<fir::ConvertOp>(idxType, offset);
     auto substringRef = builder.createHere<fir::CoordinateOp>(
-        str.getReferenceType(), str.data, offsetIndex);
+        str.getReferenceType(), str.data, offset);
 
     // Compute the length.
     mlir::Value substringLen{};
     if (nbounds < 2) {
-      substringLen = builder.createHere<mlir::SubIOp>(str.len, bounds[0]);
+      substringLen = builder.createHere<mlir::SubIOp>(str.len, castBounds[0]);
     } else {
-      substringLen = builder.createHere<mlir::SubIOp>(bounds[1], bounds[0]);
+      substringLen =
+          builder.createHere<mlir::SubIOp>(castBounds[1], castBounds[0]);
     }
-    auto one = builder.createIntegerConstant(substringLen.getType(), 1);
     substringLen = builder.createHere<mlir::AddIOp>(substringLen, one);
 
     // Set length to zero if bounds were reversed (Fortran 2018 9.4.1)
@@ -466,6 +480,40 @@ struct CharacterOpsBuilderImpl {
 
     return {substringRef, substringLen};
   }
+
+  mlir::Value createLenTrim(Char str) {
+    // Note: Runtime for LEN_TRIM should also be available at some
+    // point. For now use an inlined implementation.
+    auto indexType = builder.getIndexType();
+    mlir::Value len = builder.createHere<fir::ConvertOp>(indexType, str.len);
+    auto one = builder.createIntegerConstant(indexType, 1);
+    auto minusOne = builder.createIntegerConstant(indexType, -1);
+    auto zero = builder.createIntegerConstant(indexType, 0);
+    auto trueVal = builder.createIntegerConstant(builder.getI1Type(), 1);
+    auto blank = createBlankConstantCode(str.getCharacterType());
+    mlir::Value lastChar = builder.createHere<mlir::SubIOp>(len, one);
+
+    auto iterWhile = builder.createHere<fir::IterWhileOp>(
+        lastChar, zero, minusOne, trueVal, lastChar);
+    auto insPt = builder.saveInsertionPoint();
+    builder.setInsertionPointToStart(iterWhile.getBody());
+    auto index = iterWhile.getInductionVar();
+    // Look for first non-blank from the right of the character.
+    auto c = createLoadCharAt(str, index);
+    c = builder.createHere<fir::ConvertOp>(blank.getType(), c);
+    auto isBlank =
+        builder.createHere<mlir::CmpIOp>(mlir::CmpIPredicate::eq, blank, c);
+    llvm::SmallVector<mlir::Value, 2> results = {isBlank, index};
+    builder.createHere<fir::ResultOp>(results);
+    builder.restoreInsertionPoint(insPt);
+    // Compute length after iteration (zero if all blanks)
+    mlir::Value newLen =
+        builder.createHere<mlir::AddIOp>(iterWhile.getResult(1), one);
+    auto result =
+        builder.createHere<SelectOp>(iterWhile.getResult(0), zero, newLen);
+    return builder.createHere<fir::ConvertOp>(builder.getLengthType(), result);
+  }
+
   Fortran::lower::FirOpBuilder &builder;
 };
 } // namespace
@@ -527,6 +575,15 @@ void Fortran::lower::CharacterOpsBuilder<T>::createAssign(mlir::Value lhs,
 }
 template void Fortran::lower::CharacterOpsBuilder<
     Fortran::lower::FirOpBuilder>::createAssign(mlir::Value, mlir::Value);
+
+template <typename T>
+mlir::Value
+Fortran::lower::CharacterOpsBuilder<T>::createLenTrim(mlir::Value str) {
+  CharacterOpsBuilderImpl bimpl{impl()};
+  return bimpl.createLenTrim(bimpl.toDataLengthPair(str));
+}
+template mlir::Value Fortran::lower::CharacterOpsBuilder<
+    Fortran::lower::FirOpBuilder>::createLenTrim(mlir::Value);
 
 template <typename T>
 void Fortran::lower::CharacterOpsBuilder<T>::createAssign(mlir::Value lptr,
@@ -627,8 +684,7 @@ template int Fortran::lower::CharacterOpsBuilder<
 
 template <typename T>
 mlir::Type Fortran::lower::CharacterOpsBuilder<T>::getLengthType() {
-  // FIXME: make this IndexType? Breaks some tests though.
-  return impl().getIntegerType(64);
+  return impl().getIndexType();
 }
 template mlir::Type Fortran::lower::CharacterOpsBuilder<
     Fortran::lower::FirOpBuilder>::getLengthType();
