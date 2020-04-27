@@ -329,7 +329,8 @@ public:
     return Fortran::lower::mangle::mangleName(uniquer, symbol);
   }
 
-  std::string uniqueCGIdent(llvm::StringRef name) override final {
+  std::string uniqueCGIdent(llvm::StringRef prefix,
+                            llvm::StringRef name) override final {
     // For "long" identifiers use a hash value
     if (name.size() > nameLengthHashSize) {
       llvm::MD5 hash;
@@ -338,12 +339,13 @@ public:
       hash.final(result);
       llvm::SmallString<32> str;
       llvm::MD5::stringifyResult(result, str);
-      std::string hashName = "h.";
-      hashName.append(str.c_str());
+      std::string hashName = prefix.str();
+      hashName.append(".").append(str.c_str());
       return uniquer.doGenerated(hashName);
     }
     // "Short" identifiers use a reversible hex string
-    return uniquer.doGenerated(llvm::toHex(name));
+    std::string nm = prefix.str();
+    return uniquer.doGenerated(nm.append(".").append(llvm::toHex(name)));
   }
 
 private:
