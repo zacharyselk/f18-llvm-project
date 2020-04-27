@@ -968,8 +968,11 @@ private:
     resTy.push_back(converter.genType(TC, KIND));
     return genProcedureRef(funRef, resTy);
   }
+
   mlir::Value genval(const Fortran::evaluate::ProcedureRef &procRef) {
     llvm::SmallVector<mlir::Type, 1> resTy;
+    if (procRef.HasAlternateReturns())
+      resTy.push_back(builder.getIndexType());
     return genProcedureRef(procRef, resTy);
   }
 
