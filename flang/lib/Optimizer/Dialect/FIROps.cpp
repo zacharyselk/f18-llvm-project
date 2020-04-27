@@ -590,10 +590,7 @@ mlir::ParseResult fir::GlobalOp::verifyValidLinkage(StringRef linkage) {
   // Supporting only a subset of the LLVM linkage types for now
   static const llvm::SmallVector<const char *, 3> validNames = {
       "internal", "common", "weak"};
-  if (llvm::any_of(validNames,
-                   [&](const char *name) { return linkage == name; }))
-    return success();
-  return failure();
+  return mlir::success(llvm::is_contained(validNames, linkage));
 }
 
 //===----------------------------------------------------------------------===//
@@ -1029,10 +1026,7 @@ static A getSubOperands(unsigned pos, A allArgs,
 }
 
 static unsigned denseElementsSize(mlir::DenseIntElementsAttr attr) {
-  unsigned count = 0;
-  for (auto x : attr)
-    ++count;
-  return count;
+  return attr.getNumElements();
 }
 
 llvm::Optional<mlir::OperandRange> fir::SelectOp::getCompareOperands(unsigned) {
@@ -1458,20 +1452,6 @@ static mlir::ParseResult parseWhereOp(OpAsmParser &parser,
     return mlir::failure();
 
   return mlir::success();
-}
-
-mlir::LogicalResult
-fir::WhereOp::fold(llvm::ArrayRef<mlir::Attribute> opnds,
-                   llvm::SmallVectorImpl<mlir::OpFoldResult> &results) {
-  // If the WhereOp has no body, then just delete it
-  if ((whereRegion().empty() || whereRegion().front().empty() ||
-       isa<fir::FirEndOp>(whereRegion().front().front())) &&
-      (otherRegion().empty() || otherRegion().front().empty() ||
-       isa<fir::FirEndOp>(otherRegion().front().front()))) {
-    results.clear();
-    return mlir::success();
-  }
-  return mlir::failure();
 }
 
 static LogicalResult verify(fir::WhereOp op) {
