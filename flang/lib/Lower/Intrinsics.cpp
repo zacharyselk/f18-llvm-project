@@ -703,14 +703,12 @@ mlir::Value IntrinsicLibrary::genIchar(mlir::Type resultType,
 }
 
 // LEN_TRIM
-mlir::Value IntrinsicLibrary::genLenTrim(mlir::Type,
+mlir::Value IntrinsicLibrary::genLenTrim(mlir::Type resultType,
                                          llvm::ArrayRef<mlir::Value> args) {
   // Optional KIND argument reflected in result type.
   assert(args.size() >= 1);
-  // FIXME: LEN_TRIM needs actual runtime and to be define in CharRT.h
-  llvm_unreachable("LEN_TRIM TODO");
-  // Fake implementation for debugging:
-  // return builder.createIntegerConstant(resultType, 0);
+  auto len = builder.createLenTrim(args[0]);
+  return builder.createHere<fir::ConvertOp>(resultType, len);
 }
 
 // MERGE
@@ -800,7 +798,7 @@ static mlir::Value createExtremumCompare(Fortran::lower::FirOpBuilder &builder,
       static_assert(behavior == ExtremumBehavior::IeeeMinMaxNum,
                     "ieeeMinNum/ieeeMaxNum behavior not implemented");
     }
-  } else if (type.isa<mlir::IntegerType>()) {
+  } else if (type.isa<mlir::IntegerType>() || type.isa<mlir::IndexType>()) {
     result = builder.createHere<mlir::CmpIOp>(integerPredicate, left, right);
   } else if (type.isa<fir::CharacterType>()) {
     // TODO: ! character min and max is tricky because the result
