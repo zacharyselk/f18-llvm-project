@@ -985,24 +985,6 @@ static mlir::LogicalResult verify(fir::ResultOp op) {
   return success();
 }
 
-static mlir::ParseResult parseResultOp(mlir::OpAsmParser &parser,
-                                       mlir::OperationState &result) {
-  llvm::SmallVector<mlir::OpAsmParser::OperandType, 4> operands;
-  llvm::SmallVector<mlir::Type, 4> types;
-  llvm::SMLoc loc = parser.getCurrentLocation();
-  if (parser.parseOperandList(operands) ||
-      parser.parseOptionalColonTypeList(types) ||
-      parser.resolveOperands(operands, types, loc, result.operands))
-    return failure();
-  return success();
-}
-
-static void print(mlir::OpAsmPrinter &p, fir::ResultOp op) {
-  p << op.getOperationName();
-  if (op.getNumOperands() != 0)
-    p << ' ' << op.getOperands() << " : " << op.getOperandTypes();
-}
-
 //===----------------------------------------------------------------------===//
 // SelectOp
 //===----------------------------------------------------------------------===//

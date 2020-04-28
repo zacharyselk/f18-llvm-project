@@ -1865,9 +1865,10 @@ def fir_ResultOp : fir_Op<"result", [NoSideEffect, ReturnLike, Terminator]> {
   let builders = [
     OpBuilder<"Builder *builder, OperationState &result", "/* do nothing */">
   ];
-  let printer = [{ return ::print(p, *this); }];
+
+  let assemblyFormat = "($results^ `:` type($results))? attr-dict";
+
   let verifier = [{ return ::verify(*this); }];
-  let parser = [{ return ::parse$cppClass(parser, result); }];
 }
 
 def FirRegionTerminator : SingleBlockImplicitTerminator<"ResultOp">;
