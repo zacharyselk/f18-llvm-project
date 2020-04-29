@@ -1287,32 +1287,6 @@ private:
     noRuntimeSupport("LOCK");
   }
 
-  /// Nullify pointer object list
-  ///
-  /// For each pointer object, reset the pointer to a disassociated status.
-  /// We do this by setting each pointer to null.
-  void genFIR(Fortran::lower::pft::Evaluation &eval,
-              const Fortran::parser::NullifyStmt &stmt) {
-    for (auto &po : stmt.v) {
-      std::visit(
-          Fortran::common::visitors{
-              [&](const Fortran::parser::Name &sym) {
-                auto ty = genType(*sym.symbol);
-                auto load = builder->create<fir::LoadOp>(
-                    toLocation(), lookupSymbol(*sym.symbol));
-                auto idxTy = mlir::IndexType::get(&mlirContext);
-                auto zero = builder->create<mlir::ConstantOp>(
-                    toLocation(), idxTy, builder->getIntegerAttr(idxTy, 0));
-                auto cast =
-                    builder->create<fir::ConvertOp>(toLocation(), ty, zero);
-                builder->create<fir::StoreOp>(toLocation(), cast, load);
-              },
-              [&](const Fortran::parser::StructureComponent &) { TODO(); },
-          },
-          po.u);
-    }
-  }
-
   /// Shared for both assignments and pointer assignments.
   void genFIR(const Fortran::evaluate::Assignment &assignment) {
     std::visit(
