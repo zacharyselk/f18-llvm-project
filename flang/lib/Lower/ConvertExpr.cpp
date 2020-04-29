@@ -229,12 +229,8 @@ private:
 
   mlir::Value gendef(Fortran::semantics::SymbolRef sym) { return gen(sym); }
 
-  /// Loading a LOGICAL immediately converts to an `i1` bool value.
   mlir::Value genLoad(mlir::Value addr) {
-    auto val = builder.create<fir::LoadOp>(getLoc(), addr);
-    if (val.getType().isa<fir::LogicalType>())
-      return builder.create<fir::ConvertOp>(getLoc(), builder.getI1Type(), val);
-    return val;
+    return builder.create<fir::LoadOp>(getLoc(), addr);
   }
 
   mlir::Value genval(Fortran::semantics::SymbolRef sym) {
@@ -465,18 +461,23 @@ private:
   mlir::Value genval(const Fortran::evaluate::LogicalOperation<KIND> &op) {
     // Request operands to be generated as `i1` and restore after this scope.
     mlir::Value result;
+    auto i1Type = builder.getI1Type();
+    auto lhs =
+        builder.create<fir::ConvertOp>(getLoc(), i1Type, genval(op.left()));
+    auto rhs =
+        builder.create<fir::ConvertOp>(getLoc(), i1Type, genval(op.right()));
     switch (op.logicalOperator) {
     case Fortran::evaluate::LogicalOperator::And:
-      result = createBinaryOp<mlir::AndOp>(op);
+      result = createBinaryOp<mlir::AndOp>(op, lhs, rhs);
       break;
     case Fortran::evaluate::LogicalOperator::Or:
-      result = createBinaryOp<mlir::OrOp>(op);
+      result = createBinaryOp<mlir::OrOp>(op, lhs, rhs);
       break;
     case Fortran::evaluate::LogicalOperator::Eqv:
-      result = createCompareOp<mlir::CmpIOp>(op, mlir::CmpIPredicate::eq);
+      result = createCompareOp<mlir::CmpIOp>(mlir::CmpIPredicate::eq, lhs, rhs);
       break;
     case Fortran::evaluate::LogicalOperator::Neqv:
-      result = createCompareOp<mlir::CmpIOp>(op, mlir::CmpIPredicate::ne);
+      result = createCompareOp<mlir::CmpIOp>(mlir::CmpIPredicate::ne, lhs, rhs);
       break;
     case Fortran::evaluate::LogicalOperator::Not:
       // lib/evaluate expression for .NOT. is Fortran::evaluate::Not<KIND>.
