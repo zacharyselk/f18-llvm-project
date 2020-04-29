@@ -456,7 +456,9 @@ private:
     auto *context = builder.getContext();
     auto logical = genval(op.left());
     auto one = genLogicalConstantAsI1(context, true);
-    return builder.create<mlir::XOrOp>(getLoc(), logical, one).getResult();
+    auto val =
+        builder.create<fir::ConvertOp>(getLoc(), builder.getI1Type(), logical);
+    return builder.create<mlir::XOrOp>(getLoc(), val, one);
   }
 
   template <int KIND>
