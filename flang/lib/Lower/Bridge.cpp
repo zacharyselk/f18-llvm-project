@@ -436,8 +436,10 @@ private:
 
   void genFIRConditionalBranch(mlir::Value &cond, mlir::Block *trueTarget,
                                mlir::Block *falseTarget) {
-    builder->create<mlir::CondBranchOp>(toLocation(), cond, trueTarget,
-                                        llvm::None, falseTarget, llvm::None);
+    auto loc = toLocation();
+    auto bcc = builder->create<fir::ConvertOp>(loc, builder->getI1Type(), cond);
+    builder->create<mlir::CondBranchOp>(loc, bcc, trueTarget, llvm::None,
+                                        falseTarget, llvm::None);
   }
 
   void genFIRConditionalBranch(const Fortran::parser::ScalarLogicalExpr &expr,
