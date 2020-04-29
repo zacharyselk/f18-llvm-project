@@ -576,11 +576,7 @@ private:
       }
       llvm_unreachable("array of complex unhandled");
     } else if constexpr (TC == Fortran::lower::CharacterCat) {
-      // Wrap this in a box. Return a pair?
-      auto addr = genCharLit<KIND>(con.GetScalarValue().value(), con.LEN());
-      auto len =
-        builder.createIntegerConstant(builder.getIndexType(), con.LEN());
-      return builder.createEmboxChar(addr, len);
+      return genCharLit<KIND>(con.GetScalarValue().value(), con.LEN());
     } else {
       llvm_unreachable("unhandled constant");
     }
