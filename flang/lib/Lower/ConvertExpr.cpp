@@ -163,7 +163,6 @@ private:
     return builder.createFunction(name, funTy);
   }
 
-  // FIXME binary operation :: ('a, 'a) -> 'a
   template <Fortran::common::TypeCategory TC, int KIND>
   mlir::FunctionType createFunctionType() {
     if constexpr (TC == Fortran::lower::IntegerCat) {
@@ -432,11 +431,6 @@ private:
                                           TC2> &convert) {
     auto ty = converter.genType(TC1, KIND);
     auto operand = genval(convert.left());
-    if (TC1 == Fortran::lower::LogicalCat) {
-      // If an i1 result is needed, it does not make sens to convert between
-      // `fir.logical` types to later convert back to the result to i1.
-      return operand;
-    }
     return builder.create<fir::ConvertOp>(getLoc(), ty, operand);
   }
 
@@ -448,7 +442,6 @@ private:
 
   template <int KIND>
   mlir::Value genval(const Fortran::evaluate::Not<KIND> &op) {
-    // Request operands to be generated as `i1` and restore after this scope.
     auto *context = builder.getContext();
     auto logical = genval(op.left());
     auto one = genLogicalConstantAsI1(context, true);
@@ -459,7 +452,6 @@ private:
 
   template <int KIND>
   mlir::Value genval(const Fortran::evaluate::LogicalOperation<KIND> &op) {
-    // Request operands to be generated as `i1` and restore after this scope.
     mlir::Value result;
     auto i1Type = builder.getI1Type();
     auto lhs =
@@ -482,7 +474,6 @@ private:
     case Fortran::evaluate::LogicalOperator::Not:
       // lib/evaluate expression for .NOT. is Fortran::evaluate::Not<KIND>.
       llvm_unreachable(".NOT. is not a binary operator");
-      break;
     }
     if (!result)
       llvm_unreachable("unhandled logical operation");
@@ -916,8 +907,7 @@ private:
     // evaluate::IntrinsicProcTable is required to use it.
     llvm::SmallVector<mlir::Type, 2> argTypes;
     llvm::SmallVector<mlir::Value, 2> operands;
-    // Logical arguments of user functions must be lowered to `fir.logical`
-    // and not `i1`.
+    // Arguments of user functions must be lowered to the correct type.
     for (const auto &arg : procRef.arguments()) {
       if (!arg.has_value())
         TODO(); // optional arguments
