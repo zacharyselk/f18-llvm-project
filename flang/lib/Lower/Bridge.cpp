@@ -436,8 +436,10 @@ private:
 
   void genFIRConditionalBranch(mlir::Value &cond, mlir::Block *trueTarget,
                                mlir::Block *falseTarget) {
-    builder->create<mlir::CondBranchOp>(toLocation(), cond, trueTarget,
-                                        llvm::None, falseTarget, llvm::None);
+    auto loc = toLocation();
+    auto bcc = builder->create<fir::ConvertOp>(loc, builder->getI1Type(), cond);
+    builder->create<mlir::CondBranchOp>(loc, bcc, trueTarget, llvm::None,
+                                        falseTarget, llvm::None);
   }
 
   void genFIRConditionalBranch(const Fortran::parser::ScalarLogicalExpr &expr,
@@ -511,7 +513,9 @@ private:
   genWhereCondition(const A *stmt, bool withElse = true) {
     auto cond = genExprValue(*Fortran::semantics::GetExpr(
         std::get<Fortran::parser::ScalarLogicalExpr>(stmt->t)));
-    auto where = builder->create<fir::WhereOp>(toLocation(), cond, withElse);
+    auto bcc = builder->create<fir::ConvertOp>(toLocation(),
+                                               builder->getI1Type(), cond);
+    auto where = builder->create<fir::WhereOp>(toLocation(), bcc, withElse);
     auto insPt = builder->saveInsertionPoint();
     builder->setInsertionPointToStart(&where.whereRegion().front());
     return {insPt, where};
