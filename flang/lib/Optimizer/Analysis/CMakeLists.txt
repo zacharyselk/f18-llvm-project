@@ -1,17 +1,13 @@
 get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
 
-add_flang_library(FIRTransforms
-  CSE.cpp
-  MemToReg.cpp
-  RewriteLoop.cpp
-  StdConverter.cpp
+add_flang_library(FIRAnalysis
+  IteratedDominanceFrontier.cpp
 
   DEPENDS
   FIROpsIncGen
   ${dialect_libs}
 
   LINK_LIBS
-  FIRAnalysis
   FIRDialect
   FIRSupport
 )
