@@ -897,6 +897,13 @@ private:
     return builder.genIntrinsicCall(name, resultType[0], operands);
   }
 
+  template <typename A>
+  bool isCharacterType(const A &exp) {
+    if (auto type = exp.GetType())
+      return type->category() == Fortran::lower::CharacterCat;
+    return false;
+  }
+
   mlir::Value genProcedureRef(const Fortran::evaluate::ProcedureRef procRef,
                               mlir::ArrayRef<mlir::Type> resultType) {
     if (const auto *intrinsic{procRef.proc().GetSpecificIntrinsic()}) {
@@ -933,7 +940,11 @@ private:
           addr = builder.createTemporary(getLoc(), val.getType());
           builder.create<fir::StoreOp>(getLoc(), val, addr);
         }
-        argTypes.push_back(addr.getType());
+        if (isCharacterType(*arg))
+          argTypes.push_back(
+              fir::BoxCharType::get(builder.getContext(), /*FIXME*/ 1));
+        else
+          argTypes.push_back(addr.getType());
         operands.push_back(addr);
       }
     }
