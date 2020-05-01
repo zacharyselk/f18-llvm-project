@@ -18,6 +18,7 @@
 #define FORTRAN_LOWER_BRIDGE_H_
 
 #include "flang/Common/Fortran.h"
+#include "flang/Lower/Support/BoxValue.h"
 #include "flang/Optimizer/Support/KindMapping.h"
 #include "mlir/IR/Module.h"
 
@@ -32,6 +33,8 @@ struct DataRef;
 template <typename>
 class Expr;
 struct SomeType;
+class IntrinsicProcTable;
+class FoldingContext;
 } // namespace evaluate
 namespace parser {
 class CharBlock;
@@ -134,8 +137,9 @@ class LoweringBridge {
 public:
   static LoweringBridge
   create(const common::IntrinsicTypeDefaultKinds &defaultKinds,
-         const parser::CookedSource *cooked) {
-    return LoweringBridge{defaultKinds, cooked};
+         const evaluate::IntrinsicProcTable &intrinsics,
+         const parser::CookedSource &cooked) {
+    return LoweringBridge{defaultKinds, intrinsics, cooked};
   }
 
   mlir::MLIRContext &getMLIRContext() { return *context.get(); }
@@ -143,9 +147,13 @@ public:
 
   void parseSourceFile(llvm::SourceMgr &);
 
-  common::IntrinsicTypeDefaultKinds const &getDefaultKinds() {
+  const common::IntrinsicTypeDefaultKinds &getDefaultKinds() const {
     return defaultKinds;
   }
+  const evaluate::IntrinsicProcTable &getIntrinsicTable() const {
+    return intrinsics;
+  }
+  evaluate::FoldingContext createFoldingContext() const;
 
   bool validModule() { return getModule(); }
 
@@ -160,11 +168,13 @@ public:
 
 private:
   explicit LoweringBridge(const common::IntrinsicTypeDefaultKinds &defaultKinds,
-                          const parser::CookedSource *cooked);
+                          const evaluate::IntrinsicProcTable &intrinsics,
+                          const parser::CookedSource &cooked);
   LoweringBridge() = delete;
   LoweringBridge(const LoweringBridge &) = delete;
 
   const common::IntrinsicTypeDefaultKinds &defaultKinds;
+  const evaluate::IntrinsicProcTable &intrinsics;
   const parser::CookedSource *cooked;
   std::unique_ptr<mlir::MLIRContext> context;
   std::unique_ptr<mlir::ModuleOp> module;

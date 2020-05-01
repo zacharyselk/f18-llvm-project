@@ -33,6 +33,7 @@ Fortran::lower::FirOpBuilder::getNamedGlobal(mlir::ModuleOp modOp,
 }
 
 mlir::Type Fortran::lower::FirOpBuilder::getRefType(mlir::Type eleTy) {
+  assert(!eleTy.isa<fir::ReferenceType>());
   return fir::ReferenceType::get(eleTy);
 }
 
@@ -217,10 +218,6 @@ struct CharacterOpsBuilderImpl {
     fir::CharacterType getCharacterType() const {
       return getCharacterType(data.getType());
     }
-    /// Get fir.ref<fir.char<kind>> type.
-    fir::ReferenceType getReferenceType() const {
-      return fir::ReferenceType::get(getCharacterType());
-    }
 
     bool needToMaterialize() const {
       return data.getType().isa<fir::SequenceType>() ||
@@ -263,7 +260,7 @@ struct CharacterOpsBuilderImpl {
     auto lenType = builder.getLengthType();
     auto type = character.getType();
     if (auto boxCharType = type.dyn_cast<fir::BoxCharType>()) {
-      auto refType = fir::ReferenceType::get(boxCharType.getEleTy());
+      auto refType = builder.getRefType(boxCharType.getEleTy());
       auto unboxed =
           builder.createHere<fir::UnboxCharOp>(refType, lenType, character);
       return {unboxed.getResult(0), unboxed.getResult(1)};
@@ -290,13 +287,18 @@ struct CharacterOpsBuilderImpl {
     llvm_unreachable("unexpected character type");
   }
 
+  /// Get fir.ref<fir.char<kind>> type.
+  mlir::Type getReferenceType(Char c) const {
+    return builder.getRefType(c.getCharacterType());
+  }
+
   mlir::Value createEmbox(Char str) {
     // BoxChar require a reference.
     if (str.needToMaterialize())
       str = materializeValue(str);
     auto kind = str.getCharacterType().getFKind();
     auto boxCharType = fir::BoxCharType::get(builder.getContext(), kind);
-    auto refType = str.getReferenceType();
+    auto refType = getReferenceType(str);
     // So far, fir.emboxChar fails lowering to llvm when it is given
     // fir.data<fir.array<len x fir.char<kind>>> types, so convert to
     // fir.data<fir.char<kind>> if needed.
@@ -316,13 +318,13 @@ struct CharacterOpsBuilderImpl {
     // the single character.
     if (str.data.getType().isa<fir::CharacterType>())
       return str.data;
-    auto addr = builder.createHere<fir::CoordinateOp>(str.getReferenceType(),
+    auto addr = builder.createHere<fir::CoordinateOp>(getReferenceType(str),
                                                       str.data, index);
     return builder.createHere<fir::LoadOp>(addr);
   }
   void createStoreCharAt(Char str, mlir::Value index, mlir::Value c) {
     assert(!str.needToMaterialize() && "not in memory");
-    auto addr = builder.createHere<fir::CoordinateOp>(str.getReferenceType(),
+    auto addr = builder.createHere<fir::CoordinateOp>(getReferenceType(str),
                                                       str.data, index);
     builder.createHere<fir::StoreOp>(c, addr);
   }
@@ -367,7 +369,7 @@ struct CharacterOpsBuilderImpl {
   // Simple length one character assignment without loops.
   void createLengthOneAssign(Char lhs, Char rhs) {
     auto addr = lhs.data;
-    auto refType = lhs.getReferenceType();
+    auto refType = getReferenceType(lhs);
     auto loc = builder.getLoc();
     addr = builder.createConvert(loc, refType, addr);
 
@@ -482,7 +484,7 @@ struct CharacterOpsBuilderImpl {
     if (offset.getType() != idxType)
       offset = builder.createConvert(loc, idxType, offset);
     auto substringRef = builder.createHere<fir::CoordinateOp>(
-        str.getReferenceType(), str.data, offset);
+        getReferenceType(str), str.data, offset);
 
     // Compute the length.
     mlir::Value substringLen{};
