@@ -940,11 +940,14 @@ private:
           addr = builder.createTemporary(getLoc(), val.getType());
           builder.create<fir::StoreOp>(getLoc(), val, addr);
         }
-        if (isCharacterType(*arg))
-          argTypes.push_back(
-              fir::BoxCharType::get(builder.getContext(), /*FIXME*/ 1));
-        else
+        if (builder.isCharacter(addr.getType())) {
+          argTypes.push_back(fir::BoxCharType::get(
+              builder.getContext(), builder.getCharacterKind(addr.getType())));
+          auto ch = builder.materializeCharacter(addr);
+          addr = builder.createEmboxChar(ch.first, ch.second);
+        } else {
           argTypes.push_back(addr.getType());
+        }
         operands.push_back(addr);
       }
     }
