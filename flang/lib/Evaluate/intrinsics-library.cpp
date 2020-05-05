@@ -239,38 +239,38 @@ static void AddLibpgmathDoubleHostProcedures(
   }
 }
 
-// Note: std::complex and _complex are layout compatible but are not guaranteed
+// Note: Lipgmath uses _Complex but the front-end use std::complex for folding.
+// std::complex and _Complex are layout compatible but are not guaranteed
 // to be linkage compatible. For instance, on i386, float _Complex is returned
 // by a pair of register but std::complex<float> is returned by structure
 // address. To fix the issue, wrapper around C _Complex functions are defined
 // below.
-template <FuncPointer<float _Complex, float _Complex> func>
-static std::complex<float> ComplexCFuncWrapper(std::complex<float> &arg) {
-  float _Complex res{func(*reinterpret_cast<float _Complex *>(&arg))};
-  return *reinterpret_cast<std::complex<float> *>(&res);
-}
 
-template <FuncPointer<double _Complex, double _Complex> func>
-static std::complex<double> ComplexCFuncWrapper(std::complex<double> &arg) {
-  double _Complex res{func(*reinterpret_cast<double _Complex *>(&arg))};
-  return *reinterpret_cast<std::complex<double> *>(&res);
-}
+template <typename T> struct ToStdComplex {
+  using Type = T;
+  using AType = Type;
+};
 
-template <FuncPointer<float _Complex, float _Complex, float _Complex> func>
-static std::complex<float> ComplexCFuncWrapper(
-    std::complex<float> &arg1, std::complex<float> &arg2) {
-  float _Complex res{func(*reinterpret_cast<float _Complex *>(&arg1),
-      *reinterpret_cast<float _Complex *>(&arg2))};
-  return *reinterpret_cast<std::complex<float> *>(&res);
-}
+template <> struct ToStdComplex<float _Complex> {
+  using Type = std::complex<float>;
+  // Complex arguments are passed by reference in C++ std math functions.
+  using AType = Type &;
+};
 
-template <FuncPointer<double _Complex, double _Complex, double _Complex> func>
-static std::complex<double> ComplexCFuncWrapper(
-    std::complex<double> &arg1, std::complex<double> &arg2) {
-  double _Complex res{func(*reinterpret_cast<double _Complex *>(&arg1),
-      *reinterpret_cast<double _Complex *>(&arg2))};
-  return *reinterpret_cast<std::complex<double> *>(&res);
-}
+template <> struct ToStdComplex<double _Complex> {
+  using Type = std::complex<double>;
+  using AType = Type &;
+};
+
+template <typename F, F func> struct CComplexFunc {};
+template <typename R, typename... A, FuncPointer<R, A...> func>
+struct CComplexFunc<FuncPointer<R, A...>, func> {
+  static typename ToStdComplex<R>::Type wrapper(
+      typename ToStdComplex<A>::AType... args) {
+    R res{func(*reinterpret_cast<A *>(&args)...)};
+    return *reinterpret_cast<typename ToStdComplex<R>::Type *>(&res);
+  }
+};
 
 template <L Lib>
 static void AddLibpgmathComplexHostProcedures(
@@ -279,7 +279,7 @@ static void AddLibpgmathComplexHostProcedures(
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_FAST
 #define PGMATH_USE_C(name, function) \
-  {#name, ComplexCFuncWrapper<function>, true},
+  {#name, CComplexFunc<decltype(&function), &function>::wrapper, true},
 #include "../runtime/pgmath.h.inc"
     };
     for (auto sym : pgmathSymbols) {
@@ -289,7 +289,7 @@ static void AddLibpgmathComplexHostProcedures(
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_RELAXED
 #define PGMATH_USE_C(name, function) \
-  {#name, ComplexCFuncWrapper<function>, true},
+  {#name, CComplexFunc<decltype(&function), &function>::wrapper, true},
 #include "../runtime/pgmath.h.inc"
     };
     for (auto sym : pgmathSymbols) {
@@ -300,7 +300,7 @@ static void AddLibpgmathComplexHostProcedures(
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_PRECISE
 #define PGMATH_USE_C(name, function) \
-  {#name, ComplexCFuncWrapper<function>, true},
+  {#name, CComplexFunc<decltype(&function), &function>::wrapper, true},
 #include "../runtime/pgmath.h.inc"
     };
     for (auto sym : pgmathSymbols) {
@@ -326,7 +326,7 @@ static void AddLibpgmathDoubleComplexHostProcedures(
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_FAST
 #define PGMATH_USE_Z(name, function) \
-  {#name, ComplexCFuncWrapper<function>, true},
+  {#name, CComplexFunc<decltype(&function), &function>::wrapper, true},
 #include "../runtime/pgmath.h.inc"
     };
     for (auto sym : pgmathSymbols) {
@@ -336,7 +336,7 @@ static void AddLibpgmathDoubleComplexHostProcedures(
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_RELAXED
 #define PGMATH_USE_Z(name, function) \
-  {#name, ComplexCFuncWrapper<function>, true},
+  {#name, CComplexFunc<decltype(&function), &function>::wrapper, true},
 #include "../runtime/pgmath.h.inc"
     };
     for (auto sym : pgmathSymbols) {
@@ -347,7 +347,7 @@ static void AddLibpgmathDoubleComplexHostProcedures(
     HostRuntimeIntrinsicProcedure pgmathSymbols[]{
 #define PGMATH_PRECISE
 #define PGMATH_USE_Z(name, function) \
-  {#name, ComplexCFuncWrapper<function>, true},
+  {#name, CComplexFunc<decltype(&function), &function>::wrapper, true},
 #include "../runtime/pgmath.h.inc"
     };
     for (auto sym : pgmathSymbols) {
