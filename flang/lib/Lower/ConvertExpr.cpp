@@ -925,8 +925,15 @@ private:
               Fortran::evaluate::UnwrapWholeSymbolDataRef(*expr)) {
         mlir::Value argRef = symMap.lookupSymbol(*sym);
         assert(argRef && "could not get symbol reference");
-        argTypes.push_back(argRef.getType());
-        operands.push_back(argRef);
+        if (builder.isCharacter(argRef.getType())) {
+          argTypes.push_back(fir::BoxCharType::get(
+              builder.getContext(), builder.getCharacterKind(argRef.getType())));
+          auto ch = builder.materializeCharacter(argRef);
+          operands.push_back(builder.createEmboxChar(ch.first, ch.second));
+        } else {
+          argTypes.push_back(argRef.getType());
+          operands.push_back(argRef);
+        }
       } else {
         // create a temp to store the expression value
         auto val = genval(*expr);
