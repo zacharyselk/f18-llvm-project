@@ -16,6 +16,8 @@
 // intrinsic alphabetical order.
 // Define PGMATH_FAST/RELAXED/PRECISE to restrict the PGMATH_USE visit
 // to the targeted versions.
+// Define PGMATH_USE_OTHER to visit math functions that are not related to
+// floating points (e.g. int**int pow).
 
 // Control Macros
 #ifdef PGMATH_DECLARE
@@ -33,6 +35,7 @@
 #define PGMATH_USE_D(name, func) PGMATH_USE_ALL_TYPES(name, func)
 #define PGMATH_USE_C(name, func) PGMATH_USE_ALL_TYPES(name, func)
 #define PGMATH_USE_Z(name, func) PGMATH_USE_ALL_TYPES(name, func)
+#define PGMATH_USE_OTHER(name, func) PGMATH_USE_ALL_TYPES(name, func)
 #endif
 
 #ifndef PGMATH_USE_S
@@ -49,6 +52,10 @@
 
 #ifndef PGMATH_USE_Z
 #define PGMATH_USE_Z(name, x)
+#endif
+
+#ifndef PGMATH_USE_OTHER
+#define PGMATH_USE_OTHER(name, x)
 #endif
 
 #define PGMATH_REAL_IMPL(impl, func) \
@@ -232,6 +239,41 @@ PGMATH_USE_S(mod, __fs_mod_1)
 PGMATH_USE_D(mod, __fd_mod_1)
 
 PGMATH_ALL2(pow)
+// Versions of pow with integer exponents
+#define PGMATH_DELCARE_POW(impl) \
+  PGMATH_DECLARE(float __##impl##s_powi_1(float, int)) \
+  PGMATH_DECLARE(double __##impl##d_powi_1(double, int)) \
+  PGMATH_DECLARE(float _Complex __##impl##c_powi_1(float _Complex, int)) \
+  PGMATH_DECLARE(double _Complex __##impl##z_powi_1(double _Complex, int)) \
+  PGMATH_USE_S(pow, __##impl##s_powi_1) \
+  PGMATH_USE_D(pow, __##impl##d_powi_1) \
+  PGMATH_USE_C(pow, __##impl##c_powi_1) \
+  PGMATH_USE_Z(pow, __##impl##z_powi_1) \
+  PGMATH_DECLARE(float __##impl##s_powk_1(float, int64_t)) \
+  PGMATH_DECLARE(double __##impl##d_powk_1(double, int64_t)) \
+  PGMATH_DECLARE(float _Complex __##impl##c_powk_1(float _Complex, int64_t)) \
+  PGMATH_DECLARE(double _Complex __##impl##z_powk_1(double _Complex, int64_t)) \
+  PGMATH_USE_S(pow, __##impl##s_powk_1) \
+  PGMATH_USE_D(pow, __##impl##d_powk_1) \
+  PGMATH_USE_C(pow, __##impl##c_powk_1) \
+  PGMATH_USE_Z(pow, __##impl##z_powk_1)
+
+#ifdef PGMATH_FAST
+PGMATH_DELCARE_POW(f)
+#endif
+#ifdef PGMATH_RELAXED
+PGMATH_DELCARE_POW(r)
+#endif
+#ifdef PGMATH_PRECISE
+PGMATH_DELCARE_POW(p)
+#endif
+
+// integer ** integer versions of pow
+PGMATH_DECLARE(int __mth_i_ipowi(int, int))
+PGMATH_DECLARE(int64_t __mth_i_kpowk(int64_t, int64_t))
+PGMATH_USE_OTHER(pow, __mth_i_ipowi)
+PGMATH_USE_OTHER(pow, __mth_i_kpowk)
+
 PGMATH_ALL(sin)
 PGMATH_ALL(sinh)
 PGMATH_MTH_VERSION_REAL(sqrt)
@@ -247,4 +289,5 @@ PGMATH_ALL(tanh)
 #undef PGMATH_USE_D
 #undef PGMATH_USE_C
 #undef PGMATH_USE_Z
+#undef PGMATH_USE_OTHER
 #undef PGMATH_USE_ALL_TYPES
