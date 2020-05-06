@@ -27,7 +27,9 @@
 #include "flang/Common/unsigned-const-division.h"
 #include "flang/Decimal/binary-floating-point.h"
 #include "flang/Decimal/decimal.h"
+#ifndef FORTRAN_IN_RUNTIME
 #include "llvm/Support/raw_ostream.h"
+#endif
 #include <cinttypes>
 #include <limits>
 #include <type_traits>
