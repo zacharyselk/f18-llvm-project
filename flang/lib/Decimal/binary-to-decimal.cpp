@@ -426,6 +426,7 @@ ConversionToDecimalResult ConvertLongDoubleToDecimal(char *buffer,
 #endif
 }
 
+#if 0
 template <int PREC, int LOG10RADIX>
 llvm::raw_ostream &BigRadixFloatingPointNumber<PREC, LOG10RADIX>::Dump(
     llvm::raw_ostream &o) const {
@@ -443,4 +444,6 @@ llvm::raw_ostream &BigRadixFloatingPointNumber<PREC, LOG10RADIX>::Dump(
   }
   return o;
 }
+#endif
+
 } // namespace Fortran::decimal
