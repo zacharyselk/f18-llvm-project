@@ -27,7 +27,7 @@
 #include "flang/Common/unsigned-const-division.h"
 #include "flang/Decimal/binary-floating-point.h"
 #include "flang/Decimal/decimal.h"
-#ifndef FORTRAN_IN_RUNTIME
+#if 0
 #include "llvm/Support/raw_ostream.h"
 #endif
 #include <cinttypes>
@@ -114,7 +114,9 @@ public:
   void Minimize(
       BigRadixFloatingPointNumber &&less, BigRadixFloatingPointNumber &&more);
 
+#if 0
   llvm::raw_ostream &Dump(llvm::raw_ostream &) const;
+#endif
 
 private:
   BigRadixFloatingPointNumber(const BigRadixFloatingPointNumber &that)
