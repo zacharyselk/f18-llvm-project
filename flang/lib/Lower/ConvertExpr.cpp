@@ -155,11 +155,8 @@ private:
   }
 
   mlir::FuncOp getFunction(llvm::StringRef name, mlir::FunctionType funTy) {
-    if (auto func = builder.getNamedFunction(name)) {
-      assert(func.getType() == funTy &&
-             "function already declared with a different type");
+    if (auto func = builder.getNamedFunction(name))
       return func;
-    }
     return builder.createFunction(name, funTy);
   }
 
@@ -431,7 +428,7 @@ private:
                                           TC2> &convert) {
     auto ty = converter.genType(TC1, KIND);
     auto operand = genval(convert.left());
-    return builder.create<fir::ConvertOp>(getLoc(), ty, operand);
+    return builder.createConvert(getLoc(), ty, operand);
   }
 
   template <typename A>
@@ -445,8 +442,7 @@ private:
     auto *context = builder.getContext();
     auto logical = genval(op.left());
     auto one = genLogicalConstantAsI1(context, true);
-    auto val =
-        builder.create<fir::ConvertOp>(getLoc(), builder.getI1Type(), logical);
+    auto val = builder.createConvert(getLoc(), builder.getI1Type(), logical);
     return builder.create<mlir::XOrOp>(getLoc(), val, one);
   }
 
@@ -454,10 +450,8 @@ private:
   mlir::Value genval(const Fortran::evaluate::LogicalOperation<KIND> &op) {
     mlir::Value result;
     auto i1Type = builder.getI1Type();
-    auto lhs =
-        builder.create<fir::ConvertOp>(getLoc(), i1Type, genval(op.left()));
-    auto rhs =
-        builder.create<fir::ConvertOp>(getLoc(), i1Type, genval(op.right()));
+    auto lhs = builder.createConvert(getLoc(), i1Type, genval(op.left()));
+    auto rhs = builder.createConvert(getLoc(), i1Type, genval(op.right()));
     switch (op.logicalOperator) {
     case Fortran::evaluate::LogicalOperator::And:
       result = createBinaryOp<mlir::AndOp>(op, lhs, rhs);
@@ -761,7 +755,7 @@ private:
     auto arrTy = fir::dyn_cast_ptrEleTy(addr.getType());
     auto eleTy = arrTy.cast<fir::SequenceType>().getEleTy();
     auto refTy = fir::ReferenceType::get(eleTy);
-    auto base = builder.create<fir::ConvertOp>(loc, refTy, addr);
+    auto base = builder.createConvert(loc, refTy, addr);
     auto idxTy = builder.getIndexType();
     auto one = builder.createIntegerConstant(idxTy, 1);
     auto zero = builder.createIntegerConstant(idxTy, 0);
@@ -769,8 +763,7 @@ private:
       mlir::Value total = zero;
       assert(arr.shape.size() == aref.subscript().size());
       for (const auto &pair : llvm::zip(arr.shape, aref.subscript())) {
-        auto val = builder.create<fir::ConvertOp>(loc, idxTy,
-                                                  genval(std::get<1>(pair)));
+        auto val = builder.createConvert(loc, idxTy, genval(std::get<1>(pair)));
         auto diff = builder.create<mlir::SubIOp>(loc, val, one);
         auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
         total = builder.create<mlir::AddIOp>(loc, prod, total);
@@ -783,10 +776,9 @@ private:
       mlir::Value total = zero;
       assert(arr.shape.size() == aref.subscript().size());
       for (const auto &pair : llvm::zip(arr.shape, aref.subscript())) {
-        auto val = builder.create<fir::ConvertOp>(loc, idxTy,
-                                                  genval(std::get<1>(pair)));
-        auto lb = builder.create<fir::ConvertOp>(
-            loc, idxTy, std::get<0>(std::get<0>(pair)));
+        auto val = builder.createConvert(loc, idxTy, genval(std::get<1>(pair)));
+        auto lb =
+            builder.createConvert(loc, idxTy, std::get<0>(std::get<0>(pair)));
         auto diff = builder.create<mlir::SubIOp>(loc, val, lb);
         auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
         total = builder.create<mlir::AddIOp>(loc, prod, total);
@@ -937,8 +929,8 @@ private:
     // Implicit interface implementation only
     // TODO: Explicit interface, we need to use Characterize here,
     // evaluate::IntrinsicProcTable is required to use it.
-    llvm::SmallVector<mlir::Type, 2> argTypes;
-    llvm::SmallVector<mlir::Value, 2> operands;
+    llvm::SmallVector<mlir::Type, 8> argTypes;
+    llvm::SmallVector<mlir::Value, 8> operands;
     // Arguments of user functions must be lowered to the correct type.
     for (const auto &arg : procRef.arguments()) {
       if (!arg.has_value())
@@ -952,7 +944,7 @@ private:
         assert(argRef && "could not get symbol reference");
         if (builder.isCharacter(argRef.getType())) {
           argTypes.push_back(fir::BoxCharType::get(
-              builder.getContext(), 
+              builder.getContext(),
               builder.getCharacterKind(argRef.getType())));
           auto ch = builder.materializeCharacter(argRef);
           operands.push_back(builder.createEmboxChar(ch.first, ch.second));
@@ -987,7 +979,19 @@ private:
     mlir::FunctionType funTy =
         mlir::FunctionType::get(argTypes, resultType, builder.getContext());
     auto funName = applyNameMangling(procRef.proc());
-    getFunction(funName, funTy);
+    auto func = getFunction(funName, funTy);
+    if (func.getType() != funTy) {
+      // In older Fortran, procedure argument types are inferenced. Deal with
+      // the potential mismatches by adding casts to the arguments when the
+      // inferenced types do not match exactly.
+      llvm::SmallVector<mlir::Value, 8> castedOperands;
+      for (const auto &op : llvm::zip(operands, func.getType().getInputs())) {
+        auto cast = builder.convertWithSemantics(getLoc(), std::get<1>(op),
+                                                 std::get<0>(op));
+        castedOperands.push_back(cast);
+      }
+      operands.swap(castedOperands);
+    }
     auto call = builder.create<fir::CallOp>(
         getLoc(), resultType, builder.getSymbolRefAttr(funName), operands);
 
