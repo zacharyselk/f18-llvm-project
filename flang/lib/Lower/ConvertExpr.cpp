@@ -122,7 +122,7 @@ private:
   }
 
   /// Generate a logical/boolean constant of `value`
-  mlir::Value genLogicalConstantAsI1(mlir::MLIRContext *context, bool value) {
+  mlir::Value genBoolConstant(mlir::MLIRContext *context, bool value) {
     auto i1Type = builder.getI1Type();
     auto attr = builder.getIntegerAttr(i1Type, value ? 1 : 0);
     return builder.create<mlir::ConstantOp>(getLoc(), i1Type, attr).getResult();
@@ -441,7 +441,7 @@ private:
   mlir::Value genval(const Fortran::evaluate::Not<KIND> &op) {
     auto *context = builder.getContext();
     auto logical = genval(op.left());
-    auto one = genLogicalConstantAsI1(context, true);
+    auto one = genBoolConstant(context, true);
     auto val = builder.createConvert(getLoc(), builder.getI1Type(), logical);
     return builder.create<mlir::XOrOp>(getLoc(), val, one);
   }
@@ -525,7 +525,7 @@ private:
     if constexpr (TC == Fortran::lower::IntegerCat) {
       return genIntegerConstant<KIND>(builder.getContext(), value.ToInt64());
     } else if constexpr (TC == Fortran::lower::LogicalCat) {
-      return genLogicalConstantAsI1(builder.getContext(), value.IsTrue());
+      return genBoolConstant(builder.getContext(), value.IsTrue());
     } else if constexpr (TC == Fortran::lower::RealCat) {
       std::string str = value.DumpHexadecimal();
       if constexpr (KIND == 2) {
