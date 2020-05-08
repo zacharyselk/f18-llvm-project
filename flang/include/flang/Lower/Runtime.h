@@ -202,7 +202,8 @@ private:
 enum class RuntimeEntryCode {
   StopStatement,
   StopStatementText,
-  FailImageStatement
+  FailImageStatement,
+  ProgramEndStatement
 };
 
 mlir::FuncOp genRuntimeFunction(RuntimeEntryCode code,
