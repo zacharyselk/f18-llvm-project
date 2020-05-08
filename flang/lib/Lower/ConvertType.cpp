@@ -47,13 +47,13 @@ mlir::Type genFIRType(mlir::MLIRContext *, int) {
 // two argument template
 template <Fortran::common::TypeCategory TC, int KIND>
 mlir::Type genFIRType(mlir::MLIRContext *context) {
-  if constexpr (TC == Fortran::lower::IntegerCat) {
-    auto bits{Fortran::evaluate::Type<Fortran::lower::IntegerCat,
+  if constexpr (TC == Fortran::common::TypeCategory::Integer) {
+    auto bits{Fortran::evaluate::Type<Fortran::common::TypeCategory::Integer,
                                       KIND>::Scalar::bits};
     return mlir::IntegerType::get(bits, context);
-  } else if constexpr (TC == Fortran::lower::LogicalCat ||
-                       TC == Fortran::lower::CharacterCat ||
-                       TC == Fortran::lower::ComplexCat) {
+  } else if constexpr (TC == Fortran::common::TypeCategory::Logical ||
+                       TC == Fortran::common::TypeCategory::Character ||
+                       TC == Fortran::common::TypeCategory::Complex) {
     return genFIRType<TC>(context, KIND);
   } else {
     return {};
@@ -61,53 +61,60 @@ mlir::Type genFIRType(mlir::MLIRContext *context) {
 }
 
 template <>
-mlir::Type genFIRType<Fortran::lower::RealCat, 2>(mlir::MLIRContext *context) {
+mlir::Type
+genFIRType<Fortran::common::TypeCategory::Real, 2>(mlir::MLIRContext *context) {
   return mlir::FloatType::getF16(context);
 }
 
 template <>
-mlir::Type genFIRType<Fortran::lower::RealCat, 3>(mlir::MLIRContext *context) {
+mlir::Type
+genFIRType<Fortran::common::TypeCategory::Real, 3>(mlir::MLIRContext *context) {
   return mlir::FloatType::getBF16(context);
 }
 
 template <>
-mlir::Type genFIRType<Fortran::lower::RealCat, 4>(mlir::MLIRContext *context) {
+mlir::Type
+genFIRType<Fortran::common::TypeCategory::Real, 4>(mlir::MLIRContext *context) {
   return mlir::FloatType::getF32(context);
 }
 
 template <>
-mlir::Type genFIRType<Fortran::lower::RealCat, 8>(mlir::MLIRContext *context) {
+mlir::Type
+genFIRType<Fortran::common::TypeCategory::Real, 8>(mlir::MLIRContext *context) {
   return mlir::FloatType::getF64(context);
 }
 
 template <>
-mlir::Type genFIRType<Fortran::lower::RealCat, 10>(mlir::MLIRContext *context) {
+mlir::Type genFIRType<Fortran::common::TypeCategory::Real, 10>(
+    mlir::MLIRContext *context) {
   return fir::RealType::get(context, 10);
 }
 
 template <>
-mlir::Type genFIRType<Fortran::lower::RealCat, 16>(mlir::MLIRContext *context) {
+mlir::Type genFIRType<Fortran::common::TypeCategory::Real, 16>(
+    mlir::MLIRContext *context) {
   return fir::RealType::get(context, 16);
 }
 
 template <>
-mlir::Type genFIRType<Fortran::lower::RealCat>(mlir::MLIRContext *context,
-                                               int kind) {
-  if (Fortran::evaluate::IsValidKindOfIntrinsicType(Fortran::lower::RealCat,
-                                                    kind)) {
+mlir::Type
+genFIRType<Fortran::common::TypeCategory::Real>(mlir::MLIRContext *context,
+                                                int kind) {
+  if (Fortran::evaluate::IsValidKindOfIntrinsicType(
+          Fortran::common::TypeCategory::Real, kind)) {
     switch (kind) {
     case 2:
-      return genFIRType<Fortran::lower::RealCat, 2>(context);
+      return genFIRType<Fortran::common::TypeCategory::Real, 2>(context);
     case 3:
-      return genFIRType<Fortran::lower::RealCat, 3>(context);
+      return genFIRType<Fortran::common::TypeCategory::Real, 3>(context);
     case 4:
-      return genFIRType<Fortran::lower::RealCat, 4>(context);
+      return genFIRType<Fortran::common::TypeCategory::Real, 4>(context);
     case 8:
-      return genFIRType<Fortran::lower::RealCat, 8>(context);
+      return genFIRType<Fortran::common::TypeCategory::Real, 8>(context);
     case 10:
-      return genFIRType<Fortran::lower::RealCat, 10>(context);
+      return genFIRType<Fortran::common::TypeCategory::Real, 10>(context);
     case 16:
-      return genFIRType<Fortran::lower::RealCat, 16>(context);
+      return genFIRType<Fortran::common::TypeCategory::Real, 16>(context);
     }
     assert(false && "type translation not implemented");
   }
@@ -115,21 +122,22 @@ mlir::Type genFIRType<Fortran::lower::RealCat>(mlir::MLIRContext *context,
 }
 
 template <>
-mlir::Type genFIRType<Fortran::lower::IntegerCat>(mlir::MLIRContext *context,
-                                                  int kind) {
-  if (Fortran::evaluate::IsValidKindOfIntrinsicType(Fortran::lower::IntegerCat,
-                                                    kind)) {
+mlir::Type
+genFIRType<Fortran::common::TypeCategory::Integer>(mlir::MLIRContext *context,
+                                                   int kind) {
+  if (Fortran::evaluate::IsValidKindOfIntrinsicType(
+          Fortran::common::TypeCategory::Integer, kind)) {
     switch (kind) {
     case 1:
-      return genFIRType<Fortran::lower::IntegerCat, 1>(context);
+      return genFIRType<Fortran::common::TypeCategory::Integer, 1>(context);
     case 2:
-      return genFIRType<Fortran::lower::IntegerCat, 2>(context);
+      return genFIRType<Fortran::common::TypeCategory::Integer, 2>(context);
     case 4:
-      return genFIRType<Fortran::lower::IntegerCat, 4>(context);
+      return genFIRType<Fortran::common::TypeCategory::Integer, 4>(context);
     case 8:
-      return genFIRType<Fortran::lower::IntegerCat, 8>(context);
+      return genFIRType<Fortran::common::TypeCategory::Integer, 8>(context);
     case 16:
-      return genFIRType<Fortran::lower::IntegerCat, 16>(context);
+      return genFIRType<Fortran::common::TypeCategory::Integer, 16>(context);
     }
     assert(false && "type translation not implemented");
   }
@@ -137,28 +145,31 @@ mlir::Type genFIRType<Fortran::lower::IntegerCat>(mlir::MLIRContext *context,
 }
 
 template <>
-mlir::Type genFIRType<Fortran::lower::LogicalCat>(mlir::MLIRContext *context,
-                                                  int KIND) {
-  if (Fortran::evaluate::IsValidKindOfIntrinsicType(Fortran::lower::LogicalCat,
-                                                    KIND))
+mlir::Type
+genFIRType<Fortran::common::TypeCategory::Logical>(mlir::MLIRContext *context,
+                                                   int KIND) {
+  if (Fortran::evaluate::IsValidKindOfIntrinsicType(
+          Fortran::common::TypeCategory::Logical, KIND))
     return fir::LogicalType::get(context, KIND);
   return {};
 }
 
 template <>
-mlir::Type genFIRType<Fortran::lower::CharacterCat>(mlir::MLIRContext *context,
-                                                    int KIND) {
+mlir::Type
+genFIRType<Fortran::common::TypeCategory::Character>(mlir::MLIRContext *context,
+                                                     int KIND) {
   if (Fortran::evaluate::IsValidKindOfIntrinsicType(
-          Fortran::lower::CharacterCat, KIND))
+          Fortran::common::TypeCategory::Character, KIND))
     return fir::CharacterType::get(context, KIND);
   return {};
 }
 
 template <>
-mlir::Type genFIRType<Fortran::lower::ComplexCat>(mlir::MLIRContext *context,
-                                                  int KIND) {
-  if (Fortran::evaluate::IsValidKindOfIntrinsicType(Fortran::lower::ComplexCat,
-                                                    KIND))
+mlir::Type
+genFIRType<Fortran::common::TypeCategory::Complex>(mlir::MLIRContext *context,
+                                                   int KIND) {
+  if (Fortran::evaluate::IsValidKindOfIntrinsicType(
+          Fortran::common::TypeCategory::Complex, KIND))
     return fir::CplxType::get(context, KIND);
   return {};
 }
@@ -220,16 +231,17 @@ public:
   // non-template, arguments are runtime values
   mlir::Type genFIRTy(Fortran::common::TypeCategory tc, int kind) {
     switch (tc) {
-    case Fortran::lower::RealCat:
-      return genFIRType<Fortran::lower::RealCat>(context, kind);
-    case Fortran::lower::IntegerCat:
-      return genFIRType<Fortran::lower::IntegerCat>(context, kind);
-    case Fortran::lower::ComplexCat:
-      return genFIRType<Fortran::lower::ComplexCat>(context, kind);
-    case Fortran::lower::LogicalCat:
-      return genFIRType<Fortran::lower::LogicalCat>(context, kind);
-    case Fortran::lower::CharacterCat:
-      return genFIRType<Fortran::lower::CharacterCat>(context, kind);
+    case Fortran::common::TypeCategory::Real:
+      return genFIRType<Fortran::common::TypeCategory::Real>(context, kind);
+    case Fortran::common::TypeCategory::Integer:
+      return genFIRType<Fortran::common::TypeCategory::Integer>(context, kind);
+    case Fortran::common::TypeCategory::Complex:
+      return genFIRType<Fortran::common::TypeCategory::Complex>(context, kind);
+    case Fortran::common::TypeCategory::Logical:
+      return genFIRType<Fortran::common::TypeCategory::Logical>(context, kind);
+    case Fortran::common::TypeCategory::Character:
+      return genFIRType<Fortran::common::TypeCategory::Character>(context,
+                                                                  kind);
     default:
       break;
     }
@@ -243,8 +255,8 @@ public:
   }
 
   mlir::Type gen(const Fortran::evaluate::ImpliedDoIndex &) {
-    return genFIRType<Fortran::lower::IntegerCat>(
-        context, defaultKind<Fortran::lower::IntegerCat>());
+    return genFIRType<Fortran::common::TypeCategory::Integer>(
+        context, defaultKind<Fortran::common::TypeCategory::Integer>());
   }
 
   template <template <typename> typename A, Fortran::common::TypeCategory TC>
@@ -254,12 +266,12 @@ public:
 
   template <int KIND>
   mlir::Type gen(const Fortran::evaluate::TypeParamInquiry<KIND> &) {
-    return genFIRType<Fortran::lower::IntegerCat, KIND>(context);
+    return genFIRType<Fortran::common::TypeCategory::Integer, KIND>(context);
   }
 
   template <typename A>
   mlir::Type gen(const Fortran::evaluate::Relational<A> &) {
-    return genFIRType<Fortran::lower::LogicalCat, 1>(context);
+    return genFIRType<Fortran::common::TypeCategory::Logical, 1>(context);
   }
 
   template <template <typename> typename A, Fortran::common::TypeCategory TC,
@@ -315,7 +327,8 @@ public:
   mlir::Type genDummyArgType(const Fortran::semantics::Symbol &dummy) {
     if (auto *type{dummy.GetType()}) {
       auto *tySpec{type->AsIntrinsic()};
-      if (tySpec && tySpec->category() == Fortran::lower::CharacterCat) {
+      if (tySpec &&
+          tySpec->category() == Fortran::common::TypeCategory::Character) {
         auto kind = toConstant(tySpec->kind());
         return fir::BoxCharType::get(context, kind);
       }
@@ -363,20 +376,25 @@ public:
       if (auto *tySpec{type->AsIntrinsic()}) {
         int kind = toConstant(tySpec->kind());
         switch (tySpec->category()) {
-        case Fortran::lower::IntegerCat:
-          returnTy = genFIRType<Fortran::lower::IntegerCat>(context, kind);
+        case Fortran::common::TypeCategory::Integer:
+          returnTy =
+              genFIRType<Fortran::common::TypeCategory::Integer>(context, kind);
           break;
-        case Fortran::lower::RealCat:
-          returnTy = genFIRType<Fortran::lower::RealCat>(context, kind);
+        case Fortran::common::TypeCategory::Real:
+          returnTy =
+              genFIRType<Fortran::common::TypeCategory::Real>(context, kind);
           break;
-        case Fortran::lower::ComplexCat:
-          returnTy = genFIRType<Fortran::lower::ComplexCat>(context, kind);
+        case Fortran::common::TypeCategory::Complex:
+          returnTy =
+              genFIRType<Fortran::common::TypeCategory::Complex>(context, kind);
           break;
-        case Fortran::lower::CharacterCat:
-          returnTy = genFIRType<Fortran::lower::CharacterCat>(context, kind);
+        case Fortran::common::TypeCategory::Character:
+          returnTy = genFIRType<Fortran::common::TypeCategory::Character>(
+              context, kind);
           break;
-        case Fortran::lower::LogicalCat:
-          returnTy = genFIRType<Fortran::lower::LogicalCat>(context, kind);
+        case Fortran::common::TypeCategory::Logical:
+          returnTy =
+              genFIRType<Fortran::common::TypeCategory::Logical>(context, kind);
           break;
         default:
           emitError("symbol has unknown intrinsic type");
@@ -525,7 +543,7 @@ mlir::FunctionType Fortran::lower::translateSymbolToFIRFunctionType(
 }
 
 mlir::Type Fortran::lower::convertReal(mlir::MLIRContext *context, int kind) {
-  return genFIRType<RealCat>(context, kind);
+  return genFIRType<Fortran::common::TypeCategory::Real>(context, kind);
 }
 
 mlir::Type Fortran::lower::getSequenceRefType(mlir::Type refType) {

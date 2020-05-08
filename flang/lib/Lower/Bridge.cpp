@@ -408,14 +408,14 @@ private:
   }
 
   bool isNumericScalarCategory(Fortran::common::TypeCategory cat) {
-    return cat == Fortran::lower::IntegerCat ||
-           cat == Fortran::lower::RealCat ||
-           cat == Fortran::lower::ComplexCat ||
-           cat == Fortran::lower::LogicalCat;
+    return cat == Fortran::common::TypeCategory::Integer ||
+           cat == Fortran::common::TypeCategory::Real ||
+           cat == Fortran::common::TypeCategory::Complex ||
+           cat == Fortran::common::TypeCategory::Logical;
   }
 
   bool isCharacterCategory(Fortran::common::TypeCategory cat) {
-    return cat == Fortran::lower::CharacterCat;
+    return cat == Fortran::common::TypeCategory::Character;
   }
 
   mlir::Block *blockOfLabel(Fortran::lower::pft::Evaluation &eval,
@@ -1311,7 +1311,8 @@ private:
                 } else if (isCharacterCategory(lhsType->category())) {
                   TODO();
                 } else {
-                  assert(lhsType->category() == Fortran::lower::DerivedCat);
+                  assert(lhsType->category() ==
+                         Fortran::common::TypeCategory::Derived);
                   TODO();
                 }
               } else if (assignment.lhs.Rank() > 0) {
@@ -1340,7 +1341,8 @@ private:
                   auto rhs{genExprValue(assignment.rhs)};
                   builder->createAssign(lhs, rhs);
                 } else {
-                  assert(lhsType->category() == Fortran::lower::DerivedCat);
+                  assert(lhsType->category() ==
+                         Fortran::common::TypeCategory::Derived);
                   // Fortran 2018 10.2.1.3 p12 and p13
                   TODO();
                 }

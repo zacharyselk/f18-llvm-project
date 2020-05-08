@@ -116,7 +116,7 @@ private:
   template <int KIND>
   mlir::Value genIntegerConstant(mlir::MLIRContext *context,
                                  std::int64_t value) {
-    auto type = converter.genType(Fortran::lower::IntegerCat, KIND);
+    auto type = converter.genType(Fortran::common::TypeCategory::Integer, KIND);
     auto attr = builder.getIntegerAttr(type, value);
     return builder.create<mlir::ConstantOp>(getLoc(), type, attr);
   }
@@ -162,13 +162,14 @@ private:
 
   template <Fortran::common::TypeCategory TC, int KIND>
   mlir::FunctionType createFunctionType() {
-    if constexpr (TC == Fortran::lower::IntegerCat) {
-      auto output = converter.genType(Fortran::lower::IntegerCat, KIND);
+    if constexpr (TC == Fortran::common::TypeCategory::Integer) {
+      auto output =
+          converter.genType(Fortran::common::TypeCategory::Integer, KIND);
       llvm::SmallVector<mlir::Type, 2> inputs;
       inputs.push_back(output);
       inputs.push_back(output);
       return mlir::FunctionType::get(inputs, output, builder.getContext());
-    } else if constexpr (TC == Fortran::lower::RealCat) {
+    } else if constexpr (TC == Fortran::common::TypeCategory::Real) {
       auto output = Fortran::lower::convertReal(builder.getContext(), KIND);
       llvm::SmallVector<mlir::Type, 2> inputs;
       inputs.push_back(output);
@@ -282,14 +283,15 @@ private:
   mlir::Value genval(
       const Fortran::evaluate::Negate<Fortran::evaluate::Type<TC, KIND>> &op) {
     auto input = genval(op.left());
-    if constexpr (TC == Fortran::lower::IntegerCat) {
+    if constexpr (TC == Fortran::common::TypeCategory::Integer) {
       // Currently no Standard/FIR op for integer negation.
       auto zero = genIntegerConstant<KIND>(builder.getContext(), 0);
       return builder.create<mlir::SubIOp>(getLoc(), zero, input);
-    } else if constexpr (TC == Fortran::lower::RealCat) {
+    } else if constexpr (TC == Fortran::common::TypeCategory::Real) {
       return builder.create<fir::NegfOp>(getLoc(), input);
     } else {
-      static_assert(TC == Fortran::lower::ComplexCat, "Expected numeric type");
+      static_assert(TC == Fortran::common::TypeCategory::Complex,
+                    "Expected numeric type");
       return createBinaryOp<fir::NegcOp>(op);
     }
   }
@@ -297,12 +299,13 @@ private:
   template <Fortran::common::TypeCategory TC, int KIND>
   mlir::Value
   genval(const Fortran::evaluate::Add<Fortran::evaluate::Type<TC, KIND>> &op) {
-    if constexpr (TC == Fortran::lower::IntegerCat) {
+    if constexpr (TC == Fortran::common::TypeCategory::Integer) {
       return createBinaryOp<mlir::AddIOp>(op);
-    } else if constexpr (TC == Fortran::lower::RealCat) {
+    } else if constexpr (TC == Fortran::common::TypeCategory::Real) {
       return createBinaryOp<fir::AddfOp>(op);
     } else {
-      static_assert(TC == Fortran::lower::ComplexCat, "Expected numeric type");
+      static_assert(TC == Fortran::common::TypeCategory::Complex,
+                    "Expected numeric type");
       return createBinaryOp<fir::AddcOp>(op);
     }
   }
@@ -310,12 +313,13 @@ private:
   mlir::Value
   genval(const Fortran::evaluate::Subtract<Fortran::evaluate::Type<TC, KIND>>
              &op) {
-    if constexpr (TC == Fortran::lower::IntegerCat) {
+    if constexpr (TC == Fortran::common::TypeCategory::Integer) {
       return createBinaryOp<mlir::SubIOp>(op);
-    } else if constexpr (TC == Fortran::lower::RealCat) {
+    } else if constexpr (TC == Fortran::common::TypeCategory::Real) {
       return createBinaryOp<fir::SubfOp>(op);
     } else {
-      static_assert(TC == Fortran::lower::ComplexCat, "Expected numeric type");
+      static_assert(TC == Fortran::common::TypeCategory::Complex,
+                    "Expected numeric type");
       return createBinaryOp<fir::SubcOp>(op);
     }
   }
@@ -324,12 +328,13 @@ private:
   mlir::Value
   genval(const Fortran::evaluate::Multiply<Fortran::evaluate::Type<TC, KIND>>
              &op) {
-    if constexpr (TC == Fortran::lower::IntegerCat) {
+    if constexpr (TC == Fortran::common::TypeCategory::Integer) {
       return createBinaryOp<mlir::MulIOp>(op);
-    } else if constexpr (TC == Fortran::lower::RealCat) {
+    } else if constexpr (TC == Fortran::common::TypeCategory::Real) {
       return createBinaryOp<fir::MulfOp>(op);
     } else {
-      static_assert(TC == Fortran::lower::ComplexCat, "Expected numeric type");
+      static_assert(TC == Fortran::common::TypeCategory::Complex,
+                    "Expected numeric type");
       return createBinaryOp<fir::MulcOp>(op);
     }
   }
@@ -337,12 +342,13 @@ private:
   template <Fortran::common::TypeCategory TC, int KIND>
   mlir::Value genval(
       const Fortran::evaluate::Divide<Fortran::evaluate::Type<TC, KIND>> &op) {
-    if constexpr (TC == Fortran::lower::IntegerCat) {
+    if constexpr (TC == Fortran::common::TypeCategory::Integer) {
       return createBinaryOp<mlir::SignedDivIOp>(op);
-    } else if constexpr (TC == Fortran::lower::RealCat) {
+    } else if constexpr (TC == Fortran::common::TypeCategory::Real) {
       return createBinaryOp<fir::DivfOp>(op);
     } else {
-      static_assert(TC == Fortran::lower::ComplexCat, "Expected numeric type");
+      static_assert(TC == Fortran::common::TypeCategory::Complex,
+                    "Expected numeric type");
       return createBinaryOp<fir::DivcOp>(op);
     }
   }
@@ -396,12 +402,12 @@ private:
   genval(const Fortran::evaluate::Relational<Fortran::evaluate::Type<TC, KIND>>
              &op) {
     mlir::Value result{};
-    if constexpr (TC == Fortran::lower::IntegerCat) {
+    if constexpr (TC == Fortran::common::TypeCategory::Integer) {
       result = createCompareOp<mlir::CmpIOp>(op, translateRelational(op.opr));
-    } else if constexpr (TC == Fortran::lower::RealCat) {
+    } else if constexpr (TC == Fortran::common::TypeCategory::Real) {
       result =
           createFltCmpOp<fir::CmpfOp>(op, translateFloatRelational(op.opr));
-    } else if constexpr (TC == Fortran::lower::ComplexCat) {
+    } else if constexpr (TC == Fortran::common::TypeCategory::Complex) {
       bool eq{op.opr == Fortran::common::RelationalOperator::EQ};
       if (!eq && op.opr != Fortran::common::RelationalOperator::NE)
         llvm_unreachable("relation undefined for complex");
@@ -409,7 +415,7 @@ private:
       result = builder.createComplexCompare(genval(op.left()),
                                             genval(op.right()), eq);
     } else {
-      static_assert(TC == Fortran::lower::CharacterCat);
+      static_assert(TC == Fortran::common::TypeCategory::Character);
       builder.setLocation(getLoc());
       result = createCharCompare(op, translateRelational(op.opr));
     }
@@ -522,11 +528,11 @@ private:
   mlir::Value genScalarLit(
       const Fortran::evaluate::Scalar<Fortran::evaluate::Type<TC, KIND>>
           &value) {
-    if constexpr (TC == Fortran::lower::IntegerCat) {
+    if constexpr (TC == Fortran::common::TypeCategory::Integer) {
       return genIntegerConstant<KIND>(builder.getContext(), value.ToInt64());
-    } else if constexpr (TC == Fortran::lower::LogicalCat) {
+    } else if constexpr (TC == Fortran::common::TypeCategory::Logical) {
       return genLogicalConstantAsI1(builder.getContext(), value.IsTrue());
-    } else if constexpr (TC == Fortran::lower::RealCat) {
+    } else if constexpr (TC == Fortran::common::TypeCategory::Real) {
       std::string str = value.DumpHexadecimal();
       if constexpr (KIND == 2) {
         llvm::APFloat floatVal{llvm::APFloatBase::IEEEhalf(), str};
@@ -545,8 +551,9 @@ private:
         llvm::APFloat floatVal{llvm::APFloatBase::IEEEdouble(), str};
         return genRealConstant<KIND>(builder.getContext(), floatVal);
       }
-    } else if constexpr (TC == Fortran::lower::ComplexCat) {
-      using TR = Fortran::evaluate::Type<Fortran::lower::RealCat, KIND>;
+    } else if constexpr (TC == Fortran::common::TypeCategory::Complex) {
+      using TR =
+          Fortran::evaluate::Type<Fortran::common::TypeCategory::Real, KIND>;
       return genval(Fortran::evaluate::ComplexConstructor<KIND>{
           Fortran::evaluate::Expr<TR>{
               Fortran::evaluate::Constant<TR>{value.REAL()}},
@@ -595,7 +602,7 @@ private:
         con.GetScalarValue();
     if (!opt.has_value())
       llvm_unreachable("constant has no value");
-    if constexpr (TC == Fortran::lower::CharacterCat) {
+    if constexpr (TC == Fortran::common::TypeCategory::Character) {
       return genCharLit<KIND>(opt.value(), con.LEN());
     }
     return genScalarLit<TC, KIND>(opt.value());
@@ -604,7 +611,7 @@ private:
   template <Fortran::common::TypeCategory TC>
   mlir::Value genval(
       const Fortran::evaluate::Constant<Fortran::evaluate::SomeKind<TC>> &con) {
-    if constexpr (TC == Fortran::lower::IntegerCat) {
+    if constexpr (TC == Fortran::common::TypeCategory::Integer) {
       auto opt = (*con).ToInt64();
       auto type = getSomeKindInteger();
       auto attr = builder.getIntegerAttr(type, opt);
@@ -917,7 +924,7 @@ private:
   template <typename A>
   bool isCharacterType(const A &exp) {
     if (auto type = exp.GetType())
-      return type->category() == Fortran::lower::CharacterCat;
+      return type->category() == Fortran::common::TypeCategory::Character;
     return false;
   }
 
@@ -1035,9 +1042,8 @@ private:
   }
 
   template <int KIND>
-  mlir::Value
-  genval(const Fortran::evaluate::Expr<
-         Fortran::evaluate::Type<Fortran::lower::LogicalCat, KIND>> &exp) {
+  mlir::Value genval(const Fortran::evaluate::Expr<Fortran::evaluate::Type<
+                         Fortran::common::TypeCategory::Logical, KIND>> &exp) {
     return std::visit([&](const auto &e) { return genval(e); }, exp.u);
   }
 
