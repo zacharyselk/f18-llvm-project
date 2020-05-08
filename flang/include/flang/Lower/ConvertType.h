@@ -60,13 +60,6 @@ namespace lower {
 using SomeExpr = evaluate::Expr<evaluate::SomeType>;
 using SymbolRef = common::Reference<const semantics::Symbol>;
 
-constexpr common::TypeCategory IntegerCat{common::TypeCategory::Integer};
-constexpr common::TypeCategory RealCat{common::TypeCategory::Real};
-constexpr common::TypeCategory ComplexCat{common::TypeCategory::Complex};
-constexpr common::TypeCategory CharacterCat{common::TypeCategory::Character};
-constexpr common::TypeCategory LogicalCat{common::TypeCategory::Logical};
-constexpr common::TypeCategory DerivedCat{common::TypeCategory::Derived};
-
 mlir::Type getFIRType(mlir::MLIRContext *ctxt,
                       common::IntrinsicTypeDefaultKinds const &defaults,
                       common::TypeCategory tc, int kind);
