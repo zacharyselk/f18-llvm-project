@@ -23,6 +23,7 @@
 #include "mlir/Target/LLVMIR.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Config/abi-breaking.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
@@ -1089,7 +1090,7 @@ struct ConvertOpConversion : public FIROpConversion<fir::ConvertOp> {
   static mlir::Type getComplexEleTy(mlir::Type complex) {
     if (auto cc = complex.dyn_cast<mlir::ComplexType>())
       return cc.getElementType();
-    return complex.cast<fir::CplxType>().getElementType();
+    return complex.cast<fir::CplxType>().getEleTy();
   }
 };
 
@@ -1258,8 +1259,9 @@ struct ValueOpCommon {
     return {};
   }
 
-  // Translate the arguments pertaining to any multidimensional array to row-major order for LLVM-IR.
-  static void toRowMajor(llvm::SmallVectorImpl<mlir::Attribute>& attrs,
+  // Translate the arguments pertaining to any multidimensional array to
+  // row-major order for LLVM-IR.
+  static void toRowMajor(llvm::SmallVectorImpl<mlir::Attribute> &attrs,
                          mlir::Type ty) {
     const auto end = attrs.size();
     for (std::remove_const_t<decltype(end)> i = 0; i < end; ++i) {
@@ -1272,20 +1274,16 @@ struct ValueOpCommon {
         ty = seq.getEleTy();
         continue;
       }
-      if (auto rec = ty.dyn_cast<fir::RecordType>()) {
-        ty = rec.getType(attrs[i].cast<mlir::IntegerAttr>().getUInt());
-        continue;
-      }
-      if (auto box = ty.dyn_cast<fir::BoxType>()) {
-        ty = box.getEleTy();
-        continue;
-      }
-      if (auto box = ty.dyn_cast<fir::BoxCharType>()) {
-        ty = box.getEleTy();
-        continue;
-      }
-      if (auto tup = ty.dyn_cast<mlir::TupleType>()) {
-        ty = tup.getType(attrs[i].cast<mlir::IntegerAttr>().getUInt());
+      if (auto eleTy =
+              llvm::TypeSwitch<mlir::Type, mlir::Type>(ty)
+                  .Case<fir::RecordType, mlir::TupleType>([&](auto match) {
+                    return match.getType(
+                        attrs[i].cast<mlir::IntegerAttr>().getUInt());
+                  })
+                  .Case<fir::BoxType, fir::BoxCharType, fir::CplxType>(
+                      [](auto match) { return match.getEleTy(); })
+                  .Default([](mlir::Type) { return mlir::Type{}; })) {
+        ty = eleTy;
         continue;
       }
       llvm_unreachable("index into invalid type");
