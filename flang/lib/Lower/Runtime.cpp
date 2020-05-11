@@ -13,39 +13,37 @@
 
 #include "../runtime/stop.h"
 
-struct RuntimeEntry {
-  using Key = Fortran::lower::RuntimeEntryCode;
-  Key key;
-  llvm::StringRef symbol;
-  Fortran::lower::FuncTypeBuilderFunc typeBuilder;
-};
+using Fortran::lower::operator""_rt_ident;
 
-#define QUOTE_HELPER(X) #X
-#define QUOTE(X) QUOTE_HELPER(X)
-#define QUOTE_RTNAME(X) QUOTE(RTNAME(X))
+#define MakeRuntimeEntry(X) mkKey(RTNAME(X))
 
-#define MakeEntry(X)                                                           \
-  {                                                                            \
-    Fortran::lower::RuntimeEntryCode::X, QUOTE_RTNAME(X),                      \
-        Fortran::lower::RuntimeTableKey<decltype(RTNAME(X))>::getTypeModel()   \
-  }
-
-static constexpr RuntimeEntry runtimeTable[]{
-    MakeEntry(StopStatement), MakeEntry(StopStatementText),
-    MakeEntry(FailImageStatement), MakeEntry(ProgramEndStatement)};
-
-static constexpr Fortran::lower::StaticMultimapView runtimeMap(runtimeTable);
-
-mlir::FuncOp
-Fortran::lower::genRuntimeFunction(RuntimeEntryCode code,
-                                   Fortran::lower::FirOpBuilder &builder) {
-  auto entry = runtimeMap.find(code);
-  assert(entry != runtimeMap.end());
-  auto func = builder.getNamedFunction(entry->symbol);
+template <typename RuntimeEntry>
+static mlir::FuncOp genRuntimeFunction(Fortran::lower::FirOpBuilder &builder) {
+  auto func = builder.getNamedFunction(RuntimeEntry::name);
   if (func)
     return func;
-  auto funTy = entry->typeBuilder(builder.getContext());
-  func = builder.createFunction(entry->symbol, funTy);
+  auto funTy = RuntimeEntry::getTypeModel()(builder.getContext());
+  func = builder.createFunction(RuntimeEntry::name, funTy);
   func.setAttr("fir.runtime", builder.getUnitAttr());
   return func;
+}
+
+mlir::FuncOp
+Fortran::lower::genStopStatementRuntime(Fortran::lower::FirOpBuilder &builder) {
+  return genRuntimeFunction<MakeRuntimeEntry(StopStatement)>(builder);
+}
+
+mlir::FuncOp Fortran::lower::genStopStatementTextRuntime(
+    Fortran::lower::FirOpBuilder &builder) {
+  return genRuntimeFunction<MakeRuntimeEntry(StopStatementText)>(builder);
+}
+
+mlir::FuncOp Fortran::lower::genFailImageStatementRuntime(
+    Fortran::lower::FirOpBuilder &builder) {
+  return genRuntimeFunction<MakeRuntimeEntry(FailImageStatement)>(builder);
+}
+
+mlir::FuncOp Fortran::lower::genProgramEndStatementRuntime(
+    Fortran::lower::FirOpBuilder &builder) {
+  return genRuntimeFunction<MakeRuntimeEntry(ProgramEndStatement)>(builder);
 }
