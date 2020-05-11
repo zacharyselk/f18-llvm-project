@@ -1257,6 +1257,40 @@ struct ValueOpCommon {
     llvm_unreachable("must be a constant op");
     return {};
   }
+
+  // Translate the arguments pertaining to any multidimensional array to row-major order for LLVM-IR.
+  static void toRowMajor(llvm::SmallVectorImpl<mlir::Attribute>& attrs,
+                         mlir::Type ty) {
+    const auto end = attrs.size();
+    for (std::remove_const_t<decltype(end)> i = 0; i < end; ++i) {
+      if (auto seq = ty.dyn_cast<fir::SequenceType>()) {
+        const auto dim = seq.getDimension();
+        if (dim > 1) {
+          std::reverse(attrs.begin() + i, attrs.begin() + i + dim);
+          i += dim - 1;
+        }
+        ty = seq.getEleTy();
+        continue;
+      }
+      if (auto rec = ty.dyn_cast<fir::RecordType>()) {
+        ty = rec.getType(attrs[i].cast<mlir::IntegerAttr>().getUInt());
+        continue;
+      }
+      if (auto box = ty.dyn_cast<fir::BoxType>()) {
+        ty = box.getEleTy();
+        continue;
+      }
+      if (auto box = ty.dyn_cast<fir::BoxCharType>()) {
+        ty = box.getEleTy();
+        continue;
+      }
+      if (auto tup = ty.dyn_cast<mlir::TupleType>()) {
+        ty = tup.getType(attrs[i].cast<mlir::IntegerAttr>().getUInt());
+        continue;
+      }
+      llvm_unreachable("index into invalid type");
+    }
+  }
 };
 
 /// Extract a subobject value from an ssa-value of aggregate type
@@ -1274,6 +1308,7 @@ struct ExtractValueOpConversion
     SmallVector<mlir::Attribute, 8> attrs;
     for (std::size_t i = 1, end{operands.size()}; i < end; ++i)
       attrs.push_back(getValue(operands[i]));
+    toRowMajor(attrs, extractVal.adt().getType());
     auto position = mlir::ArrayAttr::get(attrs, extractVal.getContext());
     rewriter.replaceOpWithNewOp<mlir::LLVM::ExtractValueOp>(
         extractVal, ty, operands[0], position);
@@ -1296,6 +1331,7 @@ struct InsertValueOpConversion
     SmallVector<mlir::Attribute, 8> attrs;
     for (std::size_t i = 2, end{operands.size()}; i < end; ++i)
       attrs.push_back(getValue(operands[i]));
+    toRowMajor(attrs, insertVal.adt().getType());
     auto position = mlir::ArrayAttr::get(attrs, insertVal.getContext());
     rewriter.replaceOpWithNewOp<mlir::LLVM::InsertValueOp>(
         insertVal, ty, operands[0], operands[1], position);
