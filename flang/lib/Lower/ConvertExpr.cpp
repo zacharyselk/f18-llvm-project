@@ -568,20 +568,20 @@ private:
   mlir::Value genArrayLit(
       const Fortran::evaluate::Constant<Fortran::evaluate::Type<TC, KIND>>
           &con) {
-    // TODO:
-    // - Multi-dimensional array
-    if (con.Rank() > 1) {
-      TODO(); // "Multi dimensional array not yet supported"
-    }
-    fir::SequenceType::Shape shape(1, con.shape()[0]);
+    // Convert Ev::ConstantSubs to SequenceType::Shape
+    fir::SequenceType::Shape shape(con.shape().begin(), con.shape().end());
     auto arrayTy = fir::SequenceType::get(shape, converter.genType(TC, KIND));
     auto idxTy = builder.getIndexType();
     mlir::Value array = builder.create<fir::UndefOp>(getLoc(), arrayTy);
     Fortran::evaluate::ConstantSubscripts subscripts = con.lbounds();
-    std::int64_t counter = 0;
     do {
       auto constant = genScalarLit<TC, KIND>(con.At(subscripts));
-      auto idx = builder.createIntegerConstant(idxTy, counter++);
+      std::vector<mlir::Value> idx;
+      for (const auto &pair : llvm::zip(subscripts, con.lbounds())) {
+        const auto &dim = std::get<0>(pair);
+        const auto &lb = std::get<1>(pair);
+        idx.push_back(builder.createIntegerConstant(idxTy, dim - lb));
+      }
       array = builder.create<fir::InsertValueOp>(getLoc(), arrayTy, array,
                                                  constant, idx);
     } while (con.IncrementSubscripts(subscripts));
