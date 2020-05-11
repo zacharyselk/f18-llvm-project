@@ -1508,8 +1508,7 @@ private:
   // call FAIL IMAGE in runtime
   void genFIR(Fortran::lower::pft::Evaluation &eval,
               const Fortran::parser::FailImageStmt &stmt) {
-    auto callee = genRuntimeFunction(
-        Fortran::lower::RuntimeEntryCode::FailImageStatement, *builder);
+    auto callee = genFailImageStatementRuntime(*builder);
     llvm::SmallVector<mlir::Value, 1> operands; // FAIL IMAGE has no args
     builder->create<mlir::CallOp>(toLocation(), callee, operands);
   }
@@ -1517,8 +1516,7 @@ private:
   // call STOP, ERROR STOP in runtime
   void genFIR(Fortran::lower::pft::Evaluation &eval,
               const Fortran::parser::StopStmt &stmt) {
-    auto callee = genRuntimeFunction(
-        Fortran::lower::RuntimeEntryCode::StopStatement, *builder);
+    auto callee = genStopStatementRuntime(*builder);
     auto calleeType = callee.getType();
     llvm::SmallVector<mlir::Value, 8> operands;
     assert(calleeType.getNumInputs() == 3 &&
@@ -1556,8 +1554,7 @@ private:
     auto i = 0;
     for (auto &op : operands) {
       auto type = calleeType.getInput(i++);
-      if (op.getType() != type)
-        op = builder->create<fir::ConvertOp>(toLocation(), type, op);
+      op = builder->createConvert(toLocation(), type, op);
     }
     builder->create<mlir::CallOp>(toLocation(), callee, operands);
   }
