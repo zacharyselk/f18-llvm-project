@@ -32,6 +32,10 @@ static bool IsDescriptor(const ObjectEntityDetails &details) {
     }
   }
   // TODO: Automatic (adjustable) arrays - are they descriptors?
+  if (details.isDummy()) {
+    return details.IsAssumedShape() || details.IsDeferredShape() ||
+        details.IsAssumedRank();
+  }
   return !details.shape().empty() && !details.shape().IsConstantShape();
 }
 
