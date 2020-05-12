@@ -112,7 +112,7 @@ public:
   static CplxType get(mlir::MLIRContext *ctxt, KindTy kind);
 
   /// Get the corresponding fir.real<k> type.
-  mlir::Type getEleTy() const;
+  mlir::Type getElementType() const;
 
   KindTy getFKind() const;
 };
