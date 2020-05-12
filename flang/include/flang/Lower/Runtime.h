@@ -197,16 +197,12 @@ private:
   Range range{nullptr, nullptr};
 };
 
-// Define Fortran related language (other than IO and maths)
-// TODO: complete this list while working on the runtime.
-enum class RuntimeEntryCode {
-  StopStatement,
-  StopStatementText,
-  FailImageStatement
-};
+// Define Fortran statement related runtime (other than IO and maths)
 
-mlir::FuncOp genRuntimeFunction(RuntimeEntryCode code,
-                                Fortran::lower::FirOpBuilder &builder);
+mlir::FuncOp genStopStatementRuntime(FirOpBuilder &);
+mlir::FuncOp genStopStatementTextRuntime(FirOpBuilder &);
+mlir::FuncOp genFailImageStatementRuntime(FirOpBuilder &);
+mlir::FuncOp genProgramEndStatementRuntime(FirOpBuilder &);
 
 } // namespace Fortran::lower
 
