@@ -109,23 +109,6 @@ static bool isExplicitShape(const Fortran::semantics::Symbol &sym) {
   return false;
 }
 
-/// Temporary helper to detect shapes that do not require evaluating
-/// bound expressions at runtime or to get the shape from a descriptor.
-static bool isConstantShape(const Fortran::semantics::ArraySpec &shape) {
-  auto isConstant = [](const auto &bound) {
-    const auto &expr = bound.GetExplicit();
-    return expr.has_value() && Fortran::evaluate::IsConstantExpr(*expr);
-  };
-  for (const auto &susbcript : shape) {
-    const auto &lb = susbcript.lbound();
-    const auto &ub = susbcript.ubound();
-    if (isConstant(lb) && (isConstant(ub) || ub.isAssumed()))
-      continue;
-    return false;
-  }
-  return true;
-}
-
 namespace {
 struct SymbolIndexAnalyzer {
   using FromBox = std::monostate;
@@ -1647,11 +1630,14 @@ private:
         if (!sym.GetType()->AsIntrinsic()) {
           TODO(); // Derived type / polymorphic
         }
+	auto symTy = genType(sym);
+	auto loc = toLocation();
         global = builder->createGlobal(
-            toLocation(), genType(sym), globalName, isConst,
+            loc, symTy, globalName, isConst,
             [&](Fortran::lower::FirOpBuilder &builder) {
               auto initVal = genExprValue(details->init().value());
-              builder.create<fir::HasValueOp>(toLocation(), initVal);
+	      auto castTo = builder.createConvert(loc, symTy, initVal);
+              builder.create<fir::HasValueOp>(loc, castTo);
             });
       } else {
         global = builder->createGlobal(toLocation(), genType(sym), globalName);
