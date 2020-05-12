@@ -1629,13 +1629,13 @@ private:
         if (!sym.GetType()->AsIntrinsic()) {
           TODO(); // Derived type / polymorphic
         }
-	auto symTy = genType(sym);
-	auto loc = toLocation();
+        auto symTy = genType(sym);
+        auto loc = toLocation();
         global = builder->createGlobal(
             loc, symTy, globalName, isConst,
             [&](Fortran::lower::FirOpBuilder &builder) {
               auto initVal = genExprValue(details->init().value());
-	      auto castTo = builder.createConvert(loc, symTy, initVal);
+              auto castTo = builder.createConvert(loc, symTy, initVal);
               builder.create<fir::HasValueOp>(loc, castTo);
             });
       } else {
@@ -1879,7 +1879,7 @@ private:
   }
 
   void instantiateVar(const Fortran::lower::pft::Variable &var) {
-    if (var.isGlobal()) 
+    if (var.isGlobal())
       instantiateGlobal(var);
     else
       instantiateLocal(var);
