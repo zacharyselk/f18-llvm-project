@@ -99,14 +99,12 @@ static bool symIsChar(const Fortran::semantics::Symbol &sym) {
 
 static bool symIsArray(const Fortran::semantics::Symbol &sym) {
   const auto *det = sym.detailsIf<Fortran::semantics::ObjectEntityDetails>();
-  return det ? det->IsArray() : false;
+  return det && det->IsArray();
 }
 
 static bool isExplicitShape(const Fortran::semantics::Symbol &sym) {
   const auto *det = sym.detailsIf<Fortran::semantics::ObjectEntityDetails>();
-  if (det && det->IsArray())
-    return det->shape().IsExplicitShape();
-  return false;
+  return det && det->IsArray() && det->shape().IsExplicitShape();
 }
 
 namespace {
