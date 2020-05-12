@@ -913,7 +913,7 @@ CplxType fir::CplxType::get(mlir::MLIRContext *ctxt, KindTy kind) {
   return Base::get(ctxt, kind);
 }
 
-mlir::Type fir::CplxType::getEleTy() const {
+mlir::Type fir::CplxType::getElementType() const {
   return fir::RealType::get(getContext(), getFKind());
 }
 
