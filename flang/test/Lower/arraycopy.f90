@@ -1,7 +1,10 @@
+
 ! RUN: bbc %s -o - | FileCheck %s
 
 ! CHECK-LABEL: _QPsub
 
+! F77 code for the array computation c = ((a + b) * c) + (b / 2.0).
+! (Eventually, test that the temporary arrays are eliminated.)
 subroutine sub(a,b,c,i,j,k)
   real a(i,j,k), b(i,j,k), c(i,j,k)
   real t1(i,j,k), t2(i,j,k)
