@@ -78,6 +78,9 @@ public:
   void createAssign(mlir::Value lptr, mlir::Value llen, mlir::Value rptr,
                     mlir::Value rlen);
 
+  /// Create lhs // rhs in temp obtained with fir.alloca
+  mlir::Value createConcatenate(mlir::Value lhs, mlir::Value rhs);
+
   mlir::Value createLenTrim(mlir::Value str);
 
   /// Embox \p addr and \p len and return fir.boxchar.
@@ -176,7 +179,7 @@ protected:
 
   template <Part partId>
   mlir::Value createPartId() {
-    return impl().createIntegerConstant(impl().getIntegerType(32),
+    return impl().createIntegerConstant(impl().getIndexType(),
                                         static_cast<int>(partId));
   }
 };
