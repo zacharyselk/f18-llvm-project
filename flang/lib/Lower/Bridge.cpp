@@ -25,6 +25,7 @@
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Parser.h"
 #include "mlir/Target/LLVMIR.h"
+#include "mlir/Transforms/RegionUtils.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MD5.h"
@@ -1993,6 +1994,8 @@ private:
     else
       genFIRProcedureExit(funit, funit.getSubprogramSymbol());
 
+    // immediately throw away any dead code just created
+    mlir::simplifyRegions({builder->getRegion()});
     delete builder;
     builder = nullptr;
     localSymbols.clear();
