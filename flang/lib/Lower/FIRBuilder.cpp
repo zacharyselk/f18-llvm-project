@@ -312,6 +312,10 @@ struct CharacterOpsBuilderImpl {
   }
 
   mlir::Value createLoadCharAt(Char str, mlir::Value index) {
+    // In case this is addressing a length one character scalar simply return
+    // the single character.
+    if (str.data.getType().isa<fir::CharacterType>())
+      return str.data;
     auto addr = builder.createHere<fir::CoordinateOp>(str.getReferenceType(),
                                                       str.data, index);
     return builder.createHere<fir::LoadOp>(addr);
@@ -419,6 +423,25 @@ struct CharacterOpsBuilderImpl {
       auto maxPadding = builder.createHere<mlir::SubIOp>(lhs.len, one);
       createPadding(lhs, copyCount, maxPadding);
     }
+  }
+
+  Char createConcatenate(Char lhs, Char rhs) {
+    mlir::Value len = builder.createHere<mlir::AddIOp>(lhs.len, rhs.len);
+    auto temp = createTemp(rhs.getCharacterType(), len);
+    createCopy(temp, lhs, lhs.len);
+    auto one = builder.createIntegerConstant(len.getType(), 1);
+    auto upperBound = builder.createHere<mlir::SubIOp>(len, one);
+    auto lhsLen = builder.createConvert(builder.getLoc(),
+                                        builder.getIndexType(), lhs.len);
+    builder.createLoop(
+        lhs.len, upperBound, one,
+        [&](Fortran::lower::FirOpBuilder &handler, mlir::Value index) {
+          CharacterOpsBuilderImpl charHandler{handler};
+          auto rhsIndex = builder.createHere<mlir::SubIOp>(index, lhsLen);
+          auto charVal = charHandler.createLoadCharAt(rhs, rhsIndex);
+          charHandler.createStoreCharAt(temp, index, charVal);
+        });
+    return temp;
   }
 
   // Returns integer with code for blank. The integer has the same
@@ -597,6 +620,18 @@ void Fortran::lower::CharacterOpsBuilder<T>::createAssign(mlir::Value lptr,
 template void
 Fortran::lower::CharacterOpsBuilder<Fortran::lower::FirOpBuilder>::createAssign(
     mlir::Value lptr, mlir::Value llen, mlir::Value rptr, mlir::Value rlen);
+
+template <typename T>
+mlir::Value
+Fortran::lower::CharacterOpsBuilder<T>::createConcatenate(mlir::Value lhs,
+                                                          mlir::Value rhs) {
+  CharacterOpsBuilderImpl bimpl{impl()};
+  return bimpl.createEmbox(bimpl.createConcatenate(
+      bimpl.toDataLengthPair(lhs), bimpl.toDataLengthPair(rhs)));
+}
+
+template mlir::Value Fortran::lower::CharacterOpsBuilder<
+    Fortran::lower::FirOpBuilder>::createConcatenate(mlir::Value, mlir::Value);
 
 template <typename T>
 mlir::Value
