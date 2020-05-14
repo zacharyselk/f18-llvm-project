@@ -14,8 +14,10 @@ ______________
   . lapack/INSTALL/second_INT_ETIME.f - 'etime' is not a known intrinsic procedure
   . lapack/INSTALL/dsecnd_INT_ETIME.f - Failed in semantics
   . lapack/INSTALL/second_INT_ETIME.f - Failed in semantics
-
   . lapack/SRC/chla_transtype.f - type of return operand 0 ('!fir.array<1x!fir.char<1>>') doesn't match function result type ('!fir.char<1>')
+
+[unassigned]
+
 
 FIXED
 _____
