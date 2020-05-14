@@ -376,7 +376,7 @@ private:
 
   template <int KIND>
   mlir::Value genval(const Fortran::evaluate::Concat<KIND> &op) {
-    TODO();
+    return builder.createConcatenate(genval(op.left()), genval(op.right()));
   }
 
   /// MIN and MAX operations
