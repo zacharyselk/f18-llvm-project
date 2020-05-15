@@ -23,6 +23,6 @@ target_link_libraries(FortranLower
   FIRSupport
   MLIRAffineToStandard
   MLIRLLVMIR
-  MLIRLoopToStandard
+  MLIRSCFToStandard
   MLIRStandardOps
 )
