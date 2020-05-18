@@ -13,6 +13,7 @@
 #include "flang/Evaluate/fold.h"
 #include "flang/Evaluate/real.h"
 #include "flang/Lower/Bridge.h"
+#include "flang/Lower/CallInterface.h"
 #include "flang/Lower/CharRT.h"
 #include "flang/Lower/ConvertType.h"
 #include "flang/Lower/FIRBuilder.h"
@@ -928,7 +929,7 @@ private:
     return false;
   }
 
-  mlir::Value genProcedureRef(const Fortran::evaluate::ProcedureRef procRef,
+  mlir::Value genProcedureRef(const Fortran::evaluate::ProcedureRef &procRef,
                               mlir::ArrayRef<mlir::Type> resultType) {
     if (const auto *intrinsic{procRef.proc().GetSpecificIntrinsic()}) {
       return genIntrinsicRef(procRef, *intrinsic, resultType[0]);
@@ -936,71 +937,99 @@ private:
     // Implicit interface implementation only
     // TODO: Explicit interface, we need to use Characterize here,
     // evaluate::IntrinsicProcTable is required to use it.
-    llvm::SmallVector<mlir::Type, 8> argTypes;
-    llvm::SmallVector<mlir::Value, 8> operands;
-    // Arguments of user functions must be lowered to the correct type.
-    for (const auto &arg : procRef.arguments()) {
-      if (!arg.has_value())
+    Fortran::lower::CallerInterface caller(procRef, converter);
+    using PassBy = Fortran::lower::CallerInterface::PassEntityBy;
+    auto func = caller.getFuncOp();
+
+    // helper to embox and place arguments passed in memory.
+    auto emboxAndPlaceArgument =
+        [&](const Fortran::lower::CallerInterface::PassedEntity &arg,
+            mlir::Value firArgRef) {
+          if (arg.passBy == PassBy::BaseAddress) {
+            caller.placeInput(arg, firArgRef);
+          } else if (arg.passBy == PassBy::BoxChar) {
+            auto boxChar = firArgRef;
+            if (!boxChar.getType().isa<fir::BoxCharType>()) {
+              auto ch = builder.materializeCharacter(boxChar);
+              boxChar = builder.createEmboxChar(ch.first, ch.second);
+            }
+            caller.placeInput(arg, boxChar);
+          } else if (arg.passBy == PassBy::Descriptor) {
+            TODO(); // generate emboxing if need.
+          } else if (arg.passBy == PassBy::AddressAndLength) {
+            auto ch = builder.materializeCharacter(firArgRef);
+            caller.placeAddressAndLengthInput(arg, ch.first, ch.second);
+          } else {
+            llvm_unreachable("pass by value not handled here");
+          }
+        };
+
+    for (const auto &arg : caller.getPassedArguments()) {
+      const auto *actual = arg.entity;
+      if (!actual)
         TODO(); // optional arguments
-      const auto *expr = arg->UnwrapExpr();
+      const auto *expr = actual->UnwrapExpr();
       if (!expr)
         TODO(); // assumed type arguments
-      if (const auto *sym =
+
+      mlir::Value argRef;
+      mlir::Value argVal;
+      if (const auto *argSymbol =
               Fortran::evaluate::UnwrapWholeSymbolDataRef(*expr)) {
-        mlir::Value argRef = symMap.lookupSymbol(*sym);
-        assert(argRef && "could not get symbol reference");
-        if (builder.isCharacter(argRef.getType())) {
-          argTypes.push_back(fir::BoxCharType::get(
-              builder.getContext(),
-              builder.getCharacterKind(argRef.getType())));
-          auto ch = builder.materializeCharacter(argRef);
-          operands.push_back(builder.createEmboxChar(ch.first, ch.second));
-        } else {
-          argTypes.push_back(argRef.getType());
-          operands.push_back(argRef);
-        }
+        argRef = symMap.lookupSymbol(*argSymbol);
       } else {
-        // create a temp to store the expression value
-        auto val = genval(*expr);
-        mlir::Value addr;
-        if (fir::isa_passbyref_type(val.getType())) {
-          // expression is already a reference, so just pass it
-          addr = val;
-        } else {
-          // expression is a value, so store it in a temporary so we can
-          // pass-by-reference
-          addr = builder.createTemporary(getLoc(), val.getType());
-          builder.create<fir::StoreOp>(getLoc(), val, addr);
+        argVal = genval(*expr);
+        if (fir::isa_passbyref_type(argVal.getType())) {
+          argRef = argVal;
+          argVal = {};
         }
-        if (builder.isCharacter(addr.getType())) {
-          argTypes.push_back(fir::BoxCharType::get(
-              builder.getContext(), builder.getCharacterKind(addr.getType())));
-          auto ch = builder.materializeCharacter(addr);
-          addr = builder.createEmboxChar(ch.first, ch.second);
-        } else {
-          argTypes.push_back(addr.getType());
-        }
-        operands.push_back(addr);
       }
-    }
-    mlir::FunctionType funTy =
-        mlir::FunctionType::get(argTypes, resultType, builder.getContext());
-    auto funName = applyNameMangling(procRef.proc());
-    auto func = getFunction(funName, funTy);
-    if (func.getType() != funTy) {
-      // In older Fortran, procedure argument types are inferenced. Deal with
-      // the potential mismatches by adding casts to the arguments when the
-      // inferenced types do not match exactly.
-      llvm::SmallVector<mlir::Value, 8> castedOperands;
-      for (const auto &op : llvm::zip(operands, func.getType().getInputs())) {
-        auto cast = builder.convertWithSemantics(getLoc(), std::get<1>(op),
-                                                 std::get<0>(op));
-        castedOperands.push_back(cast);
+      assert((argVal || argRef) && "needs value or address");
+
+      // Handle cases where the argument must be passed by value
+      if (arg.passBy == PassBy::Value) {
+        if (!argVal)
+          argVal = genLoad(argRef);
+        caller.placeInput(arg, argVal);
+        continue;
       }
-      operands.swap(castedOperands);
+
+      // From this point, arguments needs to be in memory.
+      if (!argRef) {
+        // expression is a value, so store it in a temporary so we can
+        // pass-by-reference
+        argRef = builder.createTemporary(getLoc(), argVal.getType());
+        builder.create<fir::StoreOp>(getLoc(), argVal, argRef);
+      }
+      emboxAndPlaceArgument(arg, argRef);
     }
+
+    // Handle case where caller must pass result
+    mlir::Value resRef;
+    if (auto resultArg = caller.getPassedResult()) {
+      resRef = builder.createTemporary(getLoc(), resultType[0]);
+      emboxAndPlaceArgument(*resultArg, resRef);
+    }
+
+    // In older Fortran, procedure argument types are inferenced. Deal with
+    // the potential mismatches by adding casts to the arguments when the
+    // inferenced types do not match exactly.
+    llvm::SmallVector<mlir::Value, 8> operands;
+    for (const auto &op :
+         llvm::zip(caller.getInputs(), func.getType().getInputs())) {
+      auto cast = builder.convertWithSemantics(getLoc(), std::get<1>(op),
+                                               std::get<0>(op));
+      operands.push_back(cast);
+    }
+
+    // Actually place the call
     auto call = builder.create<fir::CallOp>(
-        getLoc(), resultType, builder.getSymbolRefAttr(funName), operands);
+        getLoc(), caller.getResultType(),
+        builder.getSymbolRefAttr(caller.getMangledName()), operands);
+
+    // Handle case where result was passed as argument
+    if (caller.getPassedResult())
+      return resRef; // FIXME: probably needs packing
 
     if (resultType.size() == 0)
       return {}; // subroutine call
