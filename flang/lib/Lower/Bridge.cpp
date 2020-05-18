@@ -1678,7 +1678,7 @@ private:
       Fortran::lower::pft::Evaluation *successor{};
       if (eval.isActionStmt())
         successor = eval.controlSuccessor;
-      else if (eval.isConstruct() &&
+      else if (eval.isConstruct() && !eval.evaluationList->empty() &&
                eval.evaluationList->back()
                    .lexicalSuccessor->isIntermediateConstructStmt())
         successor = eval.constructExit;
