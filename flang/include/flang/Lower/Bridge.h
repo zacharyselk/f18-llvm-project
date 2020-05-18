@@ -91,6 +91,10 @@ public:
     return genExprValue(*someExpr, &loc);
   }
 
+  /// Get FoldingContext that is required for some expression
+  /// analysis.
+  virtual Fortran::evaluate::FoldingContext &getFoldingContext() = 0;
+
   //
   // Types
 
@@ -124,6 +128,8 @@ public:
   virtual Fortran::lower::FirOpBuilder &getFirOpBuilder() = 0;
   /// Get the ModuleOp
   virtual mlir::ModuleOp &getModuleOp() = 0;
+  /// Get the MLIRContext
+  virtual mlir::MLIRContext &getMLIRContext() = 0;
   /// Unique a symbol
   virtual std::string mangleName(const semantics::Symbol &) = 0;
   /// Unique a compiler generated identifier. A short prefix should be provided
