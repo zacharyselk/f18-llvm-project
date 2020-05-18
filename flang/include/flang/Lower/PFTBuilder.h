@@ -218,6 +218,10 @@ struct Evaluation : EvaluationVariant {
     return visit(common::visitors{
         [](auto &r) { return pft::isConstruct<std::decay_t<decltype(r)>>; }});
   }
+
+  /// For a construct with multiway control-flow semantics, return true if this
+  /// is one of the alternative condition statements of the construct. For
+  /// example, `ELSE IF` in an `IF` construct.
   constexpr bool isIntermediateConstructStmt() const {
     return visit(common::visitors{[](auto &r) {
       return pft::isIntermediateConstructStmt<std::decay_t<decltype(r)>>;
