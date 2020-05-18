@@ -9,6 +9,7 @@
 #include "flang/Lower/Bridge.h"
 #include "../../runtime/iostat.h"
 #include "SymbolMap.h"
+#include "flang/Lower/CallInterface.h"
 #include "flang/Lower/ConvertExpr.h"
 #include "flang/Lower/ConvertType.h"
 #include "flang/Lower/FIRBuilder.h"
@@ -1604,14 +1605,6 @@ private:
     }
   }
 
-  mlir::FuncOp createNewFunction(mlir::Location loc, llvm::StringRef name,
-                                 const Fortran::semantics::Symbol *symbol) {
-    mlir::FunctionType ty =
-        symbol ? genFunctionType(*symbol)
-               : mlir::FunctionType::get(llvm::None, llvm::None, &mlirContext);
-    return Fortran::lower::FirOpBuilder::createFunction(loc, module, name, ty);
-  }
-
   /// Instantiate a global variable. If it hasn't already been processed, add
   /// the global to the ModuleOp as a new uniqued symbol and initialize it with
   /// the correct value. It will be referenced on demand using `fir.addr_of`.
@@ -1887,35 +1880,15 @@ private:
   /// Prepare to translate a new function
   void startNewFunction(Fortran::lower::pft::FunctionLikeUnit &funit) {
     assert(!builder && "expected nullptr");
-    // get mangled name
-    std::string name = funit.isMainProgram()
-                           ? uniquer.doProgramEntry().str()
-                           : mangleName(funit.getSubprogramSymbol());
-    // FIXME: do NOT use unknown for the anonymous PROGRAM case. We probably
-    // should just stash the location in the funit regardless.
-    mlir::Location loc = toLocation(funit.getStartingSourceLoc());
-    mlir::FuncOp func =
-        Fortran::lower::FirOpBuilder::getNamedFunction(module, name);
-    if (!func)
-      func = createNewFunction(loc, name, funit.symbol);
+    Fortran::lower::CalleeInterface callee(funit);
+    mlir::FuncOp func = callee.getFuncOp();
     builder = new Fortran::lower::FirOpBuilder(func, kindMap);
     assert(builder && "FirOpBuilder did not instantiate");
     func.addEntryBlock();
     builder->setInsertionPointToStart(&func.front());
-    bool hasAlternateReturns = false;
 
-    auto *entryBlock = &func.front();
-    if (funit.symbol && !funit.isMainProgram()) {
-      const auto &details =
-          funit.symbol->get<Fortran::semantics::SubprogramDetails>();
-      auto blockIter = entryBlock->getArguments().begin();
-      for (const auto &dummy : details.dummyArgs()) {
-        if (dummy)
-          addSymbol(*dummy, *blockIter++);
-        else
-          hasAlternateReturns = true;
-      }
-    }
+    callee.mapDummyAndResults(localSymbols);
+
     for (const auto &var : funit.getOrderedSymbolTable())
       instantiateVar(var);
 
@@ -1925,7 +1898,7 @@ private:
     // Reinstate entry block as the current insertion point.
     builder->setInsertionPointToEnd(&func.front());
 
-    if (hasAlternateReturns) {
+    if (callee.hasAlternateReturns()) {
       // Create a local temp to hold the alternate return index.
       // Give it an integer index type and the subroutine name (for dumps).
       // Attach it to the subroutine symbol in the localSymbols map.
