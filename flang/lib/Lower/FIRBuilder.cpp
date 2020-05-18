@@ -284,7 +284,12 @@ struct CharacterOpsBuilderImpl {
         return {load.memref(), len};
       return {character, len};
     }
-    llvm_unreachable("unexpected character type");
+    if (auto charTy = type.dyn_cast<fir::CharacterType>()) {
+      // FIXME: use CharBoxValue
+      auto len = builder.createIntegerConstant(lenType, 1);
+      return {character, len};
+    }
+    llvm::report_fatal_error("unexpected character type");
   }
 
   /// Get fir.ref<fir.char<kind>> type.
