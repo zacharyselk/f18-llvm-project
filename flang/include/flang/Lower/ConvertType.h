@@ -96,10 +96,6 @@ translateSymbolToFIRType(mlir::MLIRContext *ctxt,
                          common::IntrinsicTypeDefaultKinds const &defaults,
                          const SymbolRef symbol);
 
-mlir::FunctionType translateSymbolToFIRFunctionType(
-    mlir::MLIRContext *ctxt, common::IntrinsicTypeDefaultKinds const &defaults,
-    const SymbolRef symbol);
-
 mlir::Type convertReal(mlir::MLIRContext *ctxt, int KIND);
 
 // Given a ReferenceType of a base type, returns the ReferenceType to
