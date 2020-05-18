@@ -324,53 +324,9 @@ public:
     return seqShapeHelper(symbol, bounds);
   }
 
-  mlir::Type genDummyArgType(const Fortran::semantics::Symbol &dummy) {
-    if (auto *type{dummy.GetType()}) {
-      auto *tySpec{type->AsIntrinsic()};
-      if (tySpec &&
-          tySpec->category() == Fortran::common::TypeCategory::Character) {
-        auto kind = toConstant(tySpec->kind());
-        return fir::BoxCharType::get(context, kind);
-      }
-    }
-    if (Fortran::semantics::IsDescriptor(dummy)) {
-      // FIXME: This should be the first case, but it seems to
-      // fire at assumed length character on purpose which is
-      // not what I expect.
-      TODO();
-    }
-    return fir::ReferenceType::get(gen(dummy));
-  }
-
-  mlir::FunctionType genFunctionType(Fortran::semantics::SymbolRef symbol) {
-    llvm::SmallVector<mlir::Type, 1> returnTys;
-    llvm::SmallVector<mlir::Type, 4> inputTys;
-    if (auto *proc =
-            symbol->detailsIf<Fortran::semantics::SubprogramDetails>()) {
-      if (proc->isFunction())
-        returnTys.emplace_back(gen(proc->result()));
-      else if (Fortran::semantics::HasAlternateReturns(symbol))
-        returnTys.emplace_back(mlir::IndexType::get(context));
-      for (auto *arg : proc->dummyArgs()) {
-        // A nullptr arg is an alternate return label specifier; skip it.
-        if (arg)
-          inputTys.emplace_back(genDummyArgType(*arg));
-      }
-    } else if (symbol->detailsIf<Fortran::semantics::ProcEntityDetails>()) {
-      // TODO Should probably use Fortran::evaluate::Characteristics for that.
-      TODO();
-    } else if (symbol->detailsIf<Fortran::semantics::MainProgramDetails>()) {
-    } else {
-      assert(false && "unexpected symbol details for function");
-    }
-    return mlir::FunctionType::get(inputTys, returnTys, context);
-  }
-
   /// Type consing from a symbol. A symbol's type must be created from the type
   /// discovered by the front-end at runtime.
   mlir::Type gen(Fortran::semantics::SymbolRef symbol) {
-    if (symbol->detailsIf<Fortran::semantics::SubprogramDetails>())
-      return genFunctionType(symbol);
     mlir::Type returnTy;
     if (auto *type{symbol->GetType()}) {
       if (auto *tySpec{type->AsIntrinsic()}) {
@@ -533,13 +489,6 @@ mlir::Type Fortran::lower::translateSymbolToFIRType(
     const Fortran::common::IntrinsicTypeDefaultKinds &defaults,
     const SymbolRef symbol) {
   return TypeBuilder{context, defaults}.gen(symbol);
-}
-
-mlir::FunctionType Fortran::lower::translateSymbolToFIRFunctionType(
-    mlir::MLIRContext *context,
-    const Fortran::common::IntrinsicTypeDefaultKinds &defaults,
-    const SymbolRef symbol) {
-  return TypeBuilder{context, defaults}.genFunctionType(symbol);
 }
 
 mlir::Type Fortran::lower::convertReal(mlir::MLIRContext *context, int kind) {
