@@ -155,6 +155,7 @@ struct BoxValue : public AbstractBox, public AbstractArrayBox {
   llvm::SmallVector<mlir::Value, 2> params;
 };
 
+/// Used for triple notation (array slices)
 using RangeBoxValue = std::tuple<mlir::Value, mlir::Value, mlir::Value>;
 
 class ExtendedValue;
@@ -176,10 +177,6 @@ public:
     return std::get_if<CharBoxValue>(&box);
   }
 
-  constexpr const RangeBoxValue *getRange() const {
-    return std::get_if<RangeBoxValue>(&box);
-  }
-
   constexpr const UnboxedValue *getUnboxed() const {
     return std::get_if<UnboxedValue>(&box);
   }
@@ -193,7 +190,7 @@ public:
 
 private:
   std::variant<UnboxedValue, CharBoxValue, ArrayBoxValue, CharArrayBoxValue,
-               BoxValue, ProcBoxValue, RangeBoxValue>
+               BoxValue, ProcBoxValue>
       box;
 };
 } // namespace fir

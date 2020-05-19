@@ -763,25 +763,32 @@ private:
     return gen(ss);
   }
 
-  Fortran::lower::ExValue genval(const Fortran::evaluate::Triplet &trip) {
+  fir::RangeBoxValue genTriple(const Fortran::evaluate::Triplet &trip) {
     mlir::Value lower;
     if (auto lo = trip.lower())
       lower = genunbox(*lo);
     mlir::Value upper;
     if (auto up = trip.upper())
       upper = genunbox(*up);
-    return fir::RangeBoxValue{lower, upper, genunbox(trip.stride())};
+    return {lower, upper, genunbox(trip.stride())};
+  }
+
+  /// Special factoring to allow RangeBoxValue to be returned when generating values.
+  std::variant<Fortran::lower::ExValue, fir::RangeBoxValue>
+  genComponent(const Fortran::evaluate::Subscript &subs) {
+    if (auto *s = std::get_if<Fortran::evaluate::IndirectSubscriptIntegerExpr>(
+            &subs.u))
+      return {genval(s->value())};
+    if (auto *s = std::get_if<Fortran::evaluate::Triplet>(&subs.u))
+      return {genTriple(*s)};
+    llvm_unreachable("unknown subscript case");
   }
 
   Fortran::lower::ExValue genval(const Fortran::evaluate::Subscript &subs) {
-    return std::visit(
-        Fortran::common::visitors{
-            [&](const Fortran::evaluate::IndirectSubscriptIntegerExpr &x) {
-              return genval(x.value());
-            },
-            [&](const Fortran::evaluate::Triplet &x) { return genval(x); },
-        },
-        subs.u);
+    if (auto *s = std::get_if<Fortran::evaluate::IndirectSubscriptIntegerExpr>(
+            &subs.u))
+      return {genval(s->value())};
+    llvm_unreachable("unhandled subscript case");
   }
 
   Fortran::lower::ExValue gen(const Fortran::evaluate::DataRef &dref) {
@@ -907,8 +914,8 @@ private:
       unsigned idx = 0;
       unsigned dim = 0;
       for (const auto &pair : llvm::zip(arr.extents, aref.subscript())) {
-        auto subVal = genval(std::get<1>(pair));
-        if (auto *trip = subVal.getRange()) {
+        auto subVal = genComponent(std::get<1>(pair));
+        if (auto *trip = std::get_if<fir::RangeBoxValue>(&subVal)) {
           // access A(i:j:k), decl A(m:n), iterspace (t1..)
           auto tlb = builder.createConvert(loc, idxTy, std::get<0>(*trip));
           auto dlb = builder.createConvert(loc, idxTy, getLB(arr, dim));
@@ -921,17 +928,21 @@ private:
           total = builder.create<mlir::AddIOp>(loc, prod, total);
           if (auto ext = std::get<0>(pair))
             delta = builder.create<mlir::MulIOp>(loc, delta, ext);
-        } else if (auto *sval = subVal.getUnboxed()) {
-          auto val = builder.createConvert(loc, idxTy, *sval);
-          auto lb = builder.createConvert(loc, idxTy, getLB(arr, dim));
-          auto diff = builder.create<mlir::SubIOp>(loc, val, lb);
-          auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
-          total = builder.create<mlir::AddIOp>(loc, prod, total);
-          if (auto ext = std::get<0>(pair))
-            delta = builder.create<mlir::MulIOp>(loc, delta, ext);
         } else {
-          TODO();
-        }
+	  auto *v = std::get_if<Fortran::lower::ExValue>(&subVal);
+	  assert(v);
+	  if (auto *sval = v->getUnboxed()) {
+	    auto val = builder.createConvert(loc, idxTy, *sval);
+	    auto lb = builder.createConvert(loc, idxTy, getLB(arr, dim));
+	    auto diff = builder.create<mlir::SubIOp>(loc, val, lb);
+	    auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
+	    total = builder.create<mlir::AddIOp>(loc, prod, total);
+	    if (auto ext = std::get<0>(pair))
+	      delta = builder.create<mlir::MulIOp>(loc, delta, ext);
+	  } else {
+	    TODO();
+	  }
+	}
         ++dim;
       }
       return builder.create<fir::CoordinateOp>(
@@ -977,21 +988,25 @@ private:
       llvm::SmallVector<mlir::Value, 8> args;
       auto loc = getLoc();
       for (auto &subsc : aref.subscript()) {
-        auto subBox = genval(subsc);
-        if (auto *val = subBox.getUnboxed()) {
-          auto ty = val->getType();
-          auto adj = getLBound(si, i++, ty);
-          assert(adj && "boxed value not handled");
-          args.push_back(builder.create<mlir::SubIOp>(loc, ty, *val, adj));
-        } else if (auto *range = subBox.getRange()) {
+        auto subBox = genComponent(subsc);
+        if (auto *v = std::get_if<Fortran::lower::ExValue>(&subBox)) {
+          if (auto *val = v->getUnboxed()) {
+            auto ty = val->getType();
+            auto adj = getLBound(si, i++, ty);
+            assert(adj && "boxed value not handled");
+            args.push_back(builder.create<mlir::SubIOp>(loc, ty, *val, adj));
+          } else {
+            TODO();
+          }
+        } else {
+          auto *range = std::get_if<fir::RangeBoxValue>(&subBox);
+          assert(range && "must be a range");
           // triple notation for slicing operation
           auto ty = builder.getIndexType();
           auto step = builder.createConvert(loc, ty, std::get<2>(*range));
           auto scale = builder.create<mlir::MulIOp>(loc, ty, lcvs[i], step);
           auto off = builder.createConvert(loc, ty, std::get<0>(*range));
           args.push_back(builder.create<mlir::AddIOp>(loc, ty, off, scale));
-        } else {
-          TODO();
         }
       }
       auto ty = genSubType(base.getType(), args.size());
@@ -1280,13 +1295,11 @@ Fortran::lower::ExValue Fortran::lower::createSomeExtendedAddress(
 //===----------------------------------------------------------------------===//
 
 mlir::Value fir::getBase(const Fortran::lower::ExValue &ex) {
-  return std::visit(
-      Fortran::common::visitors{
-          [](const fir::UnboxedValue &x) { return x; },
-          [](const fir::RangeBoxValue &) { return mlir::Value{}; },
-          [](const auto &x) { return x.getAddr(); },
-      },
-      ex.box);
+  return std::visit(Fortran::common::visitors{
+                        [](const fir::UnboxedValue &x) { return x; },
+                        [](const auto &x) { return x.getAddr(); },
+                    },
+                    ex.box);
 }
 
 llvm::raw_ostream &fir::operator<<(llvm::raw_ostream &os,
@@ -1361,13 +1374,7 @@ llvm::raw_ostream &fir::operator<<(llvm::raw_ostream &os,
 
 llvm::raw_ostream &fir::operator<<(llvm::raw_ostream &os,
                                    const fir::ExtendedValue &ex) {
-  std::visit(Fortran::common::visitors{[&](const fir::RangeBoxValue &box) {
-                                         os << "boxrange { " << std::get<0>(box)
-                                            << ", " << std::get<1>(box) << ", "
-                                            << std::get<2>(box) << " }";
-                                       },
-                                       [&](const auto &value) { os << value; }},
-             ex.box);
+  std::visit([&](const auto &value) { os << value; }, ex.box);
   return os;
 }
 
