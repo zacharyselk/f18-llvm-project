@@ -367,7 +367,7 @@ struct FunctionLikeUnit : public ProgramUnit {
   parser::CharBlock getStartingSourceLoc() {
     if (beginStmt)
       return stmtSourceLoc(*beginStmt);
-    if (evaluationList.size())
+    if (!evaluationList.empty())
       return evaluationList.front().position;
     return stmtSourceLoc(endStmt);
   }
