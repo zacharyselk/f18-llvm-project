@@ -95,6 +95,9 @@ Fortran::lower::mangle::mangleName(fir::NameUniquer &uniquer,
           },
           [&](const Fortran::semantics::ObjectEntityDetails &) {
             auto modNames = moduleNames(ultimateSymbol);
+            if (Fortran::semantics::IsNamedConstant(ultimateSymbol)) {
+              return uniquer.doConstant(modNames, toStringRef(symbolName));
+            }
             return uniquer.doVariable(modNames, hostName(ultimateSymbol),
                                       toStringRef(symbolName));
           },
