@@ -1585,7 +1585,8 @@ private:
     if (unstructuredContext) {
       // When transitioning from unstructured to structured code,
       // the structured code might be a target that starts a new block.
-      maybeStartBlock(eval.isConstruct() && eval.lowerAsStructured()
+      maybeStartBlock(eval.isConstruct() && eval.lowerAsStructured() &&
+                              !eval.evaluationList->empty()
                           ? eval.evaluationList->front().block
                           : eval.block);
     }
