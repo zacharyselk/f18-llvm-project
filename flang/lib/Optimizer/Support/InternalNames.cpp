@@ -99,9 +99,11 @@ std::string fir::NameUniquer::doCommonBlock(llvm::StringRef name) {
 
 std::string
 fir::NameUniquer::doConstant(llvm::ArrayRef<llvm::StringRef> modules,
+                             llvm::Optional<llvm::StringRef> host,
                              llvm::StringRef name) {
   std::string result = prefix();
-  return result.append(doModules(modules)).append("EC").append(toLower(name));
+  result.append(doModulesHost(modules, host)).append("EC");
+  return result.append(toLower(name));
 }
 
 std::string
