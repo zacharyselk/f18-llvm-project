@@ -246,6 +246,7 @@ public:
     return create<OP>(getLoc(), std::forward<AS>(args)...);
   }
 
+  /// Get the current Region of the insertion point.
   mlir::Region &getRegion() { return *getBlock()->getParent(); }
 
   /// Get the current Module
@@ -258,6 +259,7 @@ public:
     return getRegion().getParentOfType<mlir::FuncOp>();
   }
 
+  /// Get a reference to the kind map.
   const fir::KindMapping &getKindMap() { return kindMap; }
 
   /// The LHS and RHS are not always in agreement in terms of
@@ -270,6 +272,7 @@ public:
   /// Get the entry block of the current Function
   mlir::Block *getEntryBlock() { return &getFunction().front(); }
 
+  /// Safely create a reference type to the type `eleTy`.
   mlir::Type getRefType(mlir::Type eleTy);
 
   /// Create an integer constant of type \p type and value \p i.
