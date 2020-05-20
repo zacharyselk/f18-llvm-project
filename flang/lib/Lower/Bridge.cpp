@@ -2070,6 +2070,27 @@ Fortran::lower::LoweringBridge::LoweringBridge(
     const Fortran::parser::CookedSource *cooked)
     : defaultKinds{defaultKinds}, cooked{cooked},
       context{std::make_unique<mlir::MLIRContext>()}, kindMap{context.get()} {
+  context.get()->getDiagEngine().registerHandler([](mlir::Diagnostic &diag) {
+    auto &os = llvm::errs();
+    switch (diag.getSeverity()) {
+    case mlir::DiagnosticSeverity::Error:
+      os << "error: ";
+      break;
+    case mlir::DiagnosticSeverity::Remark:
+      os << "info: ";
+      break;
+    case mlir::DiagnosticSeverity::Warning:
+      os << "warning: ";
+      break;
+    default:
+      break;
+    }
+    if (!diag.getLocation().isa<UnknownLoc>())
+      os << diag.getLocation() << ": ";
+    os << diag << '\n';
+    os.flush();
+    return mlir::success();
+  });
   module = std::make_unique<mlir::ModuleOp>(
       mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get())));
 }
