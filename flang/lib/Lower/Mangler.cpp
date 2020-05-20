@@ -95,11 +95,11 @@ Fortran::lower::mangle::mangleName(fir::NameUniquer &uniquer,
           },
           [&](const Fortran::semantics::ObjectEntityDetails &) {
             auto modNames = moduleNames(ultimateSymbol);
-            if (Fortran::semantics::IsNamedConstant(ultimateSymbol)) {
-              return uniquer.doConstant(modNames, toStringRef(symbolName));
-            }
-            return uniquer.doVariable(modNames, hostName(ultimateSymbol),
-                                      toStringRef(symbolName));
+            auto optHost = hostName(ultimateSymbol);
+            auto symbol = toStringRef(symbolName);
+            if (Fortran::semantics::IsNamedConstant(ultimateSymbol))
+              return uniquer.doConstant(modNames, optHost, symbol);
+            return uniquer.doVariable(modNames, optHost, symbol);
           },
           [](const auto &) -> std::string {
             assert(false);
