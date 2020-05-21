@@ -320,17 +320,23 @@ struct ProgramUnit : ProgramVariant {
 
 /// A variable captures an object to be created per the declaration part of a
 /// function like unit.
+///
+/// Properties can be applied by lowering. For example, a local array that is
+/// known to be very large may be transformed into a heap allocated entity by
+/// lowering. That decision would be tracked in its Variable instance.
 struct Variable {
   explicit Variable(const Fortran::semantics::Symbol &sym, bool global = false,
                     int depth = 0)
       : sym{&sym}, depth{depth}, global{global} {}
 
   const Fortran::semantics::Symbol &getSymbol() const { return *sym; }
+  
   bool isGlobal() const { return global; }
   bool isHeapAlloc() const { return heapAlloc; }
   bool isPointer() const { return pointer; }
   bool isTarget() const { return target; }
   int getDepth() const { return depth; }
+  
   void setHeapAlloc(bool to = true) { heapAlloc = to; }
   void setPointer(bool to = true) { pointer = to; }
   void setTarget(bool to = true) { target = to; }
