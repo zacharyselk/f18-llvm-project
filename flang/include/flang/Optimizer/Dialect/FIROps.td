@@ -15,6 +15,7 @@
 #define FIR_DIALECT_FIR_OPS
 
 include "mlir/IR/SymbolInterfaces.td"
+include "mlir/Interfaces/CallInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/LoopLikeInterface.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
@@ -157,7 +158,8 @@ def fir_NamedAllocateOpBuilder : OpBuilder<
   [{
     result.addTypes(getRefTy(inType));
     result.addAttribute("in_type", TypeAttr::get(inType));
-    result.addAttribute("name", builder.getStringAttr(name));
+    if (!name.empty())
+      result.addAttribute("name", builder.getStringAttr(name));
     result.addOperands(sizes);
     result.addAttributes(attributes);
   }]>;
@@ -196,9 +198,10 @@ class fir_AllocatableBaseOp<string mnemonic, list<OpTrait> traits = []> :
   );
 }
 
-class fir_AllocatableOp<string mnemonic, list<OpTrait> traits = []> :
+class fir_AllocatableOp<string mnemonic, Resource resource,
+      list<OpTrait> traits = []> :
     fir_AllocatableBaseOp<mnemonic,
-	!listconcat(traits, [MemoryEffects<[MemAlloc]>])>,
+	!listconcat(traits, [MemoryEffects<[MemAlloc<resource>]>])>,
     fir_TwoBuilders<fir_AllocateOpBuilder, fir_NamedAllocateOpBuilder>,
     Arguments<(ins TypeAttr:$in_type, Variadic<AnyIntegerType>:$args)> {
 
@@ -308,7 +311,8 @@ class fir_AllocatableOp<string mnemonic, list<OpTrait> traits = []> :
 // Memory SSA operations
 //===----------------------------------------------------------------------===//
 
-def fir_AllocaOp : fir_AllocatableOp<"alloca"> {
+def fir_AllocaOp :
+      fir_AllocatableOp<"alloca", AutomaticAllocationScopeResource> {
   let summary = "allocate storage for a temporary on the stack given a type";
   let description = [{
     This primitive operation is used to allocate an object on the stack.  A
@@ -351,7 +355,7 @@ def fir_AllocaOp : fir_AllocatableOp<"alloca"> {
   }];
 }
 
-def fir_LoadOp : fir_OneResultOp<"load", [MemoryEffects<[MemRead]>]> {
+def fir_LoadOp : fir_OneResultOp<"load"> {
   let summary = "load a value from a memory reference";
   let description = [{
     Load a value from a memory reference into an ssa-value (virtual register).
@@ -367,7 +371,7 @@ def fir_LoadOp : fir_OneResultOp<"load", [MemoryEffects<[MemRead]>]> {
     or null.
   }];
 
-  let arguments = (ins AnyReferenceLike:$memref);
+  let arguments = (ins Arg<AnyReferenceLike, "", [MemRead]>:$memref);
 
   let builders = [OpBuilder<
     "OpBuilder &builder, OperationState &result, Value refVal",
@@ -376,9 +380,13 @@ def fir_LoadOp : fir_OneResultOp<"load", [MemoryEffects<[MemRead]>]> {
         mlir::emitError(result.location, "LoadOp has null argument");
         return;
       }
-      auto refTy = refVal.getType().cast<fir::ReferenceType>();
+      auto eleTy = fir::dyn_cast_ptrEleTy(refVal.getType());
+      if (!eleTy) {
+        mlir::emitError(result.location, "not a memory reference type");
+        return;
+      }
       result.addOperands(refVal);
-      result.addTypes(refTy.getEleTy());
+      result.addTypes(eleTy);
     }]
   >];
 
@@ -409,7 +417,7 @@ def fir_LoadOp : fir_OneResultOp<"load", [MemoryEffects<[MemRead]>]> {
   }];
 }
 
-def fir_StoreOp : fir_Op<"store", [MemoryEffects<[MemWrite]>]> {
+def fir_StoreOp : fir_Op<"store", []> {
   let summary = "store an SSA-value to a memory location";
 
   let description = [{
@@ -428,7 +436,8 @@ def fir_StoreOp : fir_Op<"store", [MemoryEffects<[MemWrite]>]> {
     `%p`, is undefined or null.
   }];
 
-  let arguments = (ins AnyType:$value, AnyReferenceLike:$memref);
+  let arguments = (ins AnyType:$value,
+                   Arg<AnyReferenceLike, "", [MemWrite]>:$memref);
 
   let parser = [{
     mlir::Type type;
@@ -491,7 +500,7 @@ def fir_UndefOp : fir_OneResultOp<"undefined", [NoSideEffect]> {
   }];
 }
 
-def fir_AllocMemOp : fir_AllocatableOp<"allocmem"> {
+def fir_AllocMemOp : fir_AllocatableOp<"allocmem", DefaultResource> {
   let summary = "allocate storage on the heap for an object of a given type";
 
   let description = [{
@@ -537,7 +546,7 @@ def fir_FreeMemOp : fir_Op<"freemem", [MemoryEffects<[MemFree]>]> {
     ```
   }];
 
-  let arguments = (ins fir_HeapType:$heapref);
+  let arguments = (ins Arg<fir_HeapType, "", [MemFree]>:$heapref);
 
   let assemblyFormat = "$heapref attr-dict `:` type($heapref)";
 }
@@ -2092,8 +2101,7 @@ def fir_IterWhileOp : region_Op<"iterate_while",
 // Procedure call operations
 //===----------------------------------------------------------------------===//
 
-def fir_CallOp : fir_Op<"call",
-    [MemoryEffects<[MemAlloc, MemFree, MemRead, MemWrite]>]> {
+def fir_CallOp : fir_Op<"call", [CallOpInterface]> {
   let summary = "call a procedure";
 
   let description = [{
@@ -2120,11 +2128,27 @@ def fir_CallOp : fir_Op<"call",
 
   let extraClassDeclaration = [{
     static constexpr StringRef calleeAttrName() { return "callee"; }
+
+    /// Get the argument operands to the called function.
+    operand_range getArgOperands() {
+      if (auto calling = getAttrOfType<SymbolRefAttr>(calleeAttrName()))
+        return {arg_operand_begin(), arg_operand_end()};
+      return {arg_operand_begin() + 1, arg_operand_end()};
+    }
+
+    operand_iterator arg_operand_begin() { return operand_begin(); }
+    operand_iterator arg_operand_end() { return operand_end(); }
+
+    /// Return the callee of this operation.
+    CallInterfaceCallable getCallableForCallee() {
+      if (auto calling = getAttrOfType<SymbolRefAttr>(calleeAttrName()))
+        return calling;
+      return getOperand(0);
+    }
   }];
 }
 
-def fir_DispatchOp : fir_Op<"dispatch",
-    [MemoryEffects<[MemAlloc, MemFree, MemRead, MemWrite]>]> {
+def fir_DispatchOp : fir_Op<"dispatch", []> {
   let summary = "call a type-bound procedure";
 
   let description = [{
