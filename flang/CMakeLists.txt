@@ -131,7 +131,7 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   option(FLANG_INCLUDE_TESTS
          "Generate build targets for the Flang unit tests."
          ON)
-  add_custom_target(check-all DEPENDS check-flang)
+  add_custom_target(check-all DEPENDS check-flang FlangUnitTests)
   if (LLVM_BUILD_DOCS)
     add_custom_target(doxygen ALL)
   endif()
@@ -366,9 +366,13 @@ add_subdirectory(runtime)
 
 option(FLANG_INCLUDE_TESTS
        "Generate build targets for the Flang unit tests."
-       ${LLVM_INCLUDE_TESTS})
+       ON)
 enable_testing()
-add_subdirectory(test)
+
+if (FLANG_INCLUDE_TESTS)
+  add_subdirectory(test)
+  add_subdirectory(unittests)
+endif()
 
 option(FLANG_INCLUDE_DOCS "Generate build targets for the Flang docs."
        ${LLVM_INCLUDE_DOCS})
