@@ -410,18 +410,10 @@ public:
           auto &p{*param};
           ps.push_back(std::pair{p.name().ToString(), gen(p)});
         }
-#if 0
-        // this functionality is missing in the front-end
-        for (auto &comp : details.componentDecls()) {
-          auto &c{*comp};
-          cs.push_back(std::pair{c.name().ToString(), gen(c)});
-        }
-#else
-        emitWarning("the front-end returns symbols of derived type that have "
-                    "components that are simple names and not symbols, so "
-                    "cannot construct type " +
-                    toStringRef(symbol.name()));
-#endif
+        emitError("the front-end returns symbols of derived type that have "
+                  "components that are simple names and not symbols, so cannot "
+                  "construct the type '" +
+                  toStringRef(symbol.name()) + "'");
         rec.finalize(ps, cs);
         returnTy = rec;
       } else {
@@ -446,10 +438,6 @@ public:
         return fir::SequenceType::get(genSeqShape(symbol, charLen), returnTy);
       }
       return fir::SequenceType::get(genSeqShape(symbol), returnTy);
-    }
-    if (Fortran::semantics::IsPointer(*symbol)) {
-      // FIXME: what about allocatable?
-      return fir::ReferenceType::get(returnTy);
     }
     return returnTy;
   }
