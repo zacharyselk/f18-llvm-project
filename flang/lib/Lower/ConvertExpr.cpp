@@ -978,7 +978,40 @@ private:
   Fortran::lower::ExValue gen(const Fortran::evaluate::ArrayRef &aref) {
     if (aref.base().IsSymbol()) {
       auto &symbol = aref.base().GetFirstSymbol();
-      return gen(symMap.lookupSymbol(symbol), aref);
+      auto si = symMap.lookupSymbol(symbol);
+      if (!si.hasConstantShape())
+        return gen(si, aref);
+      auto box = gen(symbol);
+      auto base = fir::getBase(box);
+      assert(base && "boxed type not handled");
+      unsigned i = 0;
+      llvm::SmallVector<mlir::Value, 8> args;
+      auto loc = getLoc();
+      for (auto &subsc : aref.subscript()) {
+        auto subBox = genComponent(subsc);
+        if (auto *v = std::get_if<Fortran::lower::ExValue>(&subBox)) {
+          if (auto *val = v->getUnboxed()) {
+            auto ty = val->getType();
+            auto adj = getLBound(si, i++, ty);
+            assert(adj && "boxed value not handled");
+            args.push_back(builder.create<mlir::SubIOp>(loc, ty, *val, adj));
+          } else {
+            TODO();
+          }
+        } else {
+          auto *range = std::get_if<fir::RangeBoxValue>(&subBox);
+          assert(range && "must be a range");
+          // triple notation for slicing operation
+          auto ty = builder.getIndexType();
+          auto step = builder.createConvert(loc, ty, std::get<2>(*range));
+          auto scale = builder.create<mlir::MulIOp>(loc, ty, lcvs[i], step);
+          auto off = builder.createConvert(loc, ty, std::get<0>(*range));
+          args.push_back(builder.create<mlir::AddIOp>(loc, ty, off, scale));
+        }
+      }
+      auto ty = genSubType(base.getType(), args.size());
+      ty = builder.getRefType(ty);
+      return builder.create<fir::CoordinateOp>(loc, ty, base, args);
     }
     return genArrayRefComponent(aref);
   }
