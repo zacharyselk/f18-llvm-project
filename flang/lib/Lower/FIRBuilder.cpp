@@ -48,27 +48,19 @@ mlir::Value Fortran::lower::FirOpBuilder::createRealConstant(
   return create<mlir::ConstantOp>(loc, realType, getFloatAttr(realType, val));
 }
 
-// This seems a bit hacky. The scaling ssa-values must be type `index`. Should
-// these just be constructed with the correct type, rather than massaged lazily
-// here?
-mlir::Value
-Fortran::lower::FirOpBuilder::allocateLocal(mlir::Location loc, mlir::Type ty,
-                                            llvm::StringRef nm,
-                                            llvm::ArrayRef<mlir::Value> shape) {
+mlir::Value Fortran::lower::FirOpBuilder::allocateLocal(
+    mlir::Location loc, mlir::Type ty, llvm::StringRef nm,
+    llvm::ArrayRef<mlir::Value> shape, bool asTarget) {
   llvm::SmallVector<mlir::Value, 8> indices;
   auto idxTy = getIndexType();
   llvm::for_each(shape, [&](mlir::Value sh) {
-    if (sh.getType().isa<mlir::IndexType>()) {
-      indices.push_back(sh);
-    } else {
-      auto cast = createConvert(loc, idxTy, sh);
-      indices.push_back(cast);
-    }
+    indices.push_back(createConvert(loc, idxTy, sh));
   });
-  // FIXME: have the builder drop the attribute when the name is empty
-  if (nm.size())
-    return create<fir::AllocaOp>(loc, ty, nm, llvm::None, indices);
-  return create<fir::AllocaOp>(loc, ty, llvm::None, indices);
+  llvm::SmallVector<mlir::NamedAttribute, 2> attrs;
+  if (asTarget)
+    attrs.emplace_back(mlir::Identifier::get("target", getContext()),
+                       getUnitAttr());
+  return create<fir::AllocaOp>(loc, ty, nm, llvm::None, indices, attrs);
 }
 
 /// Create a temporary variable on the stack. Anonymous temporaries have no
