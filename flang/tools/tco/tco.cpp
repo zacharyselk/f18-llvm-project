@@ -93,11 +93,13 @@ static int compileFIR() {
     // add all the passes
     // the user can disable them individually
     // convert fir dialect to affine
+    if (fir::inlinerIsEnabled())
+      pm.addPass(fir::createInlinerPass());
     pm.addPass(fir::createPromoteToAffinePass());
-    // convert fir dialect to loop
-    pm.addPass(fir::createLowerToLoopPass());
+    // convert fir dialect to scf
+    pm.addPass(fir::createLowerToScfPass());
     pm.addPass(fir::createControlFlowLoweringPass());
-    // convert loop dialect to standard
+    // convert scf dialect to standard
     pm.addPass(mlir::createLowerToCFGPass());
     // pm.addPass(fir::createMemToRegPass());
     pm.addPass(mlir::createCanonicalizerPass());
