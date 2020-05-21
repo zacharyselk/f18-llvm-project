@@ -12,7 +12,10 @@
 #include <memory>
 
 namespace mlir {
+class BlockAndValueMapping;
+class Operation;
 class Pass;
+class Region;
 } // namespace mlir
 
 namespace fir {
@@ -29,13 +32,20 @@ std::unique_ptr<mlir::Pass> createPromoteToAffinePass();
 /// Convert `fir.do_loop` and `fir.if` to `loop.for` and `loop.if`.  This
 /// conversion enables the `createLowerToCFGPass` to transform these to CFG
 /// form.
-std::unique_ptr<mlir::Pass> createLowerToLoopPass();
+std::unique_ptr<mlir::Pass> createLowerToScfPass();
 
 /// A pass to convert the FIR dialect from "Mem-SSA" form to "Reg-SSA"
 /// form. This pass is a port of LLVM's mem2reg pass, but modified for the FIR
 /// dialect as well as the restructuring of MLIR's representation to present PHI
 /// nodes as block arguments.
 std::unique_ptr<mlir::Pass> createMemToRegPass();
+
+/// This pass will preform inlining on FIR. If inlining is disabled this returns
+/// a nullptr.
+std::unique_ptr<mlir::Pass> createInlinerPass();
+bool inlinerIsEnabled();
+bool canLegallyInline(mlir::Operation *op, mlir::Region *reg,
+                      mlir::BlockAndValueMapping &map);
 
 } // namespace fir
 
