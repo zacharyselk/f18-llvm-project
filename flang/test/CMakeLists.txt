@@ -11,6 +11,12 @@ configure_lit_site_cfg(
   MAIN_CONFIG
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.cfg.py
 )
+configure_lit_site_cfg(
+  ${CMAKE_CURRENT_SOURCE_DIR}/Unit/lit.site.cfg.py.in
+  ${CMAKE_CURRENT_BINARY_DIR}/Unit/lit.site.cfg.py
+  MAIN_CONFIG
+  ${CMAKE_CURRENT_SOURCE_DIR}/Unit/lit.cfg.py
+  )
 
 set(FLANG_TEST_PARAMS
   flang_site_config=${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg.py)
@@ -21,6 +27,10 @@ set(FLANG_TEST_DEPENDS
   tco bbc
   FortranRuntime FortranDecimal
 )
+
+if (FLANG_INCLUDE_TESTS)
+  list(APPEND FLANG_TEST_DEPENDS FlangUnitTests)
+endif()
 
 add_custom_target(flang-test-depends DEPENDS ${FLANG_TEST_DEPENDS})
 
