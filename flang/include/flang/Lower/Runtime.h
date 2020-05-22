@@ -29,8 +29,25 @@ class MLIRContext;
 class FuncOp;
 } // namespace mlir
 
-namespace Fortran::lower {
+namespace Fortran {
 
+namespace parser {
+struct EventPostStmt;
+struct EventWaitStmt;
+struct FormTeamStmt;
+struct LockStmt;
+struct PauseStmt;
+struct StopStmt;
+struct SyncAllStmt;
+struct SyncImagesStmt;
+struct SyncMemoryStmt;
+struct SyncTeamStmt;
+struct UnlockStmt;
+} // namespace parser
+
+namespace lower {
+
+class AbstractConverter;
 class FirOpBuilder;
 
 //===----------------------------------------------------------------------===//
@@ -197,13 +214,24 @@ private:
   Range range{nullptr, nullptr};
 };
 
-// Define Fortran statement related runtime (other than IO and maths)
+// Lowering of Fortran statement related runtime (other than IO and maths)
 
-mlir::FuncOp genStopStatementRuntime(FirOpBuilder &);
-mlir::FuncOp genStopStatementTextRuntime(FirOpBuilder &);
-mlir::FuncOp genFailImageStatementRuntime(FirOpBuilder &);
-mlir::FuncOp genProgramEndStatementRuntime(FirOpBuilder &);
+void genEventPostStatement(AbstractConverter &, const parser::EventPostStmt &);
+void genEventWaitStatement(AbstractConverter &, const parser::EventWaitStmt &);
+void genFormTeamStatement(AbstractConverter &, const parser::FormTeamStmt &);
+void genLockStatement(AbstractConverter &, const parser::LockStmt &);
+void genFailImageStatement(AbstractConverter &);
+void genStopStatement(AbstractConverter &, const parser::StopStmt &);
+void genSyncAllStatement(AbstractConverter &, const parser::SyncAllStmt &);
+void genSyncImagesStatement(AbstractConverter &,
+                            const parser::SyncImagesStmt &);
+void genSyncMemoryStatement(AbstractConverter &,
+                            const parser::SyncMemoryStmt &);
+void genSyncTeamStatement(AbstractConverter &, const parser::SyncTeamStmt &);
+void genUnlockStatement(AbstractConverter &, const parser::UnlockStmt &);
+void genPauseStatement(AbstractConverter &, const parser::PauseStmt &);
 
-} // namespace Fortran::lower
+} // namespace lower
+} // namespace Fortran
 
 #endif // FORTRAN_LOWER_RUNTIME_H_
