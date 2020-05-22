@@ -15,24 +15,24 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/Support/CommandLine.h"
 
-/// disable FIR to loop dialect conversion
+/// disable FIR to scf dialect conversion
 static llvm::cl::opt<bool>
-    disableLoopConversion("disable-loop-conversion",
-                          llvm::cl::desc("disable FIR to Loop pass"),
-                          llvm::cl::init(false));
+    disableScfConversion("disable-scf-conversion",
+                         llvm::cl::desc("disable FIR to SCF pass"),
+                         llvm::cl::init(false));
 
 using namespace fir;
 
 namespace {
 
-// Conversion to the MLIR loop dialect
+// Conversion to the SCF dialect.
 //
 // FIR loops that cannot be converted to the affine dialect will remain as
-// `fir.loop` operations.  These can be converted to `loop.for` operations. MLIR
-// includes a pass to lower `loop.for` operations to a CFG.
+// `fir.do_loop` operations.  These can be converted to `scf.for` operations.
+// MLIR includes a pass to lower `scf.for` operations to a CFG.
 
-/// Convert `fir.loop` to `loop.for`
-class LoopLoopConv : public mlir::OpRewritePattern<fir::LoopOp> {
+/// Convert `fir.do_loop` to `scf.for`
+class ScfLoopConv : public mlir::OpRewritePattern<fir::LoopOp> {
 public:
   using OpRewritePattern::OpRewritePattern;
 
@@ -53,8 +53,8 @@ public:
   }
 };
 
-/// Convert `fir.where` to `loop.if`
-class LoopWhereConv : public mlir::OpRewritePattern<fir::WhereOp> {
+/// Convert `fir.if` to `scf.if`
+class ScfIfConv : public mlir::OpRewritePattern<fir::WhereOp> {
 public:
   using OpRewritePattern::OpRewritePattern;
 
@@ -77,8 +77,8 @@ public:
   }
 };
 
-/// Replace FirEndOp with TerminatorOp
-class LoopResultConv : public mlir::OpRewritePattern<fir::ResultOp> {
+/// Convert `fir.result` to `scf.yield`
+class ScfResultConv : public mlir::OpRewritePattern<fir::ResultOp> {
 public:
   using OpRewritePattern::OpRewritePattern;
 
@@ -90,7 +90,7 @@ public:
   }
 };
 
-class LoopIterWhileConv : public mlir::OpRewritePattern<fir::IterWhileOp> {
+class ScfIterWhileConv : public mlir::OpRewritePattern<fir::IterWhileOp> {
 public:
   using OpRewritePattern::OpRewritePattern;
 
@@ -166,24 +166,23 @@ public:
   }
 };
 
-/// Convert `fir.loop` and `fir.where` to `loop.for` and `loop.if`.
-class LoopDialectConversion
-    : public mlir::PassWrapper<LoopDialectConversion, mlir::FunctionPass> {
+/// Convert FIR structured control flow ops to SCF ops.
+class ScfDialectConversion
+    : public mlir::PassWrapper<ScfDialectConversion, mlir::FunctionPass> {
 public:
   void runOnFunction() override {
-    if (disableLoopConversion)
+    if (disableScfConversion)
       return;
 
     auto *context = &getContext();
     mlir::OwningRewritePatternList patterns1;
-    patterns1.insert<LoopIterWhileConv>(context);
+    patterns1.insert<ScfIterWhileConv>(context);
 
     mlir::OwningRewritePatternList patterns2;
-    patterns2.insert<LoopLoopConv, LoopWhereConv, LoopResultConv>(context);
+    patterns2.insert<ScfLoopConv, ScfIfConv, ScfResultConv>(context);
     mlir::ConversionTarget target = *context;
     target.addLegalDialect<mlir::AffineDialect, FIROpsDialect,
-                           mlir::scf::SCFDialect,
-                           mlir::StandardOpsDialect>();
+                           mlir::scf::SCFDialect, mlir::StandardOpsDialect>();
 
     // apply the patterns
     target.addIllegalOp<IterWhileOp>();
@@ -197,16 +196,16 @@ public:
     if (mlir::failed(mlir::applyPartialConversion(getFunction(), target,
                                                   std::move(patterns2)))) {
       mlir::emitError(mlir::UnknownLoc::get(context),
-                      "error in converting to MLIR loop dialect\n");
+                      "error in converting to scf dialect\n");
       signalPassFailure();
     }
   }
 };
 } // namespace
 
-/// Convert `fir.loop` and `fir.where` to `loop.for` and `loop.if`.  This
+/// Convert FIR's structured control flow ops to SCF ops.  This
 /// conversion enables the `createLowerToCFGPass` to transform these to CFG
 /// form.
-std::unique_ptr<mlir::Pass> fir::createLowerToLoopPass() {
-  return std::make_unique<LoopDialectConversion>();
+std::unique_ptr<mlir::Pass> fir::createLowerToScfPass() {
+  return std::make_unique<ScfDialectConversion>();
 }
