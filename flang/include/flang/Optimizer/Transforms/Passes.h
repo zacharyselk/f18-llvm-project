@@ -40,9 +40,11 @@ std::unique_ptr<mlir::Pass> createLowerToScfPass();
 /// nodes as block arguments.
 std::unique_ptr<mlir::Pass> createMemToRegPass();
 
-/// This pass will preform inlining on FIR. If inlining is disabled this returns
-/// a nullptr.
+/// This pass will preform inlining on FIR.
 std::unique_ptr<mlir::Pass> createInlinerPass();
+
+/// Is inlining enabled? Check this before instantiating the pass with
+/// createInlinerPass().
 bool inlinerIsEnabled();
 bool canLegallyInline(mlir::Operation *op, mlir::Region *reg,
                       mlir::BlockAndValueMapping &map);
