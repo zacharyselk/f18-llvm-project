@@ -37,8 +37,9 @@ struct Program;
 struct ModuleLikeUnit;
 struct FunctionLikeUnit;
 
-// Using std::list for a list of Evaluations preserves the option to do
-// O(1) time insertions anywhere.
+// TODO: A collection of Evaluations can obviously be any of the container
+// types; leaving this as a std::list _for now_ because we reserve the right to
+// insert PFT nodes in any order in O(1) time.
 using EvaluationList = std::list<Evaluation>;
 using LabelEvalMap = llvm::DenseMap<Fortran::parser::Label, Evaluation *>;
 
