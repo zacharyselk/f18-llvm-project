@@ -44,8 +44,8 @@ public:
     auto step = loop.step();
     assert(low && high && step);
     // ForOp has different bounds semantics. Adjust upper bound.
-    auto one = rewriter.create<mlir::ConstantIndexOp>(loc, 1);
-    auto adjustUp = rewriter.create<mlir::AddIOp>(loc, high, one);
+    auto diff = rewriter.create<mlir::SubIOp>(loc, high, low);
+    auto adjustUp = rewriter.create<mlir::AddIOp>(loc, diff, step);
     auto f = rewriter.create<mlir::scf::ForOp>(loc, low, adjustUp, step);
     f.region().getBlocks().clear();
     rewriter.inlineRegionBefore(loop.region(), f.region(), f.region().end());
