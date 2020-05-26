@@ -9,6 +9,7 @@ add_flang_library(FortranLower
   Intrinsics.cpp
   IO.cpp
   Mangler.cpp
+  OpenMP.cpp
   PFTBuilder.cpp
   Runtime.cpp
 
