@@ -131,9 +131,9 @@ using LabelSet = llvm::SmallSet<parser::Label, 5>;
 using SymbolRef = common::Reference<const semantics::Symbol>;
 using SymbolLabelMap = llvm::DenseMap<SymbolRef, LabelSet>;
 
-/// Provide a variant like container that can holds constant references.
-/// It is used in the other classes to provide union of const references
-/// to parse-tree nodes.
+/// Provide a variant like container that can hold constant references.  It is
+/// used in the other classes to provide union of const references to parse-tree
+/// nodes.
 template <typename... A>
 class ReferenceVariant {
 public:

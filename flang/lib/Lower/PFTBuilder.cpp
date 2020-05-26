@@ -1039,10 +1039,8 @@ private:
 void Fortran::lower::pft::FunctionLikeUnit::processSymbolTable(
     const semantics::Scope &scope) {
   SymbolDependenceDepth sdd{varList};
-  for (const auto &iter : scope) {
+  for (const auto &iter : scope)
     sdd.analyze(iter.second.get());
-    // llvm::outs() << iter.second.get() << '\n';
-  }
   sdd.finalize();
 }
 
