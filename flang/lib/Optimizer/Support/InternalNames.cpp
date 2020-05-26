@@ -23,7 +23,7 @@ static std::string doModules(llvm::ArrayRef<llvm::StringRef> mods) {
   std::string result;
   auto *token = "M";
   for (auto mod : mods) {
-    result.append(token).append(mod);
+    result.append(token).append(mod.lower());
     token = "S";
   }
   return result;
@@ -33,7 +33,7 @@ static std::string doModulesHost(llvm::ArrayRef<llvm::StringRef> mods,
                                  llvm::Optional<llvm::StringRef> host) {
   std::string result = doModules(mods);
   if (host.hasValue())
-    result.append("F").append(*host);
+    result.append("F").append(host->lower());
   return result;
 }
 
@@ -52,7 +52,7 @@ convertToStringRef(const llvm::Optional<std::string> &from) {
 
 static std::string readName(llvm::StringRef uniq, std::size_t &i,
                             std::size_t init, std::size_t end) {
-  for (i = init; i < end && uniq[i] >= 'a' && uniq[i] <= 'z'; ++i) {
+  for (i = init; i < end && (uniq[i] < 'A' || uniq[i] > 'Z'); ++i) {
     // do nothing
   }
   return uniq.substr(init, i).str();
