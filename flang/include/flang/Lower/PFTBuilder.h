@@ -43,13 +43,53 @@ struct FunctionLikeUnit;
 using EvaluationList = std::list<Evaluation>;
 using LabelEvalMap = llvm::DenseMap<Fortran::parser::Label, Evaluation *>;
 
-struct ParentVariant {
-  template <typename A>
-  ParentVariant(A &parentVariant) : p{&parentVariant} {}
-  const std::variant<Program *, ModuleLikeUnit *, FunctionLikeUnit *,
-                     Evaluation *>
-      p;
+/// Provide a variant like container that can hold references. It can hold
+/// constant or mutable references. It is used in the other classes to provide
+/// union of const references to parse-tree nodes.
+template <bool isConst, typename... A>
+class ReferenceVariantBase {
+public:
+  template <typename B>
+  using BaseType = std::conditional_t<isConst, const B, B>;
+  template <typename B>
+  using Ref = common::Reference<BaseType<B>>;
+
+  ReferenceVariantBase() = delete;
+  template <typename B>
+  ReferenceVariantBase(B &b) : u{Ref<B>{b}} {}
+
+  template <typename B>
+  constexpr BaseType<B> &get() const {
+    return std::get<Ref<B>> > (u).get();
+  }
+  template <typename B>
+  constexpr BaseType<B> *getIf() const {
+    auto *ptr = std::get_if<Ref<B>>(&u);
+    return ptr ? &ptr->get() : nullptr;
+  }
+  template <typename B>
+  constexpr bool isA() const {
+    return std::holds_alternative<Ref<B>>(u);
+  }
+  template <typename VISITOR>
+  constexpr auto visit(VISITOR &&visitor) const {
+    return std::visit(
+        common::visitors{[&visitor](auto ref) { return visitor(ref.get()); }},
+        u);
+  }
+
+private:
+  std::variant<Ref<A>...> u;
 };
+template <typename... A>
+using ReferenceVariant = ReferenceVariantBase<true, A...>;
+template <typename... A>
+using MutableReferenceVariant = ReferenceVariantBase<false, A...>;
+
+/// ParentVariant is used to provide a reference to the unit a parse-tree node
+/// belongs to. It is a variant of non-nullable pointers.
+using ParentVariant = MutableReferenceVariant<Program, ModuleLikeUnit,
+                                              FunctionLikeUnit, Evaluation>;
 
 /// Classify the parse-tree nodes from ExecutablePartConstruct
 
@@ -130,43 +170,6 @@ static constexpr bool isFunctionLike{common::HasMember<
 using LabelSet = llvm::SmallSet<parser::Label, 5>;
 using SymbolRef = common::Reference<const semantics::Symbol>;
 using SymbolLabelMap = llvm::DenseMap<SymbolRef, LabelSet>;
-
-/// Provide a variant like container that can hold constant references.  It is
-/// used in the other classes to provide union of const references to parse-tree
-/// nodes.
-template <typename... A>
-class ReferenceVariant {
-public:
-  template <typename B>
-  using ConstRef = common::Reference<const B>;
-
-  ReferenceVariant() = delete;
-  template <typename B>
-  ReferenceVariant(const B &b) : u{ConstRef<B>{b}} {}
-
-  template <typename B>
-  constexpr const B &get() const {
-    return std::get<ConstRef<B>> > (u).get();
-  }
-  template <typename B>
-  constexpr const B *getIf() const {
-    auto *ptr = std::get_if<ConstRef<B>>(&u);
-    return ptr ? &ptr->get() : nullptr;
-  }
-  template <typename B>
-  constexpr bool isA() const {
-    return std::holds_alternative<ConstRef<B>>(u);
-  }
-  template <typename VISITOR>
-  constexpr auto visit(VISITOR &&visitor) const {
-    return std::visit(
-        common::visitors{[&visitor](auto ref) { return visitor(ref.get()); }},
-        u);
-  }
-
-private:
-  std::variant<ConstRef<A>...> u;
-};
 
 template <typename A>
 struct MakeReferenceVariantHelper {};
