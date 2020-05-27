@@ -222,16 +222,15 @@ private:
   /// Reset functionList to an enclosing function's functionList.
   void resetFunctionList() {
     if (!parentVariantStack.empty()) {
-      std::visit(common::visitors{
-                     [&](lower::pft::FunctionLikeUnit *p) {
-                       functionList = &p->nestedFunctions;
-                     },
-                     [&](lower::pft::ModuleLikeUnit *p) {
-                       functionList = &p->nestedFunctions;
-                     },
-                     [&](auto *) { functionList = nullptr; },
-                 },
-                 parentVariantStack.back().p);
+      parentVariantStack.back().visit(common::visitors{
+          [&](lower::pft::FunctionLikeUnit &p) {
+            functionList = &p.nestedFunctions;
+          },
+          [&](lower::pft::ModuleLikeUnit &p) {
+            functionList = &p.nestedFunctions;
+          },
+          [&](auto &) { functionList = nullptr; },
+      });
     }
   }
 
@@ -937,13 +936,11 @@ bool Fortran::lower::pft::Evaluation::lowerAsUnstructured() const {
 
 lower::pft::FunctionLikeUnit *
 Fortran::lower::pft::Evaluation::getOwningProcedure() const {
-  return std::visit(
-      common::visitors{
-          [](lower::pft::FunctionLikeUnit *c) { return c; },
-          [&](lower::pft::Evaluation *c) { return c->getOwningProcedure(); },
-          [](auto *) -> lower::pft::FunctionLikeUnit * { return nullptr; },
-      },
-      parentVariant.p);
+  return parentVariant.visit(common::visitors{
+      [](lower::pft::FunctionLikeUnit &c) { return &c; },
+      [&](lower::pft::Evaluation &c) { return c.getOwningProcedure(); },
+      [](auto &) -> lower::pft::FunctionLikeUnit * { return nullptr; },
+  });
 }
 
 namespace {
