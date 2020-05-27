@@ -9,6 +9,7 @@
 #include "flang/Lower/ConvertType.h"
 #include "../../runtime/io-api.h"
 #include "flang/Lower/Bridge.h"
+#include "flang/Lower/PFTBuilder.h"
 #include "flang/Lower/Utils.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
 #include "flang/Semantics/expression.h"
@@ -364,34 +365,32 @@ public:
     return mlir::FunctionType::get(inputTys, returnTys, context);
   }
 
-  /// Type consing from a symbol. A symbol's type must be created from the type
-  /// discovered by the front-end at runtime.
-  mlir::Type gen(Fortran::semantics::SymbolRef symbol) {
-    if (symbol->detailsIf<Fortran::semantics::SubprogramDetails>())
+  mlir::Type genSymbolHelper(const Fortran::semantics::Symbol &symbol,
+                             bool isAlloc = false, bool isPtr = false) {
+    if (symbol.detailsIf<Fortran::semantics::SubprogramDetails>())
       return genFunctionType(symbol);
-    mlir::Type returnTy;
-    if (auto *type{symbol->GetType()}) {
+    mlir::Type ty;
+    if (auto *type{symbol.GetType()}) {
       if (auto *tySpec{type->AsIntrinsic()}) {
         int kind = toConstant(tySpec->kind());
         switch (tySpec->category()) {
         case Fortran::common::TypeCategory::Integer:
-          returnTy =
+          ty =
               genFIRType<Fortran::common::TypeCategory::Integer>(context, kind);
           break;
         case Fortran::common::TypeCategory::Real:
-          returnTy =
-              genFIRType<Fortran::common::TypeCategory::Real>(context, kind);
+          ty = genFIRType<Fortran::common::TypeCategory::Real>(context, kind);
           break;
         case Fortran::common::TypeCategory::Complex:
-          returnTy =
+          ty =
               genFIRType<Fortran::common::TypeCategory::Complex>(context, kind);
           break;
         case Fortran::common::TypeCategory::Character:
-          returnTy = genFIRType<Fortran::common::TypeCategory::Character>(
-              context, kind);
+          ty = genFIRType<Fortran::common::TypeCategory::Character>(context,
+                                                                    kind);
           break;
         case Fortran::common::TypeCategory::Logical:
-          returnTy =
+          ty =
               genFIRType<Fortran::common::TypeCategory::Logical>(context, kind);
           break;
         default:
@@ -415,7 +414,7 @@ public:
                   "construct the type '" +
                   toStringRef(symbol.name()) + "'");
         rec.finalize(ps, cs);
-        returnTy = rec;
+        ty = rec;
       } else {
         emitError("symbol's type must have a type spec");
         return {};
@@ -424,22 +423,36 @@ public:
       emitError("symbol must have a type");
       return {};
     }
-    if (symbol->IsObjectArray()) {
-      if (symbol->GetType()->category() ==
+    if (symbol.IsObjectArray()) {
+      if (symbol.GetType()->category() ==
           Fortran::semantics::DeclTypeSpec::Character) {
         auto charLen = fir::SequenceType::getUnknownExtent();
-        const auto &lenParam = symbol->GetType()->characterTypeSpec().length();
+        const auto &lenParam = symbol.GetType()->characterTypeSpec().length();
         if (auto expr = lenParam.GetExplicit()) {
           auto len = Fortran::evaluate::AsGenericExpr(std::move(*expr));
           auto asInt = Fortran::evaluate::ToInt64(len);
           if (asInt)
             charLen = *asInt;
         }
-        return fir::SequenceType::get(genSeqShape(symbol, charLen), returnTy);
+        return fir::SequenceType::get(genSeqShape(symbol, charLen), ty);
       }
-      return fir::SequenceType::get(genSeqShape(symbol), returnTy);
+      return fir::SequenceType::get(genSeqShape(symbol), ty);
     }
-    return returnTy;
+    if (isPtr || Fortran::semantics::IsPointer(symbol))
+      ty = fir::PointerType::get(ty);
+    else if (isAlloc || Fortran::semantics::IsAllocatable(symbol))
+      ty = fir::HeapType::get(ty);
+    return ty;
+  }
+
+  mlir::Type gen(const Fortran::lower::pft::Variable &var) {
+    return genSymbolHelper(var.getSymbol(), var.isHeapAlloc(), var.isPointer());
+  }
+
+  /// Type consing from a symbol. A symbol's type must be created from the type
+  /// discovered by the front-end at runtime.
+  mlir::Type gen(Fortran::semantics::SymbolRef symbol) {
+    return genSymbolHelper(symbol);
   }
 
   fir::SequenceType::Shape trivialShape(int size) {
@@ -519,6 +532,13 @@ mlir::Type Fortran::lower::translateSymbolToFIRType(
     const Fortran::common::IntrinsicTypeDefaultKinds &defaults,
     const SymbolRef symbol) {
   return TypeBuilder{context, defaults}.gen(symbol);
+}
+
+mlir::Type Fortran::lower::translateVariableToFIRType(
+    mlir::MLIRContext *context,
+    const Fortran::common::IntrinsicTypeDefaultKinds &defaults,
+    const Fortran::lower::pft::Variable &var) {
+  return TypeBuilder{context, defaults}.gen(var);
 }
 
 mlir::FunctionType Fortran::lower::translateSymbolToFIRFunctionType(
