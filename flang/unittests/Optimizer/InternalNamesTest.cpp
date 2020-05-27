@@ -95,12 +95,12 @@ TEST(InternalNamesTest, doTypeTest) {
 TEST(InternalNamesTest, doIntrinsicTypeDescriptorTest) {
   NameUniquer obj;
   std::string actual =
-      obj.doIntrinsicTypeDescriptor({}, {}, obj.IntrinsicType::REAL, {42});
+      obj.doIntrinsicTypeDescriptor({}, {}, obj.IntrinsicType::REAL, 42);
   std::string expectedMangledName = "_QCrealK42";
   ASSERT_EQ(actual, expectedMangledName);
 
   actual = obj.doIntrinsicTypeDescriptor({}, {}, obj.IntrinsicType::REAL, {});
-  expectedMangledName = "_QCrealK0"; // [FIXME]: Should be 4(DEFAULT KIND) ?
+  expectedMangledName = "_QCrealK0";
   ASSERT_EQ(actual, expectedMangledName);
 
   actual =
@@ -136,8 +136,7 @@ TEST(InternalNamesTest, doTypeDescriptorTest) {
   std::string actual = obj.doTypeDescriptor(
       {StringRef("moD1")}, {StringRef("foo")}, "MyTYPE", {2, 8});
   std::string expectedMangledName =
-      "_QMmod1FfooCTmytypeK2K8"; // [FIXME]: Why moD1 is not lower case?,
-                                 // expected: "_QMmod1FfooCTmytypeK2K8"
+      "_QMmod1FfooCTmytypeK2K8";
   ASSERT_EQ(actual, expectedMangledName);
 }
 
@@ -166,14 +165,45 @@ TEST(InternalNamesTest, deconstructTest) {
   validateDeconstructedName(actual, expectedNameKind, expectedComponents);
 }
 
-// TODO: Implement full support for deConstruct, disabled for now
-TEST(InternalNamesTest, DISABLED_complexdeconstructTest) {
+TEST(InternalNamesTest, complexdeconstructTest) {
   NameUniquer obj;
   std::pair actual = obj.deconstruct("_QMmodSs1modSs2modFsubPfun");
-  auto expectedNameKind = obj.NameKind::NOT_UNIQUED;
+  auto expectedNameKind = obj.NameKind::PROCEDURE;
   struct DeconstructedName expectedComponents = {
       {"mod", "s1mod", "s2mod"}, {"sub"}, "fun", {}};
   validateDeconstructedName(actual, expectedNameKind, expectedComponents);
+
+
+  actual = obj.deconstruct("_QPsub");
+  expectedNameKind = obj.NameKind::PROCEDURE;
+  expectedComponents = {{}, {}, "sub", {}};
+  validateDeconstructedName(actual, expectedNameKind, expectedComponents);
+
+  actual = obj.deconstruct("_QBvariables");
+  expectedNameKind = obj.NameKind::COMMON;
+  expectedComponents = {{}, {}, "variables", {}};
+  validateDeconstructedName(actual, expectedNameKind, expectedComponents);
+
+  actual = obj.deconstruct("_QMmodEintvar");
+  expectedNameKind = obj.NameKind::VARIABLE;
+  expectedComponents = {{"mod"}, {}, "intvar", {}};
+  validateDeconstructedName(actual, expectedNameKind, expectedComponents);
+
+  actual = obj.deconstruct("_QMmodECpi");
+  expectedNameKind = obj.NameKind::CONSTANT;
+  expectedComponents = {{"mod"}, {}, "pi", {}};
+  validateDeconstructedName(actual, expectedNameKind, expectedComponents);
+
+  actual = obj.deconstruct("_QTyourtypeK4KN6");
+  expectedNameKind = obj.NameKind::DERIVED_TYPE;
+  expectedComponents = {{}, {}, "yourtype", {4,-6}};
+  validateDeconstructedName(actual, expectedNameKind, expectedComponents);
+
+  actual = obj.deconstruct("_QDTt");
+  expectedNameKind = obj.NameKind::DISPATCH_TABLE;
+  expectedComponents = {{}, {}, "t", {}};
+  validateDeconstructedName(actual, expectedNameKind, expectedComponents);
+
 }
 
 // main() from gtest_main
