@@ -135,8 +135,7 @@ TEST(InternalNamesTest, doTypeDescriptorTest) {
   NameUniquer obj;
   std::string actual = obj.doTypeDescriptor(
       {StringRef("moD1")}, {StringRef("foo")}, "MyTYPE", {2, 8});
-  std::string expectedMangledName =
-      "_QMmod1FfooCTmytypeK2K8";
+  std::string expectedMangledName = "_QMmod1FfooCTmytypeK2K8";
   ASSERT_EQ(actual, expectedMangledName);
 }
 
@@ -173,7 +172,6 @@ TEST(InternalNamesTest, complexdeconstructTest) {
       {"mod", "s1mod", "s2mod"}, {"sub"}, "fun", {}};
   validateDeconstructedName(actual, expectedNameKind, expectedComponents);
 
-
   actual = obj.deconstruct("_QPsub");
   expectedNameKind = obj.NameKind::PROCEDURE;
   expectedComponents = {{}, {}, "sub", {}};
@@ -196,14 +194,13 @@ TEST(InternalNamesTest, complexdeconstructTest) {
 
   actual = obj.deconstruct("_QTyourtypeK4KN6");
   expectedNameKind = obj.NameKind::DERIVED_TYPE;
-  expectedComponents = {{}, {}, "yourtype", {4,-6}};
+  expectedComponents = {{}, {}, "yourtype", {4, -6}};
   validateDeconstructedName(actual, expectedNameKind, expectedComponents);
 
   actual = obj.deconstruct("_QDTt");
   expectedNameKind = obj.NameKind::DISPATCH_TABLE;
   expectedComponents = {{}, {}, "t", {}};
   validateDeconstructedName(actual, expectedNameKind, expectedComponents);
-
 }
 
 // main() from gtest_main
