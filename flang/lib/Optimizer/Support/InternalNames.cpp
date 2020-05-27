@@ -55,7 +55,7 @@ static std::string readName(llvm::StringRef uniq, std::size_t &i,
   for (i = init; i < end && (uniq[i] < 'A' || uniq[i] > 'Z'); ++i) {
     // do nothing
   }
-  return uniq.substr(init, (i-init) ).str();
+  return uniq.substr(init, (i - init)).str();
 }
 
 static std::int64_t readInt(llvm::StringRef uniq, std::size_t &i,
@@ -64,7 +64,7 @@ static std::int64_t readInt(llvm::StringRef uniq, std::size_t &i,
     // do nothing
   }
   std::int64_t result = BAD_VALUE;
-  if (uniq.substr(init, i-init).getAsInteger(10, result))
+  if (uniq.substr(init, i - init).getAsInteger(10, result))
     return BAD_VALUE;
   return result;
 }
