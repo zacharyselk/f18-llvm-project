@@ -59,6 +59,9 @@ struct NameUniquer;
 }
 
 namespace Fortran::lower {
+namespace pft {
+struct Variable;
+}
 
 using SomeExpr = evaluate::Expr<evaluate::SomeType>;
 using SymbolRef = common::Reference<const semantics::Symbol>;
@@ -101,6 +104,8 @@ public:
   virtual mlir::Type genType(common::TypeCategory tc) = 0;
   /// Generate the type from a category and kind
   virtual mlir::Type genType(common::TypeCategory tc, int kind) = 0;
+  /// Generate the type from a Variable
+  virtual mlir::Type genType(const pft::Variable &) = 0;
 
   //
   // Locations

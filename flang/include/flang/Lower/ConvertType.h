@@ -5,10 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //----------------------------------------------------------------------------//
-
-#ifndef FORTRAN_LOWER_CONVERT_TYPE_H_
-#define FORTRAN_LOWER_CONVERT_TYPE_H_
-
+///
 /// Conversion of front-end TYPE, KIND, ATTRIBUTE (TKA) information to FIR/MLIR.
 /// This is meant to be the single point of truth (SPOT) for all type
 /// conversions when lowering to FIR.  This implements all lowering of parse
@@ -16,6 +13,11 @@
 /// not using one of the routines provided here, it's being done wrong.
 ///
 /// [Coding style](https://llvm.org/docs/CodingStandards.html)
+///
+//----------------------------------------------------------------------------//
+
+#ifndef FORTRAN_LOWER_CONVERT_TYPE_H_
+#define FORTRAN_LOWER_CONVERT_TYPE_H_
 
 #include "flang/Common/Fortran.h"
 #include "mlir/IR/Types.h"
@@ -56,6 +58,9 @@ class Symbol;
 } // namespace semantics
 
 namespace lower {
+namespace pft {
+struct Variable;
+}
 
 using SomeExpr = evaluate::Expr<evaluate::SomeType>;
 using SymbolRef = common::Reference<const semantics::Symbol>;
@@ -95,6 +100,10 @@ mlir::Type
 translateSymbolToFIRType(mlir::MLIRContext *ctxt,
                          common::IntrinsicTypeDefaultKinds const &defaults,
                          const SymbolRef symbol);
+mlir::Type
+translateVariableToFIRType(mlir::MLIRContext *ctxt,
+                           common::IntrinsicTypeDefaultKinds const &defaults,
+                           const pft::Variable &variable);
 
 mlir::FunctionType translateSymbolToFIRFunctionType(
     mlir::MLIRContext *ctxt, common::IntrinsicTypeDefaultKinds const &defaults,
