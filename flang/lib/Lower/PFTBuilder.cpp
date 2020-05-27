@@ -1014,6 +1014,12 @@ struct SymbolDependenceDepth {
     }
     adjustSize(depth + 1);
     vars[depth].emplace_back(sym, global, depth);
+    if (Fortran::semantics::IsAllocatable(sym))
+      vars[depth].back().setHeapAlloc();
+    if (Fortran::semantics::IsPointer(sym))
+      vars[depth].back().setPointer();
+    if (sym.attrs().test(Fortran::semantics::Attr::TARGET))
+      vars[depth].back().setTarget();
     return depth;
   }
 

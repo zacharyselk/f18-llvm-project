@@ -327,13 +327,21 @@ struct Variable {
 
   const Fortran::semantics::Symbol &getSymbol() const { return *sym; }
   bool isGlobal() const { return global; }
+  bool isHeapAlloc() const { return heapAlloc; }
+  bool isPointer() const { return pointer; }
+  bool isTarget() const { return target; }
   int getDepth() const { return depth; }
+  void setHeapAlloc(bool to = true) { heapAlloc = to; }
+  void setPointer(bool to = true) { pointer = to; }
+  void setTarget(bool to = true) { target = to; }
 
 private:
   const Fortran::semantics::Symbol *sym;
   int depth;
   bool global;
-  //bool heap{false}; // variable needs deallocation on exit
+  bool heapAlloc{false}; // variable needs deallocation on exit
+  bool pointer{false};
+  bool target{false};
 };
 
 /// Function-like units may contain evaluations (executable statements) and
