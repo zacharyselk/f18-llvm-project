@@ -14,6 +14,7 @@
 #include "flang/Evaluate/real.h"
 #include "flang/Lower/Bridge.h"
 #include "flang/Lower/CharRT.h"
+#include "flang/Lower/ComplexExpr.h"
 #include "flang/Lower/ConvertType.h"
 #include "flang/Lower/FIRBuilder.h"
 #include "flang/Lower/Runtime.h"
@@ -354,13 +355,18 @@ private:
     TODO();
   }
 
+  mlir::Value extractComplexPart(mlir::Value cplx, bool isImagPart) {
+    return Fortran::lower::ComplexExprHelper{builder, getLoc()}
+        .extractComplexPart(cplx, isImagPart);
+  }
+
   template <int KIND>
   Fortran::lower::ExValue
   genval(const Fortran::evaluate::ComplexComponent<KIND> &part) {
     builder.setLocation(getLoc());
     auto lhs = genunbox(part.left());
     assert(lhs && "boxed type not handled");
-    return builder.extractComplexPart(lhs, part.isImaginaryPart);
+    return extractComplexPart(lhs, part.isImaginaryPart);
   }
 
   template <Fortran::common::TypeCategory TC, int KIND>
@@ -459,6 +465,12 @@ private:
     return builder.genPow(ty, lhs, rhs);
   }
 
+  mlir::Value createComplex(fir::KindTy kind, mlir::Value real,
+                            mlir::Value imag) {
+    return Fortran::lower::ComplexExprHelper{builder, getLoc()}.createComplex(
+        kind, real, imag);
+  }
+
   template <int KIND>
   Fortran::lower::ExValue
   genval(const Fortran::evaluate::ComplexConstructor<KIND> &op) {
@@ -466,7 +478,7 @@ private:
     auto lhs = genunbox(op.left());
     auto rhs = genunbox(op.right());
     assert(lhs && rhs && "boxed value not handled");
-    return builder.createComplex(KIND, lhs, rhs);
+    return createComplex(KIND, lhs, rhs);
   }
 
   template <int KIND>
@@ -498,6 +510,12 @@ private:
     TODO();
   }
 
+  mlir::Value createComplexCompare(mlir::Value cplx1, mlir::Value cplx2,
+                                   bool eq) {
+    return Fortran::lower::ComplexExprHelper{builder, getLoc()}
+        .createComplexCompare(cplx1, cplx2, eq);
+  }
+
   template <Fortran::common::TypeCategory TC, int KIND>
   Fortran::lower::ExValue
   genval(const Fortran::evaluate::Relational<Fortran::evaluate::Type<TC, KIND>>
@@ -514,7 +532,7 @@ private:
       auto lhs = genunbox(op.left());
       auto rhs = genunbox(op.right());
       assert(lhs && rhs && "boxed value not handled");
-      return builder.createComplexCompare(lhs, rhs, eq);
+      return createComplexCompare(lhs, rhs, eq);
     } else {
       static_assert(TC == Fortran::common::TypeCategory::Character);
       builder.setLocation(getLoc());
@@ -773,7 +791,8 @@ private:
     return {lower, upper, genunbox(trip.stride())};
   }
 
-  /// Special factoring to allow RangeBoxValue to be returned when generating values.
+  /// Special factoring to allow RangeBoxValue to be returned when generating
+  /// values.
   std::variant<Fortran::lower::ExValue, fir::RangeBoxValue>
   genComponent(const Fortran::evaluate::Subscript &subs) {
     if (auto *s = std::get_if<Fortran::evaluate::IndirectSubscriptIntegerExpr>(
@@ -929,20 +948,20 @@ private:
           if (auto ext = std::get<0>(pair))
             delta = builder.create<mlir::MulIOp>(loc, delta, ext);
         } else {
-	  auto *v = std::get_if<Fortran::lower::ExValue>(&subVal);
-	  assert(v);
-	  if (auto *sval = v->getUnboxed()) {
-	    auto val = builder.createConvert(loc, idxTy, *sval);
-	    auto lb = builder.createConvert(loc, idxTy, getLB(arr, dim));
-	    auto diff = builder.create<mlir::SubIOp>(loc, val, lb);
-	    auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
-	    total = builder.create<mlir::AddIOp>(loc, prod, total);
-	    if (auto ext = std::get<0>(pair))
-	      delta = builder.create<mlir::MulIOp>(loc, delta, ext);
-	  } else {
-	    TODO();
-	  }
-	}
+          auto *v = std::get_if<Fortran::lower::ExValue>(&subVal);
+          assert(v);
+          if (auto *sval = v->getUnboxed()) {
+            auto val = builder.createConvert(loc, idxTy, *sval);
+            auto lb = builder.createConvert(loc, idxTy, getLB(arr, dim));
+            auto diff = builder.create<mlir::SubIOp>(loc, val, lb);
+            auto prod = builder.create<mlir::MulIOp>(loc, delta, diff);
+            total = builder.create<mlir::AddIOp>(loc, prod, total);
+            if (auto ext = std::get<0>(pair))
+              delta = builder.create<mlir::MulIOp>(loc, delta, ext);
+          } else {
+            TODO();
+          }
+        }
         ++dim;
       }
       return builder.create<fir::CoordinateOp>(
