@@ -126,66 +126,6 @@ public:
 
 /// Extension class to facilitate lowering of COMPLEX manipulations in FIR.
 template <typename T>
-class ComplexOpsBuilder {
-public:
-  // The values of part enum members are meaningful for
-  // InsertValueOp and ExtractValueOp so they are explicit.
-  enum class Part { Real = 0, Imag = 1 };
-
-  // access the implementation
-  T &impl() { return *static_cast<T *>(this); }
-
-  /// Type helper. They do not create MLIR operations.
-  mlir::Type getComplexPartType(mlir::Value cplx);
-  mlir::Type getComplexPartType(mlir::Type complexType);
-
-  /// Complex operation creation helper. They create MLIR operations.
-  mlir::Value createComplex(fir::KindTy kind, mlir::Value real,
-                            mlir::Value imag);
-
-  /// Create a complex value.
-  mlir::Value createComplex(mlir::Location loc, mlir::Type complexType,
-                            mlir::Value real, mlir::Value imag);
-
-  mlir::Value extractComplexPart(mlir::Value cplx, bool isImagPart) {
-    return isImagPart ? extract<Part::Imag>(cplx) : extract<Part::Real>(cplx);
-  }
-
-  /// Returns (Real, Imag) pair of \p cplx
-  std::pair<mlir::Value, mlir::Value> extractParts(mlir::Value cplx) {
-    return {extract<Part::Real>(cplx), extract<Part::Imag>(cplx)};
-  }
-  mlir::Value insertComplexPart(mlir::Value cplx, mlir::Value part,
-                                bool isImagPart) {
-    return isImagPart ? insert<Part::Imag>(cplx, part)
-                      : insert<Part::Real>(cplx, part);
-  }
-
-  mlir::Value createComplexCompare(mlir::Value cplx1, mlir::Value cplx2,
-                                   bool eq);
-
-protected:
-  template <Part partId>
-  mlir::Value extract(mlir::Value cplx) {
-    return impl().template createHere<fir::ExtractValueOp>(
-        getComplexPartType(cplx), cplx, createPartId<partId>());
-  }
-
-  template <Part partId>
-  mlir::Value insert(mlir::Value cplx, mlir::Value part) {
-    return impl().template createHere<fir::InsertValueOp>(
-        cplx.getType(), cplx, part, createPartId<partId>());
-  }
-
-  template <Part partId>
-  mlir::Value createPartId() {
-    return impl().createIntegerConstant(impl().getIndexType(),
-                                        static_cast<int>(partId));
-  }
-};
-
-/// Extension class to facilitate lowering of COMPLEX manipulations in FIR.
-template <typename T>
 class IntrinsicCallOpsBuilder {
 public:
   // access the implementation
@@ -225,7 +165,6 @@ public:
 /// patterns.
 class FirOpBuilder : public mlir::OpBuilder,
                      public CharacterOpsBuilder<FirOpBuilder>,
-                     public ComplexOpsBuilder<FirOpBuilder>,
                      public IntrinsicCallOpsBuilder<FirOpBuilder> {
 public:
   explicit FirOpBuilder(mlir::Operation *op, const fir::KindMapping &kindMap)
@@ -277,6 +216,8 @@ public:
 
   /// Create an integer constant of type \p type and value \p i.
   mlir::Value createIntegerConstant(mlir::Type integerType, std::int64_t i);
+  mlir::Value createIntegerConstant(mlir::Location loc, mlir::Type integerType,
+                                    std::int64_t i);
 
   mlir::Value createRealConstant(mlir::Location loc, mlir::Type realType,
                                  const llvm::APFloat &val);

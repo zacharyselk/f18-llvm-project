@@ -9,6 +9,7 @@
 #include "flang/Lower/FIRBuilder.h"
 #include "SymbolMap.h"
 #include "flang/Lower/Bridge.h"
+#include "flang/Lower/ComplexExpr.h"
 #include "flang/Lower/ConvertType.h"
 #include "flang/Optimizer/Dialect/FIROpsSupport.h"
 #include "flang/Semantics/symbol.h"
@@ -40,7 +41,12 @@ mlir::Type Fortran::lower::FirOpBuilder::getRefType(mlir::Type eleTy) {
 mlir::Value
 Fortran::lower::FirOpBuilder::createIntegerConstant(mlir::Type intType,
                                                     std::int64_t cst) {
-  return createHere<mlir::ConstantOp>(intType, getIntegerAttr(intType, cst));
+  return createIntegerConstant(getLoc(), intType, cst);
+}
+
+mlir::Value Fortran::lower::FirOpBuilder::createIntegerConstant(
+    mlir::Location loc, mlir::Type ty, std::int64_t cst) {
+  return create<mlir::ConstantOp>(loc, ty, getIntegerAttr(ty, cst));
 }
 
 mlir::Value Fortran::lower::FirOpBuilder::createRealConstant(
@@ -153,21 +159,22 @@ mlir::Value Fortran::lower::FirOpBuilder::convertWithSemantics(
   if (fromTy == toTy)
     return val;
   // FIXME: add a fir::is_integer() test
+  ComplexExprHelper helper{*this, loc};
   if ((fir::isa_real(fromTy) || fromTy.isSignlessInteger()) &&
       fir::isa_complex(toTy)) {
     // imaginary part is zero
-    auto eleTy = getComplexPartType(toTy);
+    auto eleTy = helper.getComplexPartType(toTy);
     auto cast = createConvert(loc, eleTy, val);
     llvm::APFloat zero{
         kindMap.getFloatSemantics(toTy.cast<fir::CplxType>().getFKind()), 0};
     auto imag = createRealConstant(loc, eleTy, zero);
-    return createComplex(loc, toTy, cast, imag);
+    return helper.createComplex(toTy, cast, imag);
   }
   // FIXME: add a fir::is_integer() test
   if (fir::isa_complex(fromTy) &&
       (toTy.isSignlessInteger() || fir::isa_real(toTy))) {
     // drop the imaginary part
-    auto rp = extractComplexPart(val, /*isImagPart=*/false);
+    auto rp = helper.extractComplexPart(val, /*isImagPart=*/false);
     return createConvert(loc, toTy, rp);
   }
   return createConvert(loc, toTy, val);
@@ -722,69 +729,3 @@ mlir::Type Fortran::lower::CharacterOpsBuilder<T>::getLengthType() {
 }
 template mlir::Type Fortran::lower::CharacterOpsBuilder<
     Fortran::lower::FirOpBuilder>::getLengthType();
-
-//===----------------------------------------------------------------------===//
-// ComplexOpsBuilder implementation
-//===----------------------------------------------------------------------===//
-
-template <typename T>
-mlir::Type Fortran::lower::ComplexOpsBuilder<T>::getComplexPartType(
-    mlir::Type complexType) {
-  return Fortran::lower::convertReal(
-      complexType.getContext(), complexType.cast<fir::CplxType>().getFKind());
-}
-template mlir::Type Fortran::lower::ComplexOpsBuilder<
-    Fortran::lower::FirOpBuilder>::getComplexPartType(mlir::Type);
-
-template <typename T>
-mlir::Type
-Fortran::lower::ComplexOpsBuilder<T>::getComplexPartType(mlir::Value cplx) {
-  return getComplexPartType(cplx.getType());
-}
-template mlir::Type Fortran::lower::ComplexOpsBuilder<
-    Fortran::lower::FirOpBuilder>::getComplexPartType(mlir::Value);
-
-template <typename T>
-mlir::Value Fortran::lower::ComplexOpsBuilder<T>::createComplex(
-    fir::KindTy kind, mlir::Value real, mlir::Value imag) {
-  auto complexTy = fir::CplxType::get(impl().getContext(), kind);
-  mlir::Value und = impl().template createHere<fir::UndefOp>(complexTy);
-  return insert<Part::Imag>(insert<Part::Real>(und, real), imag);
-}
-template mlir::Value Fortran::lower::ComplexOpsBuilder<
-    Fortran::lower::FirOpBuilder>::createComplex(fir::KindTy, mlir::Value,
-                                                 mlir::Value);
-
-template <typename T>
-mlir::Value Fortran::lower::ComplexOpsBuilder<T>::createComplex(
-    mlir::Location loc, mlir::Type cplxTy, mlir::Value real, mlir::Value imag) {
-  mlir::Value und = impl().template create<fir::UndefOp>(loc, cplxTy);
-  return insert<Part::Imag>(insert<Part::Real>(und, real), imag);
-}
-template mlir::Value Fortran::lower::ComplexOpsBuilder<
-    Fortran::lower::FirOpBuilder>::createComplex(mlir::Location, mlir::Type,
-                                                 mlir::Value, mlir::Value);
-
-template <typename T>
-mlir::Value Fortran::lower::ComplexOpsBuilder<T>::createComplexCompare(
-    mlir::Value cplx1, mlir::Value cplx2, bool eq) {
-  auto real1 = extract<Part::Real>(cplx1);
-  auto real2 = extract<Part::Real>(cplx2);
-  auto imag1 = extract<Part::Imag>(cplx1);
-  auto imag2 = extract<Part::Imag>(cplx2);
-
-  mlir::CmpFPredicate predicate =
-      eq ? mlir::CmpFPredicate::UEQ : mlir::CmpFPredicate::UNE;
-  auto &b = impl();
-  mlir::Value realCmp =
-      b.template createHere<mlir::CmpFOp>(predicate, real1, real2);
-  mlir::Value imagCmp =
-      b.template createHere<mlir::CmpFOp>(predicate, imag1, imag2);
-
-  return eq ? b.template createHere<mlir::AndOp>(realCmp, imagCmp).getResult()
-            : b.template createHere<mlir::OrOp>(realCmp, imagCmp).getResult();
-}
-template mlir::Value Fortran::lower::ComplexOpsBuilder<
-    Fortran::lower::FirOpBuilder>::createComplexCompare(mlir::Value cplx1,
-                                                        mlir::Value cplx2,
-                                                        bool eq);
