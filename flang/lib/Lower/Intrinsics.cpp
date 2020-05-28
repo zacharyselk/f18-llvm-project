@@ -568,7 +568,6 @@ IntrinsicLibrary::outlineInWrapper(Generator generator, llvm::StringRef name,
                                    mlir::Type resultType,
                                    llvm::ArrayRef<mlir::Value> args) {
   auto module = builder.getModule();
-  auto *mlirContext = module.getContext();
   auto funcType = getFunctionType(resultType, args, builder);
   std::string wrapperName = getIntrinsicWrapperName(name, funcType);
   auto function = builder.getNamedFunction(wrapperName);
@@ -590,7 +589,8 @@ IntrinsicLibrary::outlineInWrapper(Generator generator, llvm::StringRef name,
 
     // Location of code inside wrapper of the wrapper is independent from
     // the location of the intrinsic call.
-    auto localLoc = mlir::UnknownLoc::get(mlirContext);
+    auto savedLoc = loc;
+    auto localLoc = localBuilder->getUnknownLoc();
     localBuilder->setLocation(localLoc);
     IntrinsicLibrary localLib{*localBuilder, localLoc};
     mlir::Value result =
@@ -598,6 +598,7 @@ IntrinsicLibrary::outlineInWrapper(Generator generator, llvm::StringRef name,
                   : std::invoke(&IntrinsicLibrary::genRuntimeCall, localLib,
                                 name, resultType, localArguments);
     localBuilder->createHere<mlir::ReturnOp>(result);
+    loc = savedLoc;
   } else {
     // Wrapper was already built, ensure it has the sought type
     assert(function.getType() == funcType);
@@ -884,7 +885,7 @@ template <typename T>
 mlir::Value Fortran::lower::IntrinsicCallOpsBuilder<T>::genIntrinsicCall(
     llvm::StringRef name, mlir::Type resultType,
     llvm::ArrayRef<mlir::Value> args) {
-  return IntrinsicLibrary{impl(), impl().getUnknownLoc()}.genIntrinsicCall(
+  return IntrinsicLibrary{impl(), impl().getLoc()}.genIntrinsicCall(
       name, resultType, args);
 }
 template mlir::Value
@@ -896,7 +897,7 @@ template <typename T>
 mlir::Value Fortran::lower::IntrinsicCallOpsBuilder<T>::genMax(
     llvm::ArrayRef<mlir::Value> args) {
   assert(args.size() > 0 && "max requires at least one argument");
-  return IntrinsicLibrary{impl(), impl().getUnknownLoc()}
+  return IntrinsicLibrary{impl(), impl().getLoc()}
       .genExtremum<Extremum::Max, ExtremumBehavior::MinMaxss>(args[0].getType(),
                                                               args);
 }
@@ -907,7 +908,7 @@ template <typename T>
 mlir::Value Fortran::lower::IntrinsicCallOpsBuilder<T>::genMin(
     llvm::ArrayRef<mlir::Value> args) {
   assert(args.size() > 0 && "min requires at least one argument");
-  return IntrinsicLibrary{impl(), impl().getUnknownLoc()}
+  return IntrinsicLibrary{impl(), impl().getLoc()}
       .genExtremum<Extremum::Min, ExtremumBehavior::MinMaxss>(args[0].getType(),
                                                               args);
 }
@@ -918,8 +919,8 @@ template <typename T>
 mlir::Value Fortran::lower::IntrinsicCallOpsBuilder<T>::genPow(mlir::Type type,
                                                                mlir::Value x,
                                                                mlir::Value y) {
-  return IntrinsicLibrary{impl(), impl().getUnknownLoc()}.genRuntimeCall(
-      "pow", type, {x, y});
+  return IntrinsicLibrary{impl(), impl().getLoc()}.genRuntimeCall("pow", type,
+                                                                  {x, y});
 }
 template mlir::Value Fortran::lower::IntrinsicCallOpsBuilder<
     Fortran::lower::FirOpBuilder>::genPow(mlir::Type, mlir::Value, mlir::Value);
