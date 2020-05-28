@@ -254,6 +254,10 @@ public:
     return Fortran::lower::translateSomeExprToFIRType(&mlirContext, defaults,
                                                       &expr);
   }
+  mlir::Type genType(const Fortran::lower::pft::Variable &var) override final {
+    return Fortran::lower::translateVariableToFIRType(&mlirContext, defaults,
+                                                      var);
+  }
   mlir::Type genType(Fortran::lower::SymbolRef sym) override final {
     return Fortran::lower::translateSymbolToFIRType(&mlirContext, defaults,
                                                     sym);
@@ -1509,7 +1513,7 @@ private:
         if (!sym.GetType()->AsIntrinsic()) {
           TODO(); // Derived type / polymorphic
         }
-        auto symTy = genType(sym);
+        auto symTy = genType(var);
         auto loc = toLocation();
         global = builder->createGlobal(
             loc, symTy, globalName, isConst,
@@ -1519,7 +1523,7 @@ private:
               builder.create<fir::HasValueOp>(loc, castTo);
             });
       } else {
-        global = builder->createGlobal(toLocation(), genType(sym), globalName);
+        global = builder->createGlobal(toLocation(), genType(var), globalName);
       }
       auto addrOf = builder->create<fir::AddrOfOp>(
           toLocation(), global.resultType(), global.getSymbol());
@@ -1564,10 +1568,10 @@ private:
   /// point of the builder must be in the entry block, which is currently being
   /// constructed.
   mlir::Value createNewLocal(mlir::Location loc,
-                             const Fortran::semantics::Symbol &sym,
+                             const Fortran::lower::pft::Variable &var,
                              llvm::ArrayRef<mlir::Value> shape = {}) {
-    auto ty = genType(sym);
-    auto nm = sym.name().ToString();
+    auto nm = var.getSymbol().name().ToString();
+    auto ty = genType(var);
     if (shape.size())
       if (auto arrTy = ty.dyn_cast<fir::SequenceType>()) {
         // elide the constant dimensions before construction
@@ -1577,9 +1581,16 @@ private:
         for (unsigned i = 0, end = arrTy.getDimension(); i < end; ++i)
           if (typeShape[i] == fir::SequenceType::getUnknownExtent())
             args.push_back(shape[i]);
-        return builder->allocateLocal(loc, ty, nm, args);
+        return builder->allocateLocal(loc, ty, nm, args, var.isTarget());
       }
-    return builder->allocateLocal(loc, ty, nm, shape);
+    auto local = builder->allocateLocal(loc, ty, nm, shape, var.isTarget());
+    // Set local pointer/allocatable to null.
+    if (var.isHeapAlloc() || var.isPointer()) {
+      auto zero = builder->createIntegerConstant(builder->getIndexType(), 0);
+      auto null = builder->createConvert(loc, ty, zero);
+      builder->create<fir::StoreOp>(loc, null, local);
+    }
+    return local;
   }
 
   /// Instantiate a local variable. Precondition: Each variable will be visited
@@ -1604,7 +1615,7 @@ private:
       // to be handled as dummy parameters.)
 
       // Otherwise, it's a local variable.
-      auto local = createNewLocal(loc, sym);
+      auto local = createNewLocal(loc, var);
       addSymbol(sym, local);
       return;
     }
@@ -1659,10 +1670,11 @@ private:
       // if object is an array process the lower bound and extent values
       llvm::SmallVector<mlir::Value, 8> extents;
       llvm::SmallVector<mlir::Value, 8> lbounds;
-      mustBeDummy = !isExplicitShape(sym);
+      mustBeDummy = !isExplicitShape(sym) &&
+                    !Fortran::semantics::IsAllocatableOrPointer(sym);
       if (sia.staticSize) {
         // object shape is constant
-        auto castTy = builder->getRefType(genType(sym));
+        auto castTy = builder->getRefType(genType(var));
         if (addr)
           addr = builder->createConvert(loc, castTy, addr);
         if (sia.lboundIsAllOnes()) {
@@ -1676,7 +1688,7 @@ private:
               return;
             }
             // local CHARACTER array with constant size
-            auto local = createNewLocal(loc, sym);
+            auto local = createNewLocal(loc, var);
             localSymbols.addCharSymbolWithShape(sym, local, len, shape);
             return;
           }
@@ -1685,13 +1697,13 @@ private:
             return;
           }
           // local array with constant size
-          auto local = createNewLocal(loc, sym);
+          auto local = createNewLocal(loc, var);
           localSymbols.addSymbolWithShape(sym, local, shape);
           return;
         }
       } else {
         // cast to the known constant parts from the declaration
-        auto castTy = builder->getRefType(genType(sym));
+        auto castTy = builder->getRefType(genType(var));
         if (addr) {
           // XXX: special handling for boxchar; see proviso above
           if (auto box =
@@ -1746,7 +1758,7 @@ private:
         llvm::SmallVector<mlir::Value, 8> shape;
         shape.push_back(len);
         shape.append(extents.begin(), extents.end());
-        auto local = createNewLocal(loc, sym, shape);
+        auto local = createNewLocal(loc, var, shape);
         localSymbols.addCharSymbolWithBounds(sym, local, len, extents, lbounds);
         return;
       }
@@ -1756,7 +1768,7 @@ private:
       }
       // local array with computed bounds
       assert(!mustBeDummy);
-      auto local = createNewLocal(loc, sym, extents);
+      auto local = createNewLocal(loc, var, extents);
       localSymbols.addSymbolWithBounds(sym, local, extents, lbounds);
       return;
     }
@@ -1768,7 +1780,7 @@ private:
         return;
       }
       assert(!mustBeDummy);
-      auto charTy = genType(sym);
+      auto charTy = genType(var);
       auto c = sia.getCharLenConst();
       mlir::Value local = c ? builder->createCharacterTemp(charTy, *c)
                             : builder->createCharacterTemp(charTy, len);
@@ -1779,7 +1791,7 @@ private:
       addSymbol(sym, addr, true);
       return;
     }
-    auto local = createNewLocal(loc, sym);
+    auto local = createNewLocal(loc, var);
     addSymbol(sym, local);
   }
 
