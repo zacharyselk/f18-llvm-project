@@ -10,6 +10,7 @@
 #include "../../runtime/io-api.h"
 #include "RTBuilder.h"
 #include "flang/Lower/Bridge.h"
+#include "flang/Lower/ComplexExpr.h"
 #include "flang/Lower/FIRBuilder.h"
 #include "flang/Lower/PFTBuilder.h"
 #include "flang/Lower/Runtime.h"
@@ -194,7 +195,8 @@ splitArguments(Fortran::lower::FirOpBuilder &builder, mlir::Location loc,
     return {dataLen.first, dataLen.second};
   }
   if (fir::isa_complex(type)) {
-    auto parts = builder.extractParts(arg);
+    auto parts =
+        Fortran::lower::ComplexExprHelper{builder, loc}.extractParts(arg);
     return {parts.first, parts.second};
   }
   return {arg};
@@ -257,8 +259,10 @@ static void genInputRuntimeFunc(Fortran::lower::FirOpBuilder &builder,
   int intKind = 0;
   auto inputFunc = getInputRuntimeFunc(builder, argType, intKind);
   if (auto ty = argType.dyn_cast<fir::CplxType>()) {
+    auto cplxPartTy =
+        Fortran::lower::ComplexExprHelper{builder, loc}.getComplexPartType(ty);
     var = builder.create<fir::CoordinateOp>(
-        loc, builder.getRefType(builder.getComplexPartType(ty)), var,
+        loc, builder.getRefType(cplxPartTy), var,
         llvm::SmallVector<mlir::Value, 1>{builder.create<mlir::ConstantOp>(
             loc, builder.getI32IntegerAttr(0))});
   }
@@ -278,8 +282,10 @@ static void genInputRuntimeFunc(Fortran::lower::FirOpBuilder &builder,
     lastOk = ok.getResult(0);
   }
   if (auto ty = argType.dyn_cast<fir::CplxType>()) {
+    auto cplxPartTy =
+        Fortran::lower::ComplexExprHelper{builder, loc}.getComplexPartType(ty);
     auto ptr = builder.create<fir::CoordinateOp>(
-        loc, builder.getRefType(builder.getComplexPartType(ty)), var,
+        loc, builder.getRefType(cplxPartTy), var,
         llvm::SmallVector<mlir::Value, 1>{builder.create<mlir::ConstantOp>(
             loc, builder.getI32IntegerAttr(1))});
     auto cst = builder.createConvert(loc, cvtTy, ptr);
