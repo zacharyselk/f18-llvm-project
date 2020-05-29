@@ -247,6 +247,25 @@ struct Evaluation : EvaluationVariant {
     }});
   }
 
+  EvaluationList &getNestedEvaluations() {
+    assert(evaluationList && "no nested evaluations");
+    return *evaluationList;
+  }
+
+  bool hasAtLeastOneNestedEvaluation() const {
+    return evaluationList && !evaluationList->empty();
+  }
+
+  Evaluation &getFirstNestedEvaluation() {
+    assert(hasAtLeastOneNestedEvaluation() && "no nested evaluations");
+    return evaluationList->front();
+  }
+
+  Evaluation &getLastNestedEvaluation() {
+    assert(hasAtLeastOneNestedEvaluation() && "no nested evaluations");
+    return evaluationList->back();
+  }
+
   /// Return FunctionLikeUnit to which this evaluation
   /// belongs. Nullptr if it does not belong to such unit.
   FunctionLikeUnit *getOwningProcedure() const;
@@ -333,13 +352,13 @@ struct Variable {
       : sym{&sym}, depth{depth}, global{global} {}
 
   const Fortran::semantics::Symbol &getSymbol() const { return *sym; }
-  
+
   bool isGlobal() const { return global; }
   bool isHeapAlloc() const { return heapAlloc; }
   bool isPointer() const { return pointer; }
   bool isTarget() const { return target; }
   int getDepth() const { return depth; }
-  
+
   void setHeapAlloc(bool to = true) { heapAlloc = to; }
   void setPointer(bool to = true) { pointer = to; }
   void setTarget(bool to = true) { target = to; }
