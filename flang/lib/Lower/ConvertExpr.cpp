@@ -15,6 +15,7 @@
 #include "flang/Lower/Bridge.h"
 #include "flang/Lower/CallInterface.h"
 #include "flang/Lower/CharRT.h"
+#include "flang/Lower/CharacterExpr.h"
 #include "flang/Lower/ComplexExpr.h"
 #include "flang/Lower/ConvertType.h"
 #include "flang/Lower/FIRBuilder.h"
@@ -336,7 +337,8 @@ private:
     switch (desc.field()) {
     case Fortran::evaluate::DescriptorInquiry::Field::Len:
       if (descType.isa<fir::BoxCharType>()) {
-        auto lenType = builder.getLengthType();
+        auto lenType = Fortran::lower::CharacterExprHelper{builder, getLoc()}
+                           .getLengthType();
         res = builder.create<fir::BoxCharLenOp>(getLoc(), lenType, descRef);
       } else if (descType.isa<fir::BoxType>()) {
         TODO();
@@ -488,7 +490,8 @@ private:
     auto rhs = genval(op.right());
     auto lhsBase = fir::getBase(lhs);
     auto rhsBase = fir::getBase(rhs);
-    return builder.createConcatenate(lhsBase, rhsBase);
+    return Fortran::lower::CharacterExprHelper{builder, getLoc()}
+        .createConcatenate(lhsBase, rhsBase);
   }
 
   /// MIN and MAX operations
@@ -632,7 +635,9 @@ private:
           });
     auto addr = builder.create<fir::AddrOfOp>(getLoc(), global.resultType(),
                                               global.getSymbol());
-    auto len = builder.createIntegerConstant(builder.getLengthType(), size);
+    auto len = builder.createIntegerConstant(
+        Fortran::lower::CharacterExprHelper{builder, getLoc()}.getLengthType(),
+        size);
     return fir::CharBoxValue{addr, len};
   }
 
@@ -772,7 +777,8 @@ private:
     }
     // FIXME: a string should be a CharBoxValue
     auto addr = fir::getBase(baseString);
-    return builder.createSubstring(addr, bounds);
+    return Fortran::lower::CharacterExprHelper{builder, getLoc()}
+        .createSubstring(addr, bounds);
   }
 
   /// The value of a substring.
@@ -1171,14 +1177,16 @@ private:
       } else if (arg.passBy == PassBy::BoxChar) {
         auto boxChar = argRef;
         if (!boxChar.getType().isa<fir::BoxCharType>()) {
-          auto ch = builder.materializeCharacter(boxChar);
-          boxChar = builder.createEmboxChar(ch.first, ch.second);
+          Fortran::lower::CharacterExprHelper helper{builder, getLoc()};
+          auto ch = helper.materializeCharacter(boxChar);
+          boxChar = helper.createEmboxChar(ch.first, ch.second);
         }
         caller.placeInput(arg, boxChar);
       } else if (arg.passBy == PassBy::Box) {
         TODO(); // generate emboxing if need.
       } else if (arg.passBy == PassBy::AddressAndLength) {
-        auto ch = builder.materializeCharacter(argRef);
+        Fortran::lower::CharacterExprHelper helper{builder, getLoc()};
+        auto ch = helper.materializeCharacter(argRef);
         caller.placeAddressAndLengthInput(arg, ch.first, ch.second);
       } else {
         llvm_unreachable("pass by value not handled here");
@@ -1191,8 +1199,9 @@ private:
       if (resultArg->passBy == PassBy::AddressAndLength) {
         // allocate and pass character result
         auto len = caller.getResultLength();
-        resRef = builder.createCharacterTemp(resultType[0], len);
-        auto ch = builder.createUnboxChar(resRef);
+        Fortran::lower::CharacterExprHelper helper{builder, getLoc()};
+        resRef = helper.createCharacterTemp(resultType[0], len);
+        auto ch = helper.createUnboxChar(resRef);
         caller.placeAddressAndLengthInput(*resultArg, ch.first, ch.second);
       } else {
         TODO(); // Pass descriptor
