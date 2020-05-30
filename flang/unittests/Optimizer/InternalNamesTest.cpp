@@ -1,4 +1,4 @@
-//===- Basic.cpp - InternalNames unit tests ---------------===//
+//===- InternalNamesTest.cpp -- InternalNames unit tests ------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -93,33 +93,30 @@ TEST(InternalNamesTest, doTypeTest) {
 }
 
 TEST(InternalNamesTest, doIntrinsicTypeDescriptorTest) {
+  using IntrinsicType = fir::NameUniquer::IntrinsicType;
   NameUniquer obj;
   std::string actual =
-      obj.doIntrinsicTypeDescriptor({}, {}, obj.IntrinsicType::REAL, 42);
+      obj.doIntrinsicTypeDescriptor({}, {}, IntrinsicType::REAL, 42);
   std::string expectedMangledName = "_QCrealK42";
   ASSERT_EQ(actual, expectedMangledName);
 
-  actual = obj.doIntrinsicTypeDescriptor({}, {}, obj.IntrinsicType::REAL, {});
+  actual = obj.doIntrinsicTypeDescriptor({}, {}, IntrinsicType::REAL, {});
   expectedMangledName = "_QCrealK0";
   ASSERT_EQ(actual, expectedMangledName);
 
-  actual =
-      obj.doIntrinsicTypeDescriptor({}, {}, obj.IntrinsicType::INTEGER, {3});
+  actual = obj.doIntrinsicTypeDescriptor({}, {}, IntrinsicType::INTEGER, 3);
   expectedMangledName = "_QCintegerK3";
   ASSERT_EQ(actual, expectedMangledName);
 
-  actual =
-      obj.doIntrinsicTypeDescriptor({}, {}, obj.IntrinsicType::LOGICAL, {2});
+  actual = obj.doIntrinsicTypeDescriptor({}, {}, IntrinsicType::LOGICAL, 2);
   expectedMangledName = "_QClogicalK2";
   ASSERT_EQ(actual, expectedMangledName);
 
-  actual =
-      obj.doIntrinsicTypeDescriptor({}, {}, obj.IntrinsicType::CHARACTER, {4});
+  actual = obj.doIntrinsicTypeDescriptor({}, {}, IntrinsicType::CHARACTER, 4);
   expectedMangledName = "_QCcharacterK4";
   ASSERT_EQ(actual, expectedMangledName);
 
-  actual =
-      obj.doIntrinsicTypeDescriptor({}, {}, obj.IntrinsicType::COMPLEX, {4});
+  actual = obj.doIntrinsicTypeDescriptor({}, {}, IntrinsicType::COMPLEX, 4);
   expectedMangledName = "_QCcomplexK4";
   ASSERT_EQ(actual, expectedMangledName);
 }
@@ -145,6 +142,11 @@ TEST(InternalNamesTest, doVariableTest) {
       {"mod1", "mod2"}, {""}, "intvar"); // Function is present and is blank.
   std::string expectedMangledName = "_QMmod1Smod2FEintvar";
   ASSERT_EQ(actual, expectedMangledName);
+
+  std::string actual2 = obj.doVariable(
+      {"mod1", "mod2"}, {}, "intVariable"); // Function is not present.
+  std::string expectedMangledName2 = "_QMmod1Smod2Eintvariable";
+  ASSERT_EQ(actual2, expectedMangledName2);
 }
 
 TEST(InternalNamesTest, doProgramEntry) {
@@ -157,7 +159,7 @@ TEST(InternalNamesTest, doProgramEntry) {
 TEST(InternalNamesTest, deconstructTest) {
   NameUniquer obj;
   std::pair actual = obj.deconstruct("_QBhello");
-  auto expectedNameKind = obj.NameKind::COMMON;
+  auto expectedNameKind = NameUniquer::NameKind::COMMON;
   struct DeconstructedName expectedComponents {
     {}, {}, "hello", {}
   };
@@ -165,40 +167,41 @@ TEST(InternalNamesTest, deconstructTest) {
 }
 
 TEST(InternalNamesTest, complexdeconstructTest) {
+  using NameKind = fir::NameUniquer::NameKind;
   NameUniquer obj;
   std::pair actual = obj.deconstruct("_QMmodSs1modSs2modFsubPfun");
-  auto expectedNameKind = obj.NameKind::PROCEDURE;
+  auto expectedNameKind = NameKind::PROCEDURE;
   struct DeconstructedName expectedComponents = {
       {"mod", "s1mod", "s2mod"}, {"sub"}, "fun", {}};
   validateDeconstructedName(actual, expectedNameKind, expectedComponents);
 
   actual = obj.deconstruct("_QPsub");
-  expectedNameKind = obj.NameKind::PROCEDURE;
+  expectedNameKind = NameKind::PROCEDURE;
   expectedComponents = {{}, {}, "sub", {}};
   validateDeconstructedName(actual, expectedNameKind, expectedComponents);
 
   actual = obj.deconstruct("_QBvariables");
-  expectedNameKind = obj.NameKind::COMMON;
+  expectedNameKind = NameKind::COMMON;
   expectedComponents = {{}, {}, "variables", {}};
   validateDeconstructedName(actual, expectedNameKind, expectedComponents);
 
   actual = obj.deconstruct("_QMmodEintvar");
-  expectedNameKind = obj.NameKind::VARIABLE;
+  expectedNameKind = NameKind::VARIABLE;
   expectedComponents = {{"mod"}, {}, "intvar", {}};
   validateDeconstructedName(actual, expectedNameKind, expectedComponents);
 
   actual = obj.deconstruct("_QMmodECpi");
-  expectedNameKind = obj.NameKind::CONSTANT;
+  expectedNameKind = NameKind::CONSTANT;
   expectedComponents = {{"mod"}, {}, "pi", {}};
   validateDeconstructedName(actual, expectedNameKind, expectedComponents);
 
   actual = obj.deconstruct("_QTyourtypeK4KN6");
-  expectedNameKind = obj.NameKind::DERIVED_TYPE;
+  expectedNameKind = NameKind::DERIVED_TYPE;
   expectedComponents = {{}, {}, "yourtype", {4, -6}};
   validateDeconstructedName(actual, expectedNameKind, expectedComponents);
 
   actual = obj.deconstruct("_QDTt");
-  expectedNameKind = obj.NameKind::DISPATCH_TABLE;
+  expectedNameKind = NameKind::DISPATCH_TABLE;
   expectedComponents = {{}, {}, "t", {}};
   validateDeconstructedName(actual, expectedNameKind, expectedComponents);
 }
