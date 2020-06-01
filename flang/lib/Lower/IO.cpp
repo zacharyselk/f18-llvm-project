@@ -10,6 +10,7 @@
 #include "../../runtime/io-api.h"
 #include "RTBuilder.h"
 #include "flang/Lower/Bridge.h"
+#include "flang/Lower/CharacterExpr.h"
 #include "flang/Lower/ComplexExpr.h"
 #include "flang/Lower/FIRBuilder.h"
 #include "flang/Lower/PFTBuilder.h"
@@ -125,7 +126,8 @@ static mlir::Value genEndIO(Fortran::lower::AbstractConverter &converter,
   if (csi.ioMsgExpr) {
     auto getIoMsg = getIORuntimeFunc<mkIOKey(GetIoMsg)>(builder);
     auto ioMsgVar =
-        builder.createUnboxChar(converter.genExprAddr(csi.ioMsgExpr, loc));
+        Fortran::lower::CharacterExprHelper{builder, loc}.createUnboxChar(
+            converter.genExprAddr(csi.ioMsgExpr, loc));
     llvm::SmallVector<mlir::Value, 3> args{cookie, ioMsgVar.first,
                                            ioMsgVar.second};
     builder.create<mlir::CallOp>(loc, getIoMsg, args);
@@ -190,8 +192,9 @@ static llvm::SmallVector<mlir::Value, 4>
 splitArguments(Fortran::lower::FirOpBuilder &builder, mlir::Location loc,
                mlir::Value arg) {
   auto type = arg.getType();
-  if (builder.isCharacter(type)) {
-    auto dataLen = builder.materializeCharacter(arg);
+  Fortran::lower::CharacterExprHelper helper{builder, loc};
+  if (helper.isCharacter(type)) {
+    auto dataLen = helper.materializeCharacter(arg);
     return {dataLen.first, dataLen.second};
   }
   if (fir::isa_complex(type)) {
@@ -336,11 +339,12 @@ lowerStringLit(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
   auto &builder = converter.getFirOpBuilder();
   auto *expr = Fortran::semantics::GetExpr(syntax);
   auto str = converter.genExprValue(expr, loc);
-  auto dataLen = builder.materializeCharacter(str);
+  Fortran::lower::CharacterExprHelper helper{builder, loc};
+  auto dataLen = helper.materializeCharacter(str);
   auto buff = builder.createConvert(loc, ty0, dataLen.first);
   auto len = builder.createConvert(loc, ty1, dataLen.second);
   if (ty2) {
-    auto kindVal = builder.getCharacterKind(str.getType());
+    auto kindVal = helper.getCharacterKind(str.getType());
     auto kind = builder.create<mlir::ConstantOp>(
         loc, builder.getIntegerAttr(ty2, kindVal));
     return {buff, len, kind};
@@ -360,7 +364,9 @@ lowerSourceTextAsStringLit(Fortran::lower::AbstractConverter &converter,
   auto &builder = converter.getFirOpBuilder();
   auto lit = builder.createStringLit(
       loc, /*FIXME*/ fir::CharacterType::get(builder.getContext(), 1), text);
-  auto data = builder.materializeCharacter(lit);
+  auto data =
+      Fortran::lower::CharacterExprHelper{builder, loc}.materializeCharacter(
+          lit);
   auto buff = builder.createConvert(loc, ty0, data.first);
   auto len = builder.createConvert(loc, ty1, data.second);
   return {buff, len, mlir::Value{}};

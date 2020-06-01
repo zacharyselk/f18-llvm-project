@@ -13,13 +13,12 @@
 
 namespace Fortran::lower {
 
-class FirOpBuilder;
-
 /// Helper to facilitate lowering of COMPLEX manipulations in FIR.
 class ComplexExprHelper {
 public:
   explicit ComplexExprHelper(FirOpBuilder &builder, mlir::Location loc)
       : builder(builder), loc(loc) {}
+  ComplexExprHelper(const ComplexExprHelper &) = delete;
 
   // The values of part enum members are meaningful for
   // InsertValueOp and ExtractValueOp so they are explicit.
