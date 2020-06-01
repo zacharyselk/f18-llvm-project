@@ -31,10 +31,10 @@ std::unique_ptr<mlir::Pass> createCSEPass();
 /// Convert FIR loop constructs to the Affine dialect
 std::unique_ptr<mlir::Pass> createPromoteToAffinePass();
 
-/// Convert `fir.do_loop` and `fir.if` to `loop.for` and `loop.if`.  This
+/// Convert `fir.do_loop` and `fir.if` to a CFG.  This
 /// conversion enables the `createLowerToCFGPass` to transform these to CFG
 /// form.
-std::unique_ptr<mlir::Pass> createLowerToScfPass();
+std::unique_ptr<mlir::Pass> createFirToCfgPass();
 
 /// A pass to convert the FIR dialect from "Mem-SSA" form to "Reg-SSA"
 /// form. This pass is a port of LLVM's mem2reg pass, but modified for the FIR
