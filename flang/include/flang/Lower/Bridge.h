@@ -14,184 +14,105 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#ifndef FORTRAN_LOWER_BRIDGE_H_
-#define FORTRAN_LOWER_BRIDGE_H_
+#ifndef FORTRAN_LOWER_BRIDGE_H
+#define FORTRAN_LOWER_BRIDGE_H
 
 #include "flang/Common/Fortran.h"
+#include "flang/Lower/AbstractConverter.h"
 #include "flang/Lower/Support/BoxValue.h"
 #include "flang/Optimizer/Support/KindMapping.h"
 #include "mlir/IR/Module.h"
 
-namespace Fortran {
-namespace common {
-class IntrinsicTypeDefaultKinds;
-template <typename>
-class Reference;
-} // namespace common
-namespace evaluate {
-struct DataRef;
-template <typename>
-class Expr;
-struct SomeType;
-class IntrinsicProcTable;
-class FoldingContext;
-} // namespace evaluate
-namespace parser {
-class CharBlock;
-class CookedSource;
-struct Program;
-} // namespace parser
-namespace semantics {
-class Symbol;
-class SemanticsContext;
-} // namespace semantics
-} // namespace Fortran
-
-namespace llvm {
-class Module;
-class SourceMgr;
-} // namespace llvm
-namespace mlir {
-class OpBuilder;
-}
 namespace fir {
 struct NameUniquer;
 }
 
-namespace Fortran::lower {
-namespace pft {
-struct Variable;
-}
+namespace Fortran {
+namespace common {
+class IntrinsicTypeDefaultKinds;
+} // namespace common
+namespace evaluate {
+class IntrinsicProcTable;
+} // namespace evaluate
+namespace parser {
+class CookedSource;
+struct Program;
+} // namespace parser
+namespace semantics {
+class SemanticsContext;
+} // namespace semantics
 
-using SomeExpr = evaluate::Expr<evaluate::SomeType>;
-using SymbolRef = common::Reference<const semantics::Symbol>;
-class FirOpBuilder;
+namespace lower {
 
 //===----------------------------------------------------------------------===//
-
-/// The abstract interface for converter implementations to lower Fortran
-/// front-end fragments such as expressions, types, etc. to the FIR dialect of
-/// MLIR.
-class AbstractConverter {
-public:
-  //
-  // Expressions
-
-  /// Generate the address of the location holding the expression
-  virtual mlir::Value genExprAddr(const SomeExpr &,
-                                  mlir::Location *loc = nullptr) = 0;
-  mlir::Value genExprAddr(const SomeExpr *someExpr, mlir::Location loc) {
-    return genExprAddr(*someExpr, &loc);
-  }
-
-  /// Generate the computations of the expression to produce a value
-  virtual mlir::Value genExprValue(const SomeExpr &,
-                                   mlir::Location *loc = nullptr) = 0;
-  mlir::Value genExprValue(const SomeExpr *someExpr, mlir::Location loc) {
-    return genExprValue(*someExpr, &loc);
-  }
-
-  /// Get FoldingContext that is required for some expression
-  /// analysis.
-  virtual Fortran::evaluate::FoldingContext &getFoldingContext() = 0;
-
-  //
-  // Types
-
-  /// Generate the type of a DataRef
-  virtual mlir::Type genType(const evaluate::DataRef &) = 0;
-  /// Generate the type of an Expr
-  virtual mlir::Type genType(const SomeExpr &) = 0;
-  /// Generate the type of a Symbol
-  virtual mlir::Type genType(SymbolRef) = 0;
-  /// Generate the type from a category
-  virtual mlir::Type genType(common::TypeCategory tc) = 0;
-  /// Generate the type from a category and kind
-  virtual mlir::Type genType(common::TypeCategory tc, int kind) = 0;
-  /// Generate the type from a Variable
-  virtual mlir::Type genType(const pft::Variable &) = 0;
-
-  //
-  // Locations
-
-  /// Get the converter's current location
-  virtual mlir::Location getCurrentLocation() = 0;
-  /// Generate a dummy location
-  virtual mlir::Location genLocation() = 0;
-  /// Generate the location as converted from a CharBlock
-  virtual mlir::Location genLocation(const parser::CharBlock &) = 0;
-
-  //
-  // FIR/MLIR
-
-  /// Get the OpBuilder
-  virtual Fortran::lower::FirOpBuilder &getFirOpBuilder() = 0;
-  /// Get the ModuleOp
-  virtual mlir::ModuleOp &getModuleOp() = 0;
-  /// Get the MLIRContext
-  virtual mlir::MLIRContext &getMLIRContext() = 0;
-  /// Unique a symbol
-  virtual std::string mangleName(const semantics::Symbol &) = 0;
-  /// Unique a compiler generated identifier. A short prefix should be provided
-  /// to hint at the origin of the identifier.
-  virtual std::string uniqueCGIdent(llvm::StringRef prefix,
-                                    llvm::StringRef name) = 0;
-
-  virtual ~AbstractConverter() = default;
-};
-
+// Lowering bridge
 //===----------------------------------------------------------------------===//
 
 /// The lowering bridge converts the front-end parse trees and semantics
 /// checking residual to MLIR (FIR dialect) code.
 class LoweringBridge {
 public:
+  /// Create a lowering bridge instance.
   static LoweringBridge
-  create(const common::IntrinsicTypeDefaultKinds &defaultKinds,
-         const evaluate::IntrinsicProcTable &intrinsics,
-         const parser::CookedSource &cooked) {
+  create(const Fortran::common::IntrinsicTypeDefaultKinds &defaultKinds,
+         const Fortran::evaluate::IntrinsicProcTable &intrinsics,
+         const Fortran::parser::CookedSource &cooked) {
     return LoweringBridge{defaultKinds, intrinsics, cooked};
   }
 
+  //===--------------------------------------------------------------------===//
+  // Getters
+  //===--------------------------------------------------------------------===//
+
   mlir::MLIRContext &getMLIRContext() { return *context.get(); }
   mlir::ModuleOp &getModule() { return *module.get(); }
-
-  void parseSourceFile(llvm::SourceMgr &);
-
-  const common::IntrinsicTypeDefaultKinds &getDefaultKinds() const {
+  const Fortran::common::IntrinsicTypeDefaultKinds &getDefaultKinds() const {
     return defaultKinds;
   }
-  const evaluate::IntrinsicProcTable &getIntrinsicTable() const {
+  const Fortran::evaluate::IntrinsicProcTable &getIntrinsicTable() const {
     return intrinsics;
   }
-  evaluate::FoldingContext createFoldingContext() const;
-
-  bool validModule() { return getModule(); }
-
-  const parser::CookedSource *getCookedSource() const { return cooked; }
-
-  /// Cross the bridge from the Fortran parse-tree, etc. to FIR+OpenMP+MLIR
-  void lower(const parser::Program &program, fir::NameUniquer &uniquer,
-             const Fortran::semantics::SemanticsContext &semanticsContext);
+  const Fortran::parser::CookedSource *getCookedSource() const {
+    return cooked;
+  }
 
   /// Get the kind map.
   const fir::KindMapping &getKindMap() const { return kindMap; }
 
+  /// Create a folding context. Careful: this is very expensive.
+  Fortran::evaluate::FoldingContext createFoldingContext() const;
+
+  bool validModule() { return getModule(); }
+
+  //===--------------------------------------------------------------------===//
+  // Perform the creation of an mlir::ModuleOp
+  //===--------------------------------------------------------------------===//
+
+  /// Read in an MLIR input file rather than lowering Fortran sources.
+  /// This is intended to be used for testing.
+  void parseSourceFile(llvm::SourceMgr &);
+
+  /// Cross the bridge from the Fortran parse-tree, etc. to MLIR dialects
+  void lower(const Fortran::parser::Program &program, fir::NameUniquer &uniquer,
+             const Fortran::semantics::SemanticsContext &semanticsContext);
+
 private:
-  explicit LoweringBridge(const common::IntrinsicTypeDefaultKinds &defaultKinds,
-                          const evaluate::IntrinsicProcTable &intrinsics,
-                          const parser::CookedSource &cooked);
+  explicit LoweringBridge(
+      const Fortran::common::IntrinsicTypeDefaultKinds &defaultKinds,
+      const Fortran::evaluate::IntrinsicProcTable &intrinsics,
+      const Fortran::parser::CookedSource &cooked);
   LoweringBridge() = delete;
   LoweringBridge(const LoweringBridge &) = delete;
 
-  const common::IntrinsicTypeDefaultKinds &defaultKinds;
-  const evaluate::IntrinsicProcTable &intrinsics;
-  const parser::CookedSource *cooked;
+  const Fortran::common::IntrinsicTypeDefaultKinds &defaultKinds;
+  const Fortran::evaluate::IntrinsicProcTable &intrinsics;
+  const Fortran::parser::CookedSource *cooked;
   std::unique_ptr<mlir::MLIRContext> context;
   std::unique_ptr<mlir::ModuleOp> module;
   fir::KindMapping kindMap;
 };
 
-} // namespace Fortran::lower
+} // namespace lower
+} // namespace Fortran
 
-#endif // FORTRAN_LOWER_BRIDGE_H_
+#endif // FORTRAN_LOWER_BRIDGE_H
