@@ -19,7 +19,6 @@
 
 #include "flang/Common/Fortran.h"
 #include "flang/Lower/AbstractConverter.h"
-#include "flang/Lower/Support/BoxValue.h"
 #include "flang/Optimizer/Support/KindMapping.h"
 #include "mlir/IR/Module.h"
 
