@@ -49,6 +49,7 @@ public:
     // conditional block since it already has the induction variable and
     // loop-carried values as arguments.
     auto *conditionalBlock = &loop.region().front();
+    conditionalBlock->addArgument(rewriter.getIndexType());
     auto *firstBlock =
         rewriter.splitBlock(conditionalBlock, conditionalBlock->begin());
     auto *lastBlock = &loop.region().back();
@@ -59,25 +60,20 @@ public:
     // Get loop values from the LoopOp
     auto low = loop.lowerBound();
     auto high = loop.upperBound();
+    assert(low && high && "must be a Value");
     auto step = loop.step();
 
     // Initalization block
     rewriter.setInsertionPointToEnd(initBlock);
-    auto zero = rewriter.create<mlir::ConstantIndexOp>(loc, 0);
-    auto one = rewriter.create<mlir::ConstantIndexOp>(loc, 1);
     auto diff = rewriter.create<mlir::SubIOp>(loc, high, low);
     auto distance = rewriter.create<mlir::AddIOp>(loc, diff, step);
-    auto normalizedDistance =
-        rewriter.create<mlir::SignedDivIOp>(loc, distance, step);
-    auto storeType = normalizedDistance.getType();
-    auto tripCounter =
-        rewriter.create<fir::AllocaOp>(loc, storeType, llvm::None);
-    rewriter.create<fir::StoreOp>(loc, normalizedDistance, tripCounter);
+    auto iters = rewriter.create<mlir::SignedDivIOp>(loc, distance, step);
 
     llvm::SmallVector<mlir::Value, 8> loopOperands;
     loopOperands.push_back(low);
     auto operands = loop.getIterOperands();
     loopOperands.append(operands.begin(), operands.end());
+    loopOperands.push_back(iters);
 
     // TODO: replace with a command line flag
     // onetrip flag determines whether loop should be executed once, before
@@ -91,23 +87,27 @@ public:
     // Last loop block
     auto *terminator = lastBlock->getTerminator();
     rewriter.setInsertionPointToEnd(lastBlock);
-    auto index = conditionalBlock->getArgument(0);
-    auto steppedIndex = rewriter.create<mlir::AddIOp>(loc, index, step);
-    auto tripCount = rewriter.create<fir::LoadOp>(loc, tripCounter);
-    auto steppedTripCount = rewriter.create<mlir::SubIOp>(loc, tripCount, one);
-    rewriter.create<fir::StoreOp>(loc, steppedTripCount, tripCounter);
+    auto iv = conditionalBlock->getArgument(0);
+    mlir::Value steppedIndex = rewriter.create<mlir::AddIOp>(loc, iv, step);
+    assert(steppedIndex && "must be a Value");
+    auto lastArg = conditionalBlock->getNumArguments() - 1;
+    auto itersLeft = conditionalBlock->getArgument(lastArg);
+    auto one = rewriter.create<mlir::ConstantIndexOp>(loc, 1);
+    mlir::Value itersMinusOne =
+        rewriter.create<mlir::SubIOp>(loc, itersLeft, one);
 
     llvm::SmallVector<mlir::Value, 8> loopCarried;
     loopCarried.push_back(steppedIndex);
     loopCarried.append(terminator->operand_begin(), terminator->operand_end());
+    loopCarried.push_back(itersMinusOne);
     rewriter.create<mlir::BranchOp>(loc, conditionalBlock, loopCarried);
     rewriter.eraseOp(terminator);
 
     // Conditional block
     rewriter.setInsertionPointToEnd(conditionalBlock);
-    auto tripCountValue = rewriter.create<fir::LoadOp>(loc, tripCounter);
-    auto comparison = rewriter.create<mlir::CmpIOp>(loc, CmpIPredicate::sgt,
-                                                    tripCountValue, zero);
+    auto zero = rewriter.create<mlir::ConstantIndexOp>(loc, 0);
+    auto comparison =
+        rewriter.create<mlir::CmpIOp>(loc, CmpIPredicate::sgt, itersLeft, zero);
 
     rewriter.create<mlir::CondBranchOp>(loc, comparison, firstBlock,
                                         llvm::ArrayRef<mlir::Value>(), endBlock,
@@ -115,7 +115,8 @@ public:
 
     // The result of the loop operation is the values of the condition block
     // arguments except the induction variable on the last iteration.
-    rewriter.replaceOp(loop, conditionalBlock->getArguments().drop_front());
+    rewriter.replaceOp(
+        loop, conditionalBlock->getArguments().drop_front().drop_back());
     return success();
   }
 };
@@ -149,8 +150,8 @@ public:
     // place it before the continuation block, and branch to it.
     auto &whereRegion = where.whereRegion();
     auto *whereBlock = &whereRegion.front();
-    mlir::Operation *whereTerminator = whereRegion.back().getTerminator();
-    mlir::ValueRange whereTerminatorOperands = whereTerminator->getOperands();
+    auto *whereTerminator = whereRegion.back().getTerminator();
+    auto whereTerminatorOperands = whereTerminator->getOperands();
     rewriter.setInsertionPointToEnd(&whereRegion.back());
     rewriter.create<mlir::BranchOp>(loc, continueBlock,
                                     whereTerminatorOperands);
@@ -164,8 +165,8 @@ public:
     auto &otherwiseRegion = where.otherRegion();
     if (!otherwiseRegion.empty()) {
       otherwiseBlock = &otherwiseRegion.front();
-      mlir::Operation *otherwiseTerm = otherwiseRegion.back().getTerminator();
-      mlir::ValueRange otherwiseTermOperands = otherwiseTerm->getOperands();
+      auto *otherwiseTerm = otherwiseRegion.back().getTerminator();
+      auto otherwiseTermOperands = otherwiseTerm->getOperands();
       rewriter.setInsertionPointToEnd(&otherwiseRegion.back());
       rewriter.create<mlir::BranchOp>(loc, continueBlock,
                                       otherwiseTermOperands);
@@ -215,12 +216,11 @@ public:
     // Append the induction variable stepping logic to the last body block and
     // branch back to the condition block. Loop-carried values are taken from
     // operands of the loop terminator.
-    mlir::Operation *terminator = lastBodyBlock->getTerminator();
+    auto *terminator = lastBodyBlock->getTerminator();
     rewriter.setInsertionPointToEnd(lastBodyBlock);
     auto step = whileOp.step();
-    auto stepped = rewriter.create<mlir::AddIOp>(loc, iv, step).getResult();
-    if (!stepped)
-      return failure();
+    mlir::Value stepped = rewriter.create<mlir::AddIOp>(loc, iv, step);
+    assert(stepped && "must be a Value");
 
     llvm::SmallVector<mlir::Value, 8> loopCarried;
     loopCarried.push_back(stepped);
@@ -230,10 +230,9 @@ public:
 
     // Compute loop bounds before branching to the condition.
     rewriter.setInsertionPointToEnd(initBlock);
-    mlir::Value lowerBound = whileOp.lowerBound();
-    mlir::Value upperBound = whileOp.upperBound();
-    if (!lowerBound || !upperBound)
-      return failure();
+    auto lowerBound = whileOp.lowerBound();
+    auto upperBound = whileOp.upperBound();
+    assert(lowerBound && upperBound && "must be a Value");
 
     // The initial values of loop-carried values is obtained from the operands
     // of the loop operation.
