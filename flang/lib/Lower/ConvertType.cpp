@@ -7,20 +7,23 @@
 //===----------------------------------------------------------------------===//
 
 #include "flang/Lower/ConvertType.h"
-#include "../../runtime/io-api.h"
-#include "flang/Lower/Bridge.h"
 #include "flang/Lower/PFTBuilder.h"
 #include "flang/Lower/Utils.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
-#include "flang/Semantics/expression.h"
 #include "flang/Semantics/tools.h"
 #include "flang/Semantics/type.h"
 #include "mlir/IR/Builders.h"
-#include "mlir/IR/Location.h"
-#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/StandardTypes.h"
 
-namespace {
+#undef QUOTE
+#undef TODO
+#define QUOTE(X) #X
+#define TODO(S)                                                                \
+  {                                                                            \
+    emitError(__FILE__ ":" QUOTE(__LINE__) ": type lowering of " S             \
+                                           " not implemented");                \
+    exit(1);                                                                   \
+  }
 
 template <typename A>
 bool isConstant(const Fortran::evaluate::Expr<A> &e) {
@@ -33,9 +36,6 @@ int64_t toConstant(const Fortran::evaluate::Expr<A> &e) {
   assert(opt.has_value() && "expression didn't resolve to a constant");
   return opt.value();
 }
-
-#undef TODO
-#define TODO() llvm_unreachable("not yet implemented")
 
 // one argument template, must be specialized
 template <Fortran::common::TypeCategory TC>
@@ -172,6 +172,8 @@ genFIRType<Fortran::common::TypeCategory::Complex>(mlir::MLIRContext *context,
     return fir::CplxType::get(context, KIND);
   return {};
 }
+
+namespace {
 
 /// Recover the type of an Fortran::evaluate::Expr<T> and convert it to an
 /// mlir::Type. The type returned can be a MLIR standard or FIR type.
@@ -442,12 +444,18 @@ public:
     return genTypelessPtr();
   }
 
-  mlir::Type gen(const Fortran::evaluate::ArrayRef &) { TODO(); }
-  mlir::Type gen(const Fortran::evaluate::CoarrayRef &) { TODO(); }
-  mlir::Type gen(const Fortran::evaluate::Component &) { TODO(); }
-  mlir::Type gen(const Fortran::evaluate::ComplexPart &) { TODO(); }
-  mlir::Type gen(const Fortran::evaluate::DescriptorInquiry &) { TODO(); }
-  mlir::Type gen(const Fortran::evaluate::StructureConstructor &) { TODO(); }
+  mlir::Type gen(const Fortran::evaluate::ArrayRef &) { TODO("array ref"); }
+  mlir::Type gen(const Fortran::evaluate::CoarrayRef &) { TODO("coarray ref"); }
+  mlir::Type gen(const Fortran::evaluate::Component &) { TODO("component"); }
+  mlir::Type gen(const Fortran::evaluate::ComplexPart &) {
+    TODO("complex part");
+  }
+  mlir::Type gen(const Fortran::evaluate::DescriptorInquiry &) {
+    TODO("descriptor inquiry");
+  }
+  mlir::Type gen(const Fortran::evaluate::StructureConstructor &) {
+    TODO("structure constructor");
+  }
 };
 
 } // namespace
