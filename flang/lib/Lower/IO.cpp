@@ -353,8 +353,8 @@ lowerStringLit(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
 }
 
 /// Pass the body of the FORMAT statement in as if it were a CHARACTER literal
-/// constant. TODO: This feels dumb. Isn't there a front-end method to get this?
-/// If not, why not?
+/// constant. NB: This is the prescribed manner in which the front-end passes
+/// this information to lowering.
 static std::tuple<mlir::Value, mlir::Value, mlir::Value>
 lowerSourceTextAsStringLit(Fortran::lower::AbstractConverter &converter,
                            mlir::Location loc, llvm::StringRef text,
