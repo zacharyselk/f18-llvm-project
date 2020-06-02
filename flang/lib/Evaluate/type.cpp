@@ -34,13 +34,6 @@ static bool IsDescriptor(const ObjectEntityDetails &details) {
     }
   }
   // TODO: Automatic (adjustable) arrays - are they descriptors?
-  if (details.isDummy()) {
-    return details.IsAssumedShape() || details.IsDeferredShape() ||
-        details.IsAssumedRank();
-  }
-  return !details.shape().empty() && !details.shape().IsConstantShape();
-#if 0
-  // FIXME: use this?
   for (const ShapeSpec &shapeSpec : details.shape()) {
     const auto &lb{shapeSpec.lbound().GetExplicit()};
     const auto &ub{shapeSpec.ubound().GetExplicit()};
@@ -49,7 +42,6 @@ static bool IsDescriptor(const ObjectEntityDetails &details) {
     }
   }
   return false;
-#endif
 }
 
 static bool IsDescriptor(const ProcEntityDetails &details) {
