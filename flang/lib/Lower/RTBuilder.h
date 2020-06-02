@@ -14,8 +14,8 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#ifndef FORTRAN_LOWER_RT_BUILDER_H_
-#define FORTRAN_LOWER_RT_BUILDER_H_
+#ifndef FORTRAN_LOWER_RT_BUILDER_H
+#define FORTRAN_LOWER_RT_BUILDER_H
 
 #include "flang/Lower/ConvertType.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
@@ -239,4 +239,4 @@ struct RuntimeTableEntry<RuntimeTableKey<KT>, RuntimeIdentifier<Cs...>> {
 
 } // namespace Fortran::lower
 
-#endif // FORTRAN_LOWER_RT_BUILDER_H_
+#endif // FORTRAN_LOWER_RT_BUILDER_H

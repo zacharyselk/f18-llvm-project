@@ -1,4 +1,4 @@
-//===-- Lower/CharRT.h -- lower CHARACTER operations ------------*- C++ -*-===//
+//===-- Lower/CharacterRuntime.h -- lower CHARACTER operations --*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef FORTRAN_LOWER_CHARRT_H
-#define FORTRAN_LOWER_CHARRT_H
+#ifndef FORTRAN_LOWER_CHARACTERRUNTIME_H
+#define FORTRAN_LOWER_CHARACTERRUNTIME_H
 
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 
@@ -33,4 +33,4 @@ mlir::Value genRawCharCompare(AbstractConverter &converter, mlir::Location loc,
 } // namespace lower
 } // namespace Fortran
 
-#endif // FORTRAN_LOWER_CHARRT_H
+#endif // FORTRAN_LOWER_CHARACTERRUNTIME_H

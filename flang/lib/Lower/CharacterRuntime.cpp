@@ -1,4 +1,4 @@
-//===-- CharRT.cpp -- runtime support for CHARACTER type entities ---------===//
+//===-- CharacterRuntime.cpp -- runtime for CHARACTER type entities -------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,15 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "flang/Lower/CharRT.h"
+#include "flang/Lower/CharacterRuntime.h"
 #include "../../runtime/character.h"
 #include "RTBuilder.h"
 #include "flang/Lower/Bridge.h"
 #include "flang/Lower/CharacterExpr.h"
 #include "flang/Lower/FIRBuilder.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
-
-#define TODO() llvm_unreachable("not yet implemented")
 
 using namespace Fortran::runtime;
 
