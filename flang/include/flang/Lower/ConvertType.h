@@ -16,8 +16,8 @@
 ///
 //----------------------------------------------------------------------------//
 
-#ifndef FORTRAN_LOWER_CONVERT_TYPE_H_
-#define FORTRAN_LOWER_CONVERT_TYPE_H_
+#ifndef FORTRAN_LOWER_CONVERT_TYPE_H
+#define FORTRAN_LOWER_CONVERT_TYPE_H
 
 #include "flang/Common/Fortran.h"
 #include "mlir/IR/Types.h"
@@ -117,4 +117,4 @@ mlir::Type getSequenceRefType(mlir::Type referenceType);
 } // namespace lower
 } // namespace Fortran
 
-#endif // FORTRAN_LOWER_CONVERT_TYPE_H_
+#endif // FORTRAN_LOWER_CONVERT_TYPE_H
