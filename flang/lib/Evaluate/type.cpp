@@ -23,6 +23,7 @@
 // IsDescriptor() predicate
 // TODO there's probably a better place for this predicate than here
 namespace Fortran::semantics {
+
 static bool IsDescriptor(const ObjectEntityDetails &details) {
   if (const auto *type{details.type()}) {
     if (auto dynamicType{evaluate::DynamicType::From(*type)}) {
@@ -431,7 +432,7 @@ DynamicType DynamicType::ResultTypeForMultiply(const DynamicType &that) const {
 
 bool DynamicType::RequiresDescriptor() const {
   return IsPolymorphic() || IsUnknownLengthCharacter() ||
-      (derived_ && derived_->NumLengthParameters() > 0);
+      (derived_ && CountLenParameters(*derived_) > 0);
 }
 
 bool DynamicType::HasDeferredTypeParameter() const {

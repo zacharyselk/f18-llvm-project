@@ -13,10 +13,13 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/StringTableBuilder.h"
 #include "llvm/Object/ELFObjectFile.h"
+#include "llvm/ObjectYAML/DWARFEmitter.h"
+#include "llvm/ObjectYAML/DWARFYAML.h"
 #include "llvm/ObjectYAML/ELFYAML.h"
 #include "llvm/ObjectYAML/yaml2obj.h"
 #include "llvm/Support/EndianStream.h"
@@ -149,6 +152,9 @@ template <class ELFT> class ELFState {
                                StringTableBuilder &STB,
                                ContiguousBlobAccumulator &CBA,
                                ELFYAML::Section *YAMLSec);
+  void initDWARFSectionHeader(Elf_Shdr &SHeader, StringRef Name,
+                              ContiguousBlobAccumulator &CBA,
+                              ELFYAML::Section *YAMLSec);
   void setProgramHeaderLayout(std::vector<Elf_Phdr> &PHeaders,
                               std::vector<Elf_Shdr> &SHeaders);
 
@@ -158,6 +164,9 @@ template <class ELFT> class ELFState {
 
   void finalizeStrings();
   void writeELFHeader(ContiguousBlobAccumulator &CBA, raw_ostream &OS);
+  void writeSectionContent(Elf_Shdr &SHeader,
+                           const ELFYAML::NoBitsSection &Section,
+                           ContiguousBlobAccumulator &CBA);
   void writeSectionContent(Elf_Shdr &SHeader,
                            const ELFYAML::RawContentSection &Section,
                            ContiguousBlobAccumulator &CBA);
@@ -274,6 +283,11 @@ ELFState<ELFT>::ELFState(ELFYAML::Object &D, yaml::ErrorHandler EH)
     ImplicitSections.insert(ImplicitSections.end(), {".dynsym", ".dynstr"});
   if (Doc.Symbols)
     ImplicitSections.push_back(".symtab");
+  if (Doc.DWARF)
+    for (StringRef DebugSecName : Doc.DWARF->getUsedSectionNames()) {
+      std::string SecName = ("." + DebugSecName).str();
+      ImplicitSections.push_back(StringRef(SecName).copy(StringAlloc));
+    }
   ImplicitSections.insert(ImplicitSections.end(), {".strtab", ".shstrtab"});
 
   // Insert placeholders for implicit sections that are not
@@ -447,7 +461,13 @@ bool ELFState<ELFT>::initImplicitHeader(ContiguousBlobAccumulator &CBA,
     initSymtabSectionHeader(Header, SymtabType::Dynamic, CBA, YAMLSec);
   else if (SecName == ".dynstr")
     initStrtabSectionHeader(Header, SecName, DotDynstr, CBA, YAMLSec);
-  else
+  else if (SecName.startswith(".debug_")) {
+    // If a ".debug_*" section's type is a preserved one, e.g., SHT_DYNAMIC, we
+    // will not treat it as a debug section.
+    if (YAMLSec && !isa<ELFYAML::RawContentSection>(YAMLSec))
+      return false;
+    initDWARFSectionHeader(Header, SecName, CBA, YAMLSec);
+  } else
     return false;
 
   LocationCounter += Header.sh_size;
@@ -553,9 +573,7 @@ void ELFState<ELFT>::initSectionHeaders(std::vector<Elf_Shdr> &SHeaders,
     } else if (auto S = dyn_cast<ELFYAML::MipsABIFlags>(Sec)) {
       writeSectionContent(SHeader, *S, CBA);
     } else if (auto S = dyn_cast<ELFYAML::NoBitsSection>(Sec)) {
-      // SHT_NOBITS sections do not have any content to write.
-      SHeader.sh_entsize = 0;
-      SHeader.sh_size = S->Size;
+      writeSectionContent(SHeader, *S, CBA);
     } else if (auto S = dyn_cast<ELFYAML::DynamicSection>(Sec)) {
       writeSectionContent(SHeader, *S, CBA);
     } else if (auto S = dyn_cast<ELFYAML::SymverSection>(Sec)) {
@@ -791,6 +809,69 @@ void ELFState<ELFT>::initStrtabSectionHeader(Elf_Shdr &SHeader, StringRef Name,
   assignSectionAddress(SHeader, YAMLSec);
 }
 
+static bool shouldEmitDWARF(DWARFYAML::Data &DWARF, StringRef Name) {
+  SetVector<StringRef> DebugSecNames = DWARF.getUsedSectionNames();
+  return Name.consume_front(".") && DebugSecNames.count(Name);
+}
+
+template <class ELFT>
+uint64_t emitDWARF(typename ELFT::Shdr &SHeader, StringRef Name,
+                   const DWARFYAML::Data &DWARF, raw_ostream &OS) {
+  uint64_t BeginOffset = OS.tell();
+  if (Name == ".debug_str")
+    DWARFYAML::EmitDebugStr(OS, DWARF);
+  else
+    llvm_unreachable("unexpected emitDWARF() call");
+
+  return OS.tell() - BeginOffset;
+}
+
+template <class ELFT>
+void ELFState<ELFT>::initDWARFSectionHeader(Elf_Shdr &SHeader, StringRef Name,
+                                            ContiguousBlobAccumulator &CBA,
+                                            ELFYAML::Section *YAMLSec) {
+  zero(SHeader);
+  SHeader.sh_name = DotShStrtab.getOffset(ELFYAML::dropUniqueSuffix(Name));
+  SHeader.sh_type = YAMLSec ? YAMLSec->Type : ELF::SHT_PROGBITS;
+  SHeader.sh_addralign = YAMLSec ? (uint64_t)YAMLSec->AddressAlign : 1;
+  SHeader.sh_offset = alignToOffset(CBA, SHeader.sh_addralign,
+                                    YAMLSec ? YAMLSec->Offset : None);
+
+  ELFYAML::RawContentSection *RawSec =
+      dyn_cast_or_null<ELFYAML::RawContentSection>(YAMLSec);
+  if (Doc.DWARF && shouldEmitDWARF(*Doc.DWARF, Name)) {
+    if (RawSec && (RawSec->Content || RawSec->Size))
+      reportError("cannot specify section '" + Name +
+                  "' contents in the 'DWARF' entry and the 'Content' "
+                  "or 'Size' in the 'Sections' entry at the same time");
+    else
+      SHeader.sh_size = emitDWARF<ELFT>(SHeader, Name, *Doc.DWARF, CBA.getOS());
+  } else if (RawSec)
+    SHeader.sh_size = writeContent(CBA.getOS(), RawSec->Content, RawSec->Size);
+  else
+    llvm_unreachable("debug sections can only be initialized via the 'DWARF' "
+                     "entry or a RawContentSection");
+
+  if (YAMLSec && YAMLSec->EntSize)
+    SHeader.sh_entsize = *YAMLSec->EntSize;
+  else if (Name == ".debug_str")
+    SHeader.sh_entsize = 1;
+
+  if (RawSec && RawSec->Info)
+    SHeader.sh_info = *RawSec->Info;
+
+  if (YAMLSec && YAMLSec->Flags)
+    SHeader.sh_flags = *YAMLSec->Flags;
+  else if (Name == ".debug_str")
+    SHeader.sh_flags = ELF::SHF_MERGE | ELF::SHF_STRINGS;
+
+  unsigned Link = 0;
+  if (YAMLSec && !YAMLSec->Link.empty() && SN2I.lookup(YAMLSec->Link, Link))
+    SHeader.sh_link = Link;
+
+  assignSectionAddress(SHeader, YAMLSec);
+}
+
 template <class ELFT> void ELFState<ELFT>::reportError(const Twine &Msg) {
   ErrHandler(Msg);
   HasError = true;
@@ -871,6 +952,35 @@ void ELFState<ELFT>::setProgramHeaderLayout(std::vector<Elf_Phdr> &PHeaders,
         PHeader.p_align = std::max((uint64_t)PHeader.p_align, F.AddrAlign);
     }
   }
+}
+
+static bool shouldAllocateFileSpace(ArrayRef<ELFYAML::ProgramHeader> Phdrs,
+                                    const ELFYAML::NoBitsSection &S) {
+  for (const ELFYAML::ProgramHeader &PH : Phdrs) {
+    auto It = llvm::find_if(
+        PH.Chunks, [&](ELFYAML::Chunk *C) { return C->Name == S.Name; });
+    if (std::any_of(It, PH.Chunks.end(), [](ELFYAML::Chunk *C) {
+          return (isa<ELFYAML::Fill>(C) ||
+                  cast<ELFYAML::Section>(C)->Type != ELF::SHT_NOBITS);
+        }))
+      return true;
+  }
+  return false;
+}
+
+template <class ELFT>
+void ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
+                                         const ELFYAML::NoBitsSection &S,
+                                         ContiguousBlobAccumulator &CBA) {
+  // SHT_NOBITS sections do not have any content to write.
+  SHeader.sh_entsize = 0;
+  SHeader.sh_size = S.Size;
+
+  // When a nobits section is followed by a non-nobits section or fill
+  // in the same segment, we allocate the file space for it. This behavior
+  // matches linkers.
+  if (shouldAllocateFileSpace(Doc.ProgramHeaders, S))
+    CBA.getOS().write_zeros(S.Size);
 }
 
 template <class ELFT>
