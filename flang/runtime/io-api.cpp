@@ -784,6 +784,35 @@ bool IONAME(InputInteger)(Cookie cookie, std::int64_t &n, int kind) {
   return false;
 }
 
+bool IONAME(OutputReal32)(Cookie cookie, float x) {
+  IoStatementState &io{*cookie};
+  if (!io.get_if<OutputStatementState>()) {
+    io.GetIoErrorHandler().Crash(
+        "OutputReal32() called for a non-output I/O statement");
+    return false;
+  }
+  if (auto edit{io.GetNextDataEdit()}) {
+    return RealOutputEditing<24>{io, x}.Edit(*edit);
+  }
+  return false;
+}
+
+bool IONAME(InputReal32)(Cookie cookie, float &x) {
+  IoStatementState &io{*cookie};
+  if (!io.get_if<InputStatementState>()) {
+    io.GetIoErrorHandler().Crash(
+        "InputReal32() called for a non-input I/O statement");
+    return false;
+  }
+  if (auto edit{io.GetNextDataEdit()}) {
+    if (edit->descriptor == DataEdit::ListDirectedNullValue) {
+      return true;
+    }
+    return EditRealInput<24>(io, *edit, reinterpret_cast<void *>(&x));
+  }
+  return false;
+}
+
 bool IONAME(OutputReal64)(Cookie cookie, double x) {
   IoStatementState &io{*cookie};
   if (!io.get_if<OutputStatementState>()) {
