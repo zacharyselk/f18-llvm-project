@@ -18,7 +18,7 @@
 #include "flang/Lower/CharacterRuntime.h"
 #include "flang/Lower/ComplexExpr.h"
 #include "flang/Lower/ConvertType.h"
-#include "flang/Lower/FIRBuilder.h"
+#include "flang/Lower/IntrinsicCall.h"
 #include "flang/Lower/Runtime.h"
 #include "flang/Optimizer/Dialect/FIRDialect.h"
 #include "flang/Semantics/expression.h"
@@ -26,18 +26,8 @@
 #include "flang/Semantics/tools.h"
 #include "flang/Semantics/type.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
-#include "mlir/IR/Attributes.h"
-#include "mlir/IR/Operation.h"
-#include "mlir/IR/PatternMatch.h"
-#include "mlir/Pass/Pass.h"
-#include "mlir/Pass/PassManager.h"
-#include "mlir/Transforms/DialectConversion.h"
-#include "mlir/Transforms/Passes.h"
 #include "llvm/ADT/APFloat.h"
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/IR/Type.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -454,7 +444,8 @@ private:
     auto lhs = genunbox(op.left());
     auto rhs = genunbox(op.right());
     assert(lhs && rhs && "boxed value not handled");
-    return builder.genPow(ty, lhs, rhs);
+    return Fortran::lower::IntrinsicCallOpsHelper{builder, getLoc()}.genPow(
+        ty, lhs, rhs);
   }
 
   template <Fortran::common::TypeCategory TC, int KIND>
@@ -465,7 +456,8 @@ private:
     auto lhs = genunbox(op.left());
     auto rhs = genunbox(op.right());
     assert(lhs && rhs && "boxed value not handled");
-    return builder.genPow(ty, lhs, rhs);
+    return Fortran::lower::IntrinsicCallOpsHelper{builder, getLoc()}.genPow(
+        ty, lhs, rhs);
   }
 
   mlir::Value createComplex(fir::KindTy kind, mlir::Value real,
@@ -506,7 +498,8 @@ private:
     auto rhs = genunbox(op.right());
     assert(lhs && rhs && "boxed value not handled");
     llvm::SmallVector<mlir::Value, 2> operands{lhs, rhs};
-    return builder.genIntrinsicCall(name, type, operands);
+    return Fortran::lower::IntrinsicCallOpsHelper{builder, getLoc()}
+        .genIntrinsicCall(name, type, operands);
   }
 
   template <int KIND>
@@ -1111,7 +1104,8 @@ private:
     }
     // Let the intrinsic library lower the intrinsic procedure call
     llvm::StringRef name{intrinsic.name};
-    return builder.genIntrinsicCall(name, resultType[0], operands);
+    return Fortran::lower::IntrinsicCallOpsHelper{builder, getLoc()}
+        .genIntrinsicCall(name, resultType[0], operands);
   }
 
   template <typename A>

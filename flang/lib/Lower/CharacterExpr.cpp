@@ -8,6 +8,7 @@
 
 #include "flang/Lower/CharacterExpr.h"
 #include "flang/Lower/ConvertType.h"
+#include "flang/Lower/IntrinsicCall.h"
 
 //===----------------------------------------------------------------------===//
 // CharacterExprHelper implementation
@@ -209,7 +210,8 @@ void Fortran::lower::CharacterExprHelper::createAssign(
   // if needed.
   mlir::Value copyCount = lhs.getLen();
   if (!compileTimeSameLength)
-    copyCount = builder.genMin({lhs.getLen(), rhs.getLen()});
+    copyCount = Fortran::lower::IntrinsicCallOpsHelper{builder, loc}.genMin(
+        {lhs.getLen(), rhs.getLen()});
 
   fir::CharBoxValue safeRhs = rhs;
   if (needToMaterialize(rhs)) {
