@@ -750,10 +750,11 @@ private:
     auto lowerValue = genFIRLoopIndex(info.lowerExpr, type);
     auto upperValue = genFIRLoopIndex(info.upperExpr, type);
     info.stepValue =
-        info.stepExpr.has_value() ? genFIRLoopIndex(*info.stepExpr, type)
-        : info.isStructured()
-            ? builder->create<mlir::ConstantIndexOp>(location, 1)
-            : builder->createIntegerConstant(info.loopVariableType, 1);
+        info.stepExpr.has_value()
+            ? genFIRLoopIndex(*info.stepExpr, type)
+            : info.isStructured()
+                  ? builder->create<mlir::ConstantIndexOp>(location, 1)
+                  : builder->createIntegerConstant(info.loopVariableType, 1);
     assert(info.stepValue && "step value must be set");
     info.loopVariable = createTemp(location, *info.loopVariableSym);
 
@@ -1798,6 +1799,11 @@ private:
   }
 
   void instantiateVar(const Fortran::lower::pft::Variable &var) {
+    if (Fortran::semantics::FindCommonBlockContaining(var.getSymbol())) {
+      mlir::emitError(toLocation(),
+                      "Common blocks not yet handled in lowering");
+      exit(1);
+    }
     if (var.isGlobal())
       instantiateGlobal(var);
     else
