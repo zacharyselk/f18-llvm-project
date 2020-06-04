@@ -1,4 +1,4 @@
-//===-- Intrinsics.cpp ----------------------------------------------------===//
+//===-- IntrinsicCall.cpp -------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,13 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Builder routines for constructing the FIR dialect of MLIR. As FIR is a
+// Helper routines for constructing the FIR dialect of MLIR. As FIR is a
 // dialect of MLIR, it makes extensive use of MLIR interfaces and MLIR's coding
 // style (https://mlir.llvm.org/getting_started/DeveloperGuide/) is used in this
 // module.
 //
 //===----------------------------------------------------------------------===//
 
+#include "flang/Lower/IntrinsicCall.h"
 #include "RTBuilder.h"
 #include "flang/Lower/CharacterExpr.h"
 #include "flang/Lower/ComplexExpr.h"
@@ -83,6 +84,10 @@ enum class ExtremumBehavior {
   // possible to implement it without some target dependent runtime.
 };
 
+// FIXME: consider merging IntrinsicLibrary class and the
+// InstrinsicCallOpsHelper class. They serve the same purpose and the methods
+// here can just be private to the helper.
+
 // TODO error handling -> return a code or directly emit messages ?
 struct IntrinsicLibrary {
 
@@ -151,7 +156,7 @@ struct IntrinsicLibrary {
 /// one to one mapping with Fortran arguments. If no mapping is
 /// defined here for a generic intrinsic, genRuntimeCall will be called
 /// to look for a match in the runtime a emit a call.
-struct IntrinsicHanlder {
+struct IntrinsicHandler {
   const char *name;
   IntrinsicLibrary::Generator generator;
   /// Code heavy intrinsic can be outlined to make FIR
@@ -159,7 +164,7 @@ struct IntrinsicHanlder {
   bool outline = false;
 };
 using I = IntrinsicLibrary;
-static constexpr IntrinsicHanlder handlers[]{
+static constexpr IntrinsicHandler handlers[]{
     {"abs", &I::genAbs},
     {"achar", &I::genConversion},
     {"aimag", &I::genAimag},
@@ -182,7 +187,7 @@ static constexpr IntrinsicHanlder handlers[]{
 };
 
 /// To make fir output more readable for debug, one can outline all intrinsic
-/// implementation in wrappers (overrides the IntrinsicHanlder::outline flag).
+/// implementation in wrappers (overrides the IntrinsicHandler::outline flag).
 static llvm::cl::opt<bool> outlineAllIntrinsics(
     "outline-intrinsics",
     llvm::cl::desc(
@@ -910,49 +915,34 @@ mlir::Value IntrinsicLibrary::genExtremum(mlir::Type,
 }
 
 //===----------------------------------------------------------------------===//
-// IntrinsicCallOpsBuilder
+// IntrinsicCallOpsHelper
 //===----------------------------------------------------------------------===//
 
-template <typename T>
-mlir::Value Fortran::lower::IntrinsicCallOpsBuilder<T>::genIntrinsicCall(
+mlir::Value Fortran::lower::IntrinsicCallOpsHelper::genIntrinsicCall(
     llvm::StringRef name, mlir::Type resultType,
     llvm::ArrayRef<mlir::Value> args) {
-  return IntrinsicLibrary{impl(), impl().getLoc()}.genIntrinsicCall(
-      name, resultType, args);
+  return IntrinsicLibrary{builder, loc}.genIntrinsicCall(name, resultType,
+                                                         args);
 }
-template mlir::Value
-    Fortran::lower::IntrinsicCallOpsBuilder<Fortran::lower::FirOpBuilder>::
-        genIntrinsicCall(llvm::StringRef, mlir::Type,
-                         llvm::ArrayRef<mlir::Value>);
 
-template <typename T>
-mlir::Value Fortran::lower::IntrinsicCallOpsBuilder<T>::genMax(
+mlir::Value Fortran::lower::IntrinsicCallOpsHelper::genMax(
     llvm::ArrayRef<mlir::Value> args) {
   assert(args.size() > 0 && "max requires at least one argument");
-  return IntrinsicLibrary{impl(), impl().getLoc()}
+  return IntrinsicLibrary{builder, loc}
       .genExtremum<Extremum::Max, ExtremumBehavior::MinMaxss>(args[0].getType(),
                                                               args);
 }
-template mlir::Value Fortran::lower::IntrinsicCallOpsBuilder<
-    Fortran::lower::FirOpBuilder>::genMax(llvm::ArrayRef<mlir::Value>);
 
-template <typename T>
-mlir::Value Fortran::lower::IntrinsicCallOpsBuilder<T>::genMin(
+mlir::Value Fortran::lower::IntrinsicCallOpsHelper::genMin(
     llvm::ArrayRef<mlir::Value> args) {
   assert(args.size() > 0 && "min requires at least one argument");
-  return IntrinsicLibrary{impl(), impl().getLoc()}
+  return IntrinsicLibrary{builder, loc}
       .genExtremum<Extremum::Min, ExtremumBehavior::MinMaxss>(args[0].getType(),
                                                               args);
 }
-template mlir::Value Fortran::lower::IntrinsicCallOpsBuilder<
-    Fortran::lower::FirOpBuilder>::genMin(llvm::ArrayRef<mlir::Value>);
 
-template <typename T>
-mlir::Value Fortran::lower::IntrinsicCallOpsBuilder<T>::genPow(mlir::Type type,
-                                                               mlir::Value x,
-                                                               mlir::Value y) {
-  return IntrinsicLibrary{impl(), impl().getLoc()}.genRuntimeCall("pow", type,
-                                                                  {x, y});
+mlir::Value Fortran::lower::IntrinsicCallOpsHelper::genPow(mlir::Type type,
+                                                           mlir::Value x,
+                                                           mlir::Value y) {
+  return IntrinsicLibrary{builder, loc}.genRuntimeCall("pow", type, {x, y});
 }
-template mlir::Value Fortran::lower::IntrinsicCallOpsBuilder<
-    Fortran::lower::FirOpBuilder>::genPow(mlir::Type, mlir::Value, mlir::Value);
