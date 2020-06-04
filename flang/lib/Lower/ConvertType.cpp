@@ -115,9 +115,8 @@ genFIRType<Fortran::common::TypeCategory::Real>(mlir::MLIRContext *context,
     case 16:
       return genFIRType<Fortran::common::TypeCategory::Real, 16>(context);
     }
-    assert(false && "type translation not implemented");
   }
-  return {};
+  llvm_unreachable("REAL type translation not implemented");
 }
 
 template <>
@@ -138,9 +137,8 @@ genFIRType<Fortran::common::TypeCategory::Integer>(mlir::MLIRContext *context,
     case 16:
       return genFIRType<Fortran::common::TypeCategory::Integer, 16>(context);
     }
-    assert(false && "type translation not implemented");
   }
-  return {};
+  llvm_unreachable("INTEGER type translation not implemented");
 }
 
 template <>
@@ -175,104 +173,25 @@ genFIRType<Fortran::common::TypeCategory::Complex>(mlir::MLIRContext *context,
 
 namespace {
 
-/// Recover the type of an Fortran::evaluate::Expr<T> and convert it to an
-/// mlir::Type. The type returned can be a MLIR standard or FIR type.
+/// Discover the type of an Fortran::evaluate::Expr<T> and convert it to an
+/// mlir::Type. The type returned may be an MLIR standard or FIR type.
 class TypeBuilder {
-  mlir::MLIRContext *context;
-  const Fortran::common::IntrinsicTypeDefaultKinds &defaults;
-
-  template <Fortran::common::TypeCategory TC>
-  int defaultKind() {
-    return defaultKind(TC);
-  }
-  int defaultKind(Fortran::common::TypeCategory TC) {
-    return defaults.GetDefaultKind(TC);
-  }
-
-  mlir::InFlightDiagnostic emitError(const llvm::Twine &message) {
-    return mlir::emitError(mlir::UnknownLoc::get(context), message);
-  }
-
-  mlir::InFlightDiagnostic emitWarning(const llvm::Twine &message) {
-    return mlir::emitWarning(mlir::UnknownLoc::get(context), message);
-  }
-
-  fir::SequenceType::Shape seqShapeHelper(Fortran::semantics::SymbolRef symbol,
-                                          fir::SequenceType::Shape &bounds) {
-    auto &details = symbol->get<Fortran::semantics::ObjectEntityDetails>();
-    const auto size = details.shape().size();
-    for (auto &ss : details.shape()) {
-      auto lb = ss.lbound();
-      auto ub = ss.ubound();
-      if (lb.isAssumed() && ub.isAssumed() && size == 1)
-        return {};
-      if (lb.isExplicit() && ub.isExplicit()) {
-        auto &lbv = lb.GetExplicit();
-        auto &ubv = ub.GetExplicit();
-        if (lbv.has_value() && ubv.has_value() && isConstant(lbv.value()) &&
-            isConstant(ubv.value())) {
-          bounds.emplace_back(toConstant(ubv.value()) -
-                              toConstant(lbv.value()) + 1);
-        } else {
-          bounds.emplace_back(fir::SequenceType::getUnknownExtent());
-        }
-      } else {
-        bounds.emplace_back(fir::SequenceType::getUnknownExtent());
-      }
-    }
-    return bounds;
-  }
-
 public:
+  
+  /// Constructor.
   explicit TypeBuilder(
       mlir::MLIRContext *context,
       const Fortran::common::IntrinsicTypeDefaultKinds &defaults)
       : context{context}, defaults{defaults} {}
 
-  // non-template, arguments are runtime values
-  mlir::Type genFIRTy(Fortran::common::TypeCategory tc, int kind) {
-    switch (tc) {
-    case Fortran::common::TypeCategory::Real:
-      return genFIRType<Fortran::common::TypeCategory::Real>(context, kind);
-    case Fortran::common::TypeCategory::Integer:
-      return genFIRType<Fortran::common::TypeCategory::Integer>(context, kind);
-    case Fortran::common::TypeCategory::Complex:
-      return genFIRType<Fortran::common::TypeCategory::Complex>(context, kind);
-    case Fortran::common::TypeCategory::Logical:
-      return genFIRType<Fortran::common::TypeCategory::Logical>(context, kind);
-    case Fortran::common::TypeCategory::Character:
-      return genFIRType<Fortran::common::TypeCategory::Character>(context,
-                                                                  kind);
-    default:
-      break;
-    }
-    assert(false && "unhandled type category");
-    return {};
-  }
-
-  // non-template, category is runtime values, kind is defaulted
-  mlir::Type genFIRTy(Fortran::common::TypeCategory tc) {
-    return genFIRTy(tc, defaultKind(tc));
-  }
-
-  mlir::Type gen(const Fortran::evaluate::ImpliedDoIndex &) {
-    return genFIRType<Fortran::common::TypeCategory::Integer>(
-        context, defaultKind<Fortran::common::TypeCategory::Integer>());
-  }
-
+  
+  //===--------------------------------------------------------------------===//
+  // Generate type entry points
+  //===--------------------------------------------------------------------===//
+  
   template <template <typename> typename A, Fortran::common::TypeCategory TC>
   mlir::Type gen(const A<Fortran::evaluate::SomeKind<TC>> &) {
     return genFIRType<TC>(context, defaultKind<TC>());
-  }
-
-  template <int KIND>
-  mlir::Type gen(const Fortran::evaluate::TypeParamInquiry<KIND> &) {
-    return genFIRType<Fortran::common::TypeCategory::Integer, KIND>(context);
-  }
-
-  template <typename A>
-  mlir::Type gen(const Fortran::evaluate::Relational<A> &) {
-    return genFIRType<Fortran::common::TypeCategory::Logical, 1>(context);
   }
 
   template <template <typename> typename A, Fortran::common::TypeCategory TC,
@@ -286,11 +205,6 @@ public:
   mlir::Type
   gen(const Fortran::evaluate::Expr<Fortran::evaluate::Type<TC, KIND>> &) {
     return genFIRType<TC, KIND>(context);
-  }
-
-  template <typename A>
-  mlir::Type genVariant(const A &variant) {
-    return std::visit([&](const auto &x) { return gen(x); }, variant.u);
   }
 
   // breaks the conflict between A<SomeKind<TC>> and Expr<B> deduction
@@ -309,17 +223,105 @@ public:
     return genVariant(dref);
   }
 
-  mlir::Type mkVoid() { return mlir::TupleType::get(context); }
+  mlir::Type gen(const Fortran::lower::pft::Variable &var) {
+    return genSymbolHelper(var.getSymbol(), var.isHeapAlloc(), var.isPointer());
+  }
+
+  /// Type consing from a symbol. A symbol's type must be created from the type
+  /// discovered by the front-end at runtime.
+  mlir::Type gen(Fortran::semantics::SymbolRef symbol) {
+    return genSymbolHelper(symbol);
+  }
+
+  // non-template, category is runtime values, kind is defaulted
+  mlir::Type genFIRTy(Fortran::common::TypeCategory tc) {
+    return genFIRTy(tc, defaultKind(tc));
+  }
+
+  // non-template, arguments are runtime values
+  mlir::Type genFIRTy(Fortran::common::TypeCategory tc, int kind) {
+    switch (tc) {
+    case Fortran::common::TypeCategory::Real:
+      return genFIRType<Fortran::common::TypeCategory::Real>(context, kind);
+    case Fortran::common::TypeCategory::Integer:
+      return genFIRType<Fortran::common::TypeCategory::Integer>(context, kind);
+    case Fortran::common::TypeCategory::Complex:
+      return genFIRType<Fortran::common::TypeCategory::Complex>(context, kind);
+    case Fortran::common::TypeCategory::Logical:
+      return genFIRType<Fortran::common::TypeCategory::Logical>(context, kind);
+    case Fortran::common::TypeCategory::Character:
+      return genFIRType<Fortran::common::TypeCategory::Character>(context,
+                                                                  kind);
+    default:
+      break;
+    }
+    llvm_unreachable("unhandled type category");
+  }
+
+private:
+  //===--------------------------------------------------------------------===//
+  // Generate type helpers
+  //===--------------------------------------------------------------------===//
+  
+  mlir::Type gen(const Fortran::evaluate::ImpliedDoIndex &) {
+    return genFIRType<Fortran::common::TypeCategory::Integer>(
+        context, defaultKind<Fortran::common::TypeCategory::Integer>());
+  }
+
+  template <int KIND>
+  mlir::Type gen(const Fortran::evaluate::TypeParamInquiry<KIND> &) {
+    return genFIRType<Fortran::common::TypeCategory::Integer, KIND>(context);
+  }
+
+  template <typename A>
+  mlir::Type gen(const Fortran::evaluate::Relational<A> &) {
+    return genFIRType<Fortran::common::TypeCategory::Logical, 1>(context);
+  }
+
+  // some sequence of `n` bytes
+  mlir::Type gen(const Fortran::evaluate::StaticDataObject::Pointer &ptr) {
+    mlir::Type byteTy{mlir::IntegerType::get(8, context)};
+    return fir::SequenceType::get(trivialShape(ptr->itemBytes()), byteTy);
+  }
+
+  mlir::Type gen(const Fortran::evaluate::Substring &ss) {
+    return genVariant(ss.GetBaseObject());
+  }
+
+  mlir::Type gen(const Fortran::evaluate::NullPointer &) {
+    return genTypelessPtr();
+  }
+  mlir::Type gen(const Fortran::evaluate::ProcedureRef &) {
+    return genTypelessPtr();
+  }
+  mlir::Type gen(const Fortran::evaluate::ProcedureDesignator &) {
+    return genTypelessPtr();
+  }
+  mlir::Type gen(const Fortran::evaluate::BOZLiteralConstant &) {
+    return genTypelessPtr();
+  }
+  mlir::Type gen(const Fortran::evaluate::ArrayRef &) { TODO("array ref"); }
+  mlir::Type gen(const Fortran::evaluate::CoarrayRef &) { TODO("coarray ref"); }
+  mlir::Type gen(const Fortran::evaluate::Component &) { TODO("component"); }
+  mlir::Type gen(const Fortran::evaluate::ComplexPart &) {
+    TODO("complex part");
+  }
+  mlir::Type gen(const Fortran::evaluate::DescriptorInquiry &) {
+    TODO("descriptor inquiry");
+  }
+  mlir::Type gen(const Fortran::evaluate::StructureConstructor &) {
+    TODO("structure constructor");
+  }
 
   fir::SequenceType::Shape genSeqShape(Fortran::semantics::SymbolRef symbol) {
-    assert(symbol->IsObjectArray());
+    assert(symbol->IsObjectArray() && "unexpected symbol type");
     fir::SequenceType::Shape bounds;
     return seqShapeHelper(symbol, bounds);
   }
 
   fir::SequenceType::Shape genSeqShape(Fortran::semantics::SymbolRef symbol,
                                        fir::SequenceType::Extent charLen) {
-    assert(symbol->IsObjectArray());
+    assert(symbol->IsObjectArray() && "unexpected symbol type");
     fir::SequenceType::Shape bounds;
     bounds.push_back(charLen);
     return seqShapeHelper(symbol, bounds);
@@ -403,15 +405,9 @@ public:
     return ty;
   }
 
-  mlir::Type gen(const Fortran::lower::pft::Variable &var) {
-    return genSymbolHelper(var.getSymbol(), var.isHeapAlloc(), var.isPointer());
-  }
-
-  /// Type consing from a symbol. A symbol's type must be created from the type
-  /// discovered by the front-end at runtime.
-  mlir::Type gen(Fortran::semantics::SymbolRef symbol) {
-    return genSymbolHelper(symbol);
-  }
+  //===--------------------------------------------------------------------===//
+  // Other helper functions
+  //===--------------------------------------------------------------------===//
 
   fir::SequenceType::Shape trivialShape(int size) {
     fir::SequenceType::Shape bounds;
@@ -419,43 +415,64 @@ public:
     return bounds;
   }
 
-  // some sequence of `n` bytes
-  mlir::Type gen(const Fortran::evaluate::StaticDataObject::Pointer &ptr) {
-    mlir::Type byteTy{mlir::IntegerType::get(8, context)};
-    return fir::SequenceType::get(trivialShape(ptr->itemBytes()), byteTy);
-  }
-
-  mlir::Type gen(const Fortran::evaluate::Substring &ss) {
-    return genVariant(ss.GetBaseObject());
-  }
-
+  mlir::Type mkVoid() { return mlir::TupleType::get(context); }
   mlir::Type genTypelessPtr() { return fir::ReferenceType::get(mkVoid()); }
 
-  mlir::Type gen(const Fortran::evaluate::NullPointer &) {
-    return genTypelessPtr();
-  }
-  mlir::Type gen(const Fortran::evaluate::ProcedureRef &) {
-    return genTypelessPtr();
-  }
-  mlir::Type gen(const Fortran::evaluate::ProcedureDesignator &) {
-    return genTypelessPtr();
-  }
-  mlir::Type gen(const Fortran::evaluate::BOZLiteralConstant &) {
-    return genTypelessPtr();
+  template <typename A>
+  mlir::Type genVariant(const A &variant) {
+    return std::visit([&](const auto &x) { return gen(x); }, variant.u);
   }
 
-  mlir::Type gen(const Fortran::evaluate::ArrayRef &) { TODO("array ref"); }
-  mlir::Type gen(const Fortran::evaluate::CoarrayRef &) { TODO("coarray ref"); }
-  mlir::Type gen(const Fortran::evaluate::Component &) { TODO("component"); }
-  mlir::Type gen(const Fortran::evaluate::ComplexPart &) {
-    TODO("complex part");
+  template <Fortran::common::TypeCategory TC>
+  int defaultKind() {
+    return defaultKind(TC);
   }
-  mlir::Type gen(const Fortran::evaluate::DescriptorInquiry &) {
-    TODO("descriptor inquiry");
+  int defaultKind(Fortran::common::TypeCategory TC) {
+    return defaults.GetDefaultKind(TC);
   }
-  mlir::Type gen(const Fortran::evaluate::StructureConstructor &) {
-    TODO("structure constructor");
+
+  fir::SequenceType::Shape seqShapeHelper(Fortran::semantics::SymbolRef symbol,
+                                          fir::SequenceType::Shape &bounds) {
+    auto &details = symbol->get<Fortran::semantics::ObjectEntityDetails>();
+    const auto size = details.shape().size();
+    for (auto &ss : details.shape()) {
+      auto lb = ss.lbound();
+      auto ub = ss.ubound();
+      if (lb.isAssumed() && ub.isAssumed() && size == 1)
+        return {};
+      if (lb.isExplicit() && ub.isExplicit()) {
+        auto &lbv = lb.GetExplicit();
+        auto &ubv = ub.GetExplicit();
+        if (lbv.has_value() && ubv.has_value() && isConstant(lbv.value()) &&
+            isConstant(ubv.value())) {
+          bounds.emplace_back(toConstant(ubv.value()) -
+                              toConstant(lbv.value()) + 1);
+        } else {
+          bounds.emplace_back(fir::SequenceType::getUnknownExtent());
+        }
+      } else {
+        bounds.emplace_back(fir::SequenceType::getUnknownExtent());
+      }
+    }
+    return bounds;
   }
+
+  //===--------------------------------------------------------------------===//
+  // Emit errors and warnings.
+  //===--------------------------------------------------------------------===//
+
+  mlir::InFlightDiagnostic emitError(const llvm::Twine &message) {
+    return mlir::emitError(mlir::UnknownLoc::get(context), message);
+  }
+
+  mlir::InFlightDiagnostic emitWarning(const llvm::Twine &message) {
+    return mlir::emitWarning(mlir::UnknownLoc::get(context), message);
+  }
+
+  //===--------------------------------------------------------------------===//
+
+  mlir::MLIRContext *context;
+  const Fortran::common::IntrinsicTypeDefaultKinds &defaults;
 };
 
 } // namespace
@@ -481,7 +498,6 @@ mlir::Type Fortran::lower::translateDataRefToFIRType(
   return TypeBuilder{context, defaults}.gen(dataRef);
 }
 
-// Builds the FIR type from an instance of SomeExpr
 mlir::Type Fortran::lower::translateSomeExprToFIRType(
     mlir::MLIRContext *context,
     const Fortran::common::IntrinsicTypeDefaultKinds &defaults,
@@ -489,8 +505,6 @@ mlir::Type Fortran::lower::translateSomeExprToFIRType(
   return TypeBuilder{context, defaults}.gen(*expr);
 }
 
-// This entry point avoids gratuitously wrapping the Symbol instance in layers
-// of Expr<T> that will then be immediately peeled back off and discarded.
 mlir::Type Fortran::lower::translateSymbolToFIRType(
     mlir::MLIRContext *context,
     const Fortran::common::IntrinsicTypeDefaultKinds &defaults,
