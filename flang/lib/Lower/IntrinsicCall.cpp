@@ -117,8 +117,9 @@ struct IntrinsicLibrary {
   mlir::Value genAimag(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genAint(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genAnint(mlir::Type, llvm::ArrayRef<mlir::Value>);
-  mlir::Value genConjg(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genCeiling(mlir::Type, llvm::ArrayRef<mlir::Value>);
+  mlir::Value genConjg(mlir::Type, llvm::ArrayRef<mlir::Value>);
+  mlir::Value genDim(mlir::Type, llvm::ArrayRef<mlir::Value>);
   template <Extremum, ExtremumBehavior>
   mlir::Value genExtremum(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genFloor(mlir::Type, llvm::ArrayRef<mlir::Value>);
@@ -175,6 +176,7 @@ static constexpr IntrinsicHandler handlers[]{
     {"ceiling", &I::genCeiling},
     {"char", &I::genConversion},
     {"conjg", &I::genConjg},
+    {"dim", &I::genDim},
     {"dble", &I::genConversion},
     {"floor", &I::genFloor},
     {"iand", &I::genIAnd},
@@ -759,6 +761,25 @@ mlir::Value IntrinsicLibrary::genConjg(mlir::Type resultType,
   auto negImag = builder.create<fir::NegfOp>(loc, imag);
   return Fortran::lower::ComplexExprHelper{builder, loc}.insertComplexPart(
       cplx, negImag, /*isImagPart=*/true);
+}
+
+// DIM
+mlir::Value IntrinsicLibrary::genDim(mlir::Type resultType,
+                                     llvm::ArrayRef<mlir::Value> args) {
+  assert(args.size() == 2);
+  if (resultType.isa<mlir::IntegerType>()) {
+    auto zero = builder.createIntegerConstant(loc, resultType, 0);
+    auto diff = builder.create<mlir::SubIOp>(loc, args[0], args[1]);
+    auto cmp =
+        builder.create<mlir::CmpIOp>(loc, mlir::CmpIPredicate::sgt, diff, zero);
+    return builder.create<mlir::SelectOp>(loc, cmp, diff, zero);
+  }
+  assert(fir::isa_real(resultType) && "Only expects real and integer in DIM");
+  auto zero = builder.createRealZeroConstant(loc, resultType);
+  auto diff = builder.create<fir::SubfOp>(loc, args[0], args[1]);
+  auto cmp =
+      builder.create<fir::CmpfOp>(loc, mlir::CmpFPredicate::OGT, diff, zero);
+  return builder.create<mlir::SelectOp>(loc, cmp, diff, zero);
 }
 
 // FLOOR
