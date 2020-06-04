@@ -36,6 +36,22 @@ subroutine aimag_test(a, b)
   b = aimag(a)
 end subroutine
 
+! AINT
+! CHECK-LABEL: aint_test
+subroutine aint_test(a, b)
+  real :: a, b
+  ! CHECK: call @llvm.trunc.f32
+  b = aint(a)
+end subroutine
+
+! ANINT
+! CHECK-LABEL: anint_test
+subroutine anint_test(a, b)
+  real :: a, b
+  ! CHECK: call @llvm.round.f32
+  b = anint(a)
+end subroutine
+
 ! DBLE
 ! CHECK-LABEL: dble_test
 subroutine dble_test(a)
