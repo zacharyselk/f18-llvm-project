@@ -8,6 +8,7 @@
 
 #include "flang/Lower/CharacterExpr.h"
 #include "flang/Lower/ConvertType.h"
+#include "flang/Lower/DoLoopHelper.h"
 #include "flang/Lower/IntrinsicCall.h"
 
 //===----------------------------------------------------------------------===//
@@ -150,11 +151,11 @@ void Fortran::lower::CharacterExprHelper::createStoreCharAt(
 void Fortran::lower::CharacterExprHelper::createCopy(
     const fir::CharBoxValue &dest, const fir::CharBoxValue &src,
     mlir::Value count) {
-  builder.createLoop(count,
-                     [&](Fortran::lower::FirOpBuilder &, mlir::Value index) {
-                       auto charVal = createLoadCharAt(src, index);
-                       createStoreCharAt(dest, index, charVal);
-                     });
+  Fortran::lower::DoLoopHelper{builder, loc}.createLoop(
+      count, [&](Fortran::lower::FirOpBuilder &, mlir::Value index) {
+        auto charVal = createLoadCharAt(src, index);
+        createStoreCharAt(dest, index, charVal);
+      });
 }
 
 void Fortran::lower::CharacterExprHelper::createPadding(
@@ -162,10 +163,10 @@ void Fortran::lower::CharacterExprHelper::createPadding(
   auto blank = createBlankConstant(getCharacterType(str));
   // Always create the loop, if upper < lower, no iteration will be
   // executed.
-  builder.createLoop(lower, upper,
-                     [&](Fortran::lower::FirOpBuilder &, mlir::Value index) {
-                       createStoreCharAt(str, index, blank);
-                     });
+  Fortran::lower::DoLoopHelper{builder, loc}.createLoop(
+      lower, upper, [&](Fortran::lower::FirOpBuilder &, mlir::Value index) {
+        createStoreCharAt(str, index, blank);
+      });
 }
 
 fir::CharBoxValue
@@ -250,7 +251,7 @@ fir::CharBoxValue Fortran::lower::CharacterExprHelper::createConcatenate(
   auto upperBound = builder.create<mlir::SubIOp>(loc, len, one);
   auto lhsLen =
       builder.createConvert(loc, builder.getIndexType(), lhs.getLen());
-  builder.createLoop(
+  Fortran::lower::DoLoopHelper{builder, loc}.createLoop(
       lhs.getLen(), upperBound, one,
       [&](Fortran::lower::FirOpBuilder &bldr, mlir::Value index) {
         auto rhsIndex = bldr.create<mlir::SubIOp>(loc, index, lhsLen);
