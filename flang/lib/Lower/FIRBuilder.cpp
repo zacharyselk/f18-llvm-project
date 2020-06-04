@@ -48,6 +48,20 @@ mlir::Value Fortran::lower::FirOpBuilder::createRealConstant(
   return create<mlir::ConstantOp>(loc, realType, getFloatAttr(realType, val));
 }
 
+mlir::Value
+Fortran::lower::FirOpBuilder::createRealZeroConstant(mlir::Location loc,
+                                                     mlir::Type realType) {
+  mlir::Attribute attr;
+  if (auto firType = realType.dyn_cast<fir::RealType>()) {
+    attr = getFloatAttr(
+        realType,
+        llvm::APFloat(kindMap.getFloatSemantics(firType.getFKind()), 0));
+  } else { // mlir::FloatType.
+    attr = getZeroAttr(realType);
+  }
+  return create<mlir::ConstantOp>(loc, realType, attr);
+}
+
 mlir::Value Fortran::lower::FirOpBuilder::allocateLocal(
     mlir::Location loc, mlir::Type ty, llvm::StringRef nm,
     llvm::ArrayRef<mlir::Value> shape, bool asTarget) {
