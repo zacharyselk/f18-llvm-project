@@ -115,6 +115,8 @@ struct IntrinsicLibrary {
 
   mlir::Value genAbs(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genAimag(mlir::Type, llvm::ArrayRef<mlir::Value>);
+  mlir::Value genAint(mlir::Type, llvm::ArrayRef<mlir::Value>);
+  mlir::Value genAnint(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genConjg(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genCeiling(mlir::Type, llvm::ArrayRef<mlir::Value>);
   template <Extremum, ExtremumBehavior>
@@ -168,6 +170,8 @@ static constexpr IntrinsicHandler handlers[]{
     {"abs", &I::genAbs},
     {"achar", &I::genConversion},
     {"aimag", &I::genAimag},
+    {"aint", &I::genAint},
+    {"anint", &I::genAnint},
     {"ceiling", &I::genCeiling},
     {"char", &I::genConversion},
     {"conjg", &I::genConjg},
@@ -272,6 +276,10 @@ static mlir::FunctionType genIntF32FuncType(mlir::MLIRContext *context) {
 static constexpr RuntimeFunction llvmIntrinsics[] = {
     {"abs", "llvm.fabs.f32", genF32F32FuncType},
     {"abs", "llvm.fabs.f64", genF64F64FuncType},
+    {"aint", "llvm.trunc.f32", genF32F32FuncType},
+    {"aint", "llvm.trunc.f64", genF64F64FuncType},
+    {"anint", "llvm.round.f32", genF32F32FuncType},
+    {"anint", "llvm.round.f64", genF64F64FuncType},
     // ceil is used for CEILING but is different, it returns a real.
     {"ceil", "llvm.ceil.f32", genF32F32FuncType},
     {"ceil", "llvm.ceil.f64", genF64F64FuncType},
@@ -706,6 +714,24 @@ mlir::Value IntrinsicLibrary::genAimag(mlir::Type resultType,
       args[0], true /* isImagPart */);
 }
 
+// ANINT
+mlir::Value IntrinsicLibrary::genAnint(mlir::Type resultType,
+                                       llvm::ArrayRef<mlir::Value> args) {
+  assert(args.size() >= 1);
+  // Skip optional kind argument to search the runtime; it is already reflected
+  // in result type.
+  return genRuntimeCall("anint", resultType, {args[0]});
+}
+
+// AINT
+mlir::Value IntrinsicLibrary::genAint(mlir::Type resultType,
+                                      llvm::ArrayRef<mlir::Value> args) {
+  assert(args.size() >= 1);
+  // Skip optional kind argument to search the runtime; it is already reflected
+  // in result type.
+  return genRuntimeCall("aint", resultType, {args[0]});
+}
+
 // CEILING
 mlir::Value IntrinsicLibrary::genCeiling(mlir::Type resultType,
                                          llvm::ArrayRef<mlir::Value> args) {
@@ -812,16 +838,19 @@ mlir::Value IntrinsicLibrary::genMod(mlir::Type resultType,
   if (resultType.isa<mlir::IntegerType>())
     return builder.create<mlir::SignedRemIOp>(loc, args[0], args[1]);
 
-  // Use runtime. Note that mlir::RemFOp alos implement floating point
+  // Use runtime. Note that mlir::RemFOp implements floating point
   // remainder, but it does not work with fir::Real type.
+  // TODO: consider using mlir::RemFOp when possible, that may help folding
+  // and  optimizations.
   return genRuntimeCall("mod", resultType, args);
 }
 
-// MOD
+// NINT
 mlir::Value IntrinsicLibrary::genNint(mlir::Type resultType,
                                       llvm::ArrayRef<mlir::Value> args) {
   assert(args.size() >= 1);
-  // Skip optional kind argument to search the runtime
+  // Skip optional kind argument to search the runtime; it is already reflected
+  // in result type.
   return genRuntimeCall("nint", resultType, {args[0]});
 }
 
