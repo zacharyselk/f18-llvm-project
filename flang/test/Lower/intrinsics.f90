@@ -60,6 +60,32 @@ subroutine dble_test(a)
   print *, dble(a)
 end subroutine
 
+! DIM
+! CHECK-LABEL: dim_testr
+subroutine dim_testr(x, y, z)
+  real :: x, y, z
+  ! CHECK-DAG: %[[x:.*]] = fir.load %arg0
+  ! CHECK-DAG: %[[y:.*]] = fir.load %arg1
+  ! CHECK-DAG: %[[zero:.*]] = constant 0.0
+  ! CHECK-DAG: %[[diff:.*]] = fir.subf %[[x]], %[[y]]
+  ! CHECK: %[[cmp:.*]] = fir.cmpf "ogt", %[[diff]], %[[zero]]
+  ! CHECK: %[[res:.*]] = select %[[cmp]], %[[diff]], %[[zero]]
+  ! CHECK: fir.store %[[res]] to %arg2
+  z = dim(x, y)
+end subroutine
+! CHECK-LABEL: dim_testi
+subroutine dim_testi(i, j, k)
+  integer :: i, j, k
+  ! CHECK-DAG: %[[i:.*]] = fir.load %arg0
+  ! CHECK-DAG: %[[j:.*]] = fir.load %arg1
+  ! CHECK-DAG: %[[zero:.*]] = constant 0
+  ! CHECK-DAG: %[[diff:.*]] = subi %[[i]], %[[j]]
+  ! CHECK: %[[cmp:.*]] = cmpi "sgt", %[[diff]], %[[zero]]
+  ! CHECK: %[[res:.*]] = select %[[cmp]], %[[diff]], %[[zero]]
+  ! CHECK: fir.store %[[res]] to %arg2
+  k = dim(i, j)
+end subroutine
+
 ! CEILING
 ! CHECK-LABEL: ceiling_test1
 subroutine ceiling_test1(i, a)
