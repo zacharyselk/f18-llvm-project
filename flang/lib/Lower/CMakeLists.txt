@@ -9,7 +9,7 @@ add_flang_library(FortranLower
   ConvertExpr.cpp
   ConvertType.cpp
   FIRBuilder.cpp
-  Intrinsics.cpp
+  IntrinsicCall.cpp
   IO.cpp
   Mangler.cpp
   OpenMP.cpp
