@@ -119,39 +119,6 @@ fir::GlobalOp Fortran::lower::FirOpBuilder::createGlobal(
   return glob;
 }
 
-//===----------------------------------------------------------------------===//
-// LoopOp builder
-//===----------------------------------------------------------------------===//
-
-void Fortran::lower::FirOpBuilder::createLoop(
-    mlir::Value lb, mlir::Value ub, mlir::Value step,
-    const BodyGenerator &bodyGenerator) {
-  auto lbi = convertToIndexType(lb);
-  auto ubi = convertToIndexType(ub);
-  assert(step && "step must be an actual Value");
-  auto inc = convertToIndexType(step);
-  auto loop = createHere<fir::LoopOp>(lbi, ubi, inc);
-  auto insertPt = saveInsertionPoint();
-  setInsertionPointToStart(loop.getBody());
-  auto index = loop.getInductionVar();
-  bodyGenerator(*this, index);
-  restoreInsertionPoint(insertPt);
-}
-
-void Fortran::lower::FirOpBuilder::createLoop(
-    mlir::Value lb, mlir::Value ub, const BodyGenerator &bodyGenerator) {
-  createLoop(lb, ub, createIntegerConstant(getIndexType(), 1), bodyGenerator);
-}
-
-void Fortran::lower::FirOpBuilder::createLoop(
-    mlir::Value count, const BodyGenerator &bodyGenerator) {
-  auto indexType = getIndexType();
-  auto zero = createIntegerConstant(indexType, 0);
-  auto one = createIntegerConstant(count.getType(), 1);
-  auto up = createHere<mlir::SubIOp>(count, one);
-  createLoop(zero, up, one, bodyGenerator);
-}
-
 mlir::Value Fortran::lower::FirOpBuilder::convertWithSemantics(
     mlir::Location loc, mlir::Type toTy, mlir::Value val) {
   assert(toTy && "store location must be typed");
