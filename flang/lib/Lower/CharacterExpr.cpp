@@ -8,6 +8,8 @@
 
 #include "flang/Lower/CharacterExpr.h"
 #include "flang/Lower/ConvertType.h"
+#include "flang/Lower/DoLoopHelper.h"
+#include "flang/Lower/IntrinsicCall.h"
 
 //===----------------------------------------------------------------------===//
 // CharacterExprHelper implementation
@@ -68,12 +70,12 @@ Fortran::lower::CharacterExprHelper::toDataLengthPair(mlir::Value character) {
   if (auto boxCharType = type.dyn_cast<fir::BoxCharType>()) {
     auto refType = builder.getRefType(boxCharType.getEleTy());
     auto unboxed =
-        builder.createHere<fir::UnboxCharOp>(refType, lenType, character);
+        builder.create<fir::UnboxCharOp>(loc, refType, lenType, character);
     return {unboxed.getResult(0), unboxed.getResult(1)};
   }
   if (auto seqType = type.dyn_cast<fir::CharacterType>()) {
     // Materialize length for usage into character manipulations.
-    auto len = builder.createIntegerConstant(lenType, 1);
+    auto len = builder.createIntegerConstant(loc, lenType, 1);
     return {character, len};
   }
   if (auto refType = type.dyn_cast<fir::ReferenceType>())
@@ -84,14 +86,14 @@ Fortran::lower::CharacterExprHelper::toDataLengthPair(mlir::Value character) {
     auto shape = seqType.getShape();
     assert(shape.size() == 1 && "only scalar character supported");
     // Materialize length for usage into character manipulations.
-    auto len = builder.createIntegerConstant(lenType, shape[0]);
+    auto len = builder.createIntegerConstant(loc, lenType, shape[0]);
     // FIXME: this seems to work for tests, but don't think it is correct
     if (auto load = dyn_cast<fir::LoadOp>(character.getDefiningOp()))
       return {load.memref(), len};
     return {character, len};
   }
   if (auto charTy = type.dyn_cast<fir::CharacterType>()) {
-    auto len = builder.createIntegerConstant(lenType, 1);
+    auto len = builder.createIntegerConstant(loc, lenType, 1);
     return {character, len};
   }
   llvm::report_fatal_error("unexpected character type");
@@ -149,11 +151,11 @@ void Fortran::lower::CharacterExprHelper::createStoreCharAt(
 void Fortran::lower::CharacterExprHelper::createCopy(
     const fir::CharBoxValue &dest, const fir::CharBoxValue &src,
     mlir::Value count) {
-  builder.createLoop(count,
-                     [&](Fortran::lower::FirOpBuilder &, mlir::Value index) {
-                       auto charVal = createLoadCharAt(src, index);
-                       createStoreCharAt(dest, index, charVal);
-                     });
+  Fortran::lower::DoLoopHelper{builder, loc}.createLoop(
+      count, [&](Fortran::lower::FirOpBuilder &, mlir::Value index) {
+        auto charVal = createLoadCharAt(src, index);
+        createStoreCharAt(dest, index, charVal);
+      });
 }
 
 void Fortran::lower::CharacterExprHelper::createPadding(
@@ -161,10 +163,10 @@ void Fortran::lower::CharacterExprHelper::createPadding(
   auto blank = createBlankConstant(getCharacterType(str));
   // Always create the loop, if upper < lower, no iteration will be
   // executed.
-  builder.createLoop(lower, upper,
-                     [&](Fortran::lower::FirOpBuilder &, mlir::Value index) {
-                       createStoreCharAt(str, index, blank);
-                     });
+  Fortran::lower::DoLoopHelper{builder, loc}.createLoop(
+      lower, upper, [&](Fortran::lower::FirOpBuilder &, mlir::Value index) {
+        createStoreCharAt(str, index, blank);
+      });
 }
 
 fir::CharBoxValue
@@ -209,7 +211,8 @@ void Fortran::lower::CharacterExprHelper::createAssign(
   // if needed.
   mlir::Value copyCount = lhs.getLen();
   if (!compileTimeSameLength)
-    copyCount = builder.genMin({lhs.getLen(), rhs.getLen()});
+    copyCount = Fortran::lower::IntrinsicCallOpsHelper{builder, loc}.genMin(
+        {lhs.getLen(), rhs.getLen()});
 
   fir::CharBoxValue safeRhs = rhs;
   if (needToMaterialize(rhs)) {
@@ -248,7 +251,7 @@ fir::CharBoxValue Fortran::lower::CharacterExprHelper::createConcatenate(
   auto upperBound = builder.create<mlir::SubIOp>(loc, len, one);
   auto lhsLen =
       builder.createConvert(loc, builder.getIndexType(), lhs.getLen());
-  builder.createLoop(
+  Fortran::lower::DoLoopHelper{builder, loc}.createLoop(
       lhs.getLen(), upperBound, one,
       [&](Fortran::lower::FirOpBuilder &bldr, mlir::Value index) {
         auto rhsIndex = bldr.create<mlir::SubIOp>(loc, index, lhsLen);
@@ -267,8 +270,7 @@ fir::CharBoxValue Fortran::lower::CharacterExprHelper::createSubstring(
 
   auto nbounds{bounds.size()};
   if (nbounds < 1 || nbounds > 2) {
-    mlir::emitError(builder.getLoc(),
-                    "Incorrect number of bounds in substring");
+    mlir::emitError(loc, "Incorrect number of bounds in substring");
     return {mlir::Value{}, mlir::Value{}};
   }
   mlir::SmallVector<mlir::Value, 2> castBounds;
@@ -354,7 +356,7 @@ mlir::Value Fortran::lower::CharacterExprHelper::createBlankConstantCode(
     fir::CharacterType type) {
   auto bits = builder.getKindMap().getCharacterBitsize(type.getFKind());
   auto intType = builder.getIntegerType(bits);
-  return builder.createIntegerConstant(loc, intType, 0x20);
+  return builder.createIntegerConstant(loc, intType, ' ');
 }
 
 mlir::Value Fortran::lower::CharacterExprHelper::createBlankConstant(

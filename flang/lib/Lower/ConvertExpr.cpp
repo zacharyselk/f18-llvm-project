@@ -18,7 +18,7 @@
 #include "flang/Lower/CharacterRuntime.h"
 #include "flang/Lower/ComplexExpr.h"
 #include "flang/Lower/ConvertType.h"
-#include "flang/Lower/FIRBuilder.h"
+#include "flang/Lower/IntrinsicCall.h"
 #include "flang/Lower/Runtime.h"
 #include "flang/Optimizer/Dialect/FIRDialect.h"
 #include "flang/Semantics/expression.h"
@@ -26,18 +26,8 @@
 #include "flang/Semantics/tools.h"
 #include "flang/Semantics/type.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
-#include "mlir/IR/Attributes.h"
-#include "mlir/IR/Operation.h"
-#include "mlir/IR/PatternMatch.h"
-#include "mlir/Pass/Pass.h"
-#include "mlir/Pass/PassManager.h"
-#include "mlir/Transforms/DialectConversion.h"
-#include "mlir/Transforms/Passes.h"
 #include "llvm/ADT/APFloat.h"
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/IR/Type.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -178,7 +168,7 @@ private:
   mlir::FuncOp getFunction(llvm::StringRef name, mlir::FunctionType funTy) {
     if (auto func = builder.getNamedFunction(name))
       return func;
-    return builder.createFunction(name, funTy);
+    return builder.createFunction(getLoc(), name, funTy);
   }
 
   template <Fortran::common::TypeCategory TC, int KIND>
@@ -366,7 +356,6 @@ private:
   template <int KIND>
   Fortran::lower::ExValue
   genval(const Fortran::evaluate::ComplexComponent<KIND> &part) {
-    builder.setLocation(getLoc());
     auto lhs = genunbox(part.left());
     assert(lhs && "boxed type not handled");
     return extractComplexPart(lhs, part.isImaginaryPart);
@@ -454,7 +443,8 @@ private:
     auto lhs = genunbox(op.left());
     auto rhs = genunbox(op.right());
     assert(lhs && rhs && "boxed value not handled");
-    return builder.genPow(ty, lhs, rhs);
+    return Fortran::lower::IntrinsicCallOpsHelper{builder, getLoc()}.genPow(
+        ty, lhs, rhs);
   }
 
   template <Fortran::common::TypeCategory TC, int KIND>
@@ -465,7 +455,8 @@ private:
     auto lhs = genunbox(op.left());
     auto rhs = genunbox(op.right());
     assert(lhs && rhs && "boxed value not handled");
-    return builder.genPow(ty, lhs, rhs);
+    return Fortran::lower::IntrinsicCallOpsHelper{builder, getLoc()}.genPow(
+        ty, lhs, rhs);
   }
 
   mlir::Value createComplex(fir::KindTy kind, mlir::Value real,
@@ -477,7 +468,6 @@ private:
   template <int KIND>
   Fortran::lower::ExValue
   genval(const Fortran::evaluate::ComplexConstructor<KIND> &op) {
-    builder.setLocation(getLoc());
     auto lhs = genunbox(op.left());
     auto rhs = genunbox(op.right());
     assert(lhs && rhs && "boxed value not handled");
@@ -506,7 +496,8 @@ private:
     auto rhs = genunbox(op.right());
     assert(lhs && rhs && "boxed value not handled");
     llvm::SmallVector<mlir::Value, 2> operands{lhs, rhs};
-    return builder.genIntrinsicCall(name, type, operands);
+    return Fortran::lower::IntrinsicCallOpsHelper{builder, getLoc()}
+        .genIntrinsicCall(name, type, operands);
   }
 
   template <int KIND>
@@ -532,14 +523,12 @@ private:
       bool eq{op.opr == Fortran::common::RelationalOperator::EQ};
       if (!eq && op.opr != Fortran::common::RelationalOperator::NE)
         llvm_unreachable("relation undefined for complex");
-      builder.setLocation(getLoc());
       auto lhs = genunbox(op.left());
       auto rhs = genunbox(op.right());
       assert(lhs && rhs && "boxed value not handled");
       return createComplexCompare(lhs, rhs, eq);
     } else {
       static_assert(TC == Fortran::common::TypeCategory::Character);
-      builder.setLocation(getLoc());
       return createCharCompare(op, translateRelational(op.opr));
     }
   }
@@ -636,6 +625,7 @@ private:
     auto addr = builder.create<fir::AddrOfOp>(getLoc(), global.resultType(),
                                               global.getSymbol());
     auto len = builder.createIntegerConstant(
+        getLoc(),
         Fortran::lower::CharacterExprHelper{builder, getLoc()}.getLengthType(),
         size);
     return fir::CharBoxValue{addr, len};
@@ -700,7 +690,7 @@ private:
       for (const auto &pair : llvm::zip(subscripts, con.lbounds())) {
         const auto &dim = std::get<0>(pair);
         const auto &lb = std::get<1>(pair);
-        idx.push_back(builder.createIntegerConstant(idxTy, dim - lb));
+        idx.push_back(builder.createIntegerConstant(getLoc(), idxTy, dim - lb));
       }
       array = builder.create<fir::InsertValueOp>(getLoc(), arrayTy, array,
                                                  constant, idx);
@@ -929,8 +919,8 @@ private:
     auto refTy = builder.getRefType(eleTy);
     auto base = builder.createConvert(loc, refTy, addr);
     auto idxTy = builder.getIndexType();
-    auto one = builder.createIntegerConstant(idxTy, 1);
-    auto zero = builder.createIntegerConstant(idxTy, 0);
+    auto one = builder.createIntegerConstant(getLoc(), idxTy, 1);
+    auto zero = builder.createIntegerConstant(getLoc(), idxTy, 0);
     auto getLB = [&](const auto &arr, unsigned dim) -> mlir::Value {
       return arr.lbounds.empty() ? one : arr.lbounds[dim];
     };
@@ -1046,7 +1036,7 @@ private:
                         mlir::Type ty) {
     assert(box.hasRank());
     if (box.hasSimpleLBounds())
-      return builder.createIntegerConstant(ty, 1);
+      return builder.createIntegerConstant(getLoc(), ty, 1);
     return builder.createConvert(getLoc(), ty, box.getLBound(dim));
   }
 
@@ -1111,7 +1101,8 @@ private:
     }
     // Let the intrinsic library lower the intrinsic procedure call
     llvm::StringRef name{intrinsic.name};
-    return builder.genIntrinsicCall(name, resultType[0], operands);
+    return Fortran::lower::IntrinsicCallOpsHelper{builder, getLoc()}
+        .genIntrinsicCall(name, resultType[0], operands);
   }
 
   template <typename A>

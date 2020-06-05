@@ -38,12 +38,6 @@ mlir::Type Fortran::lower::FirOpBuilder::getRefType(mlir::Type eleTy) {
   return fir::ReferenceType::get(eleTy);
 }
 
-mlir::Value
-Fortran::lower::FirOpBuilder::createIntegerConstant(mlir::Type intType,
-                                                    std::int64_t cst) {
-  return createIntegerConstant(getLoc(), intType, cst);
-}
-
 mlir::Value Fortran::lower::FirOpBuilder::createIntegerConstant(
     mlir::Location loc, mlir::Type ty, std::int64_t cst) {
   return create<mlir::ConstantOp>(loc, ty, getIntegerAttr(ty, cst));
@@ -117,39 +111,6 @@ fir::GlobalOp Fortran::lower::FirOpBuilder::createGlobal(
   bodyBuilder(*this);
   restoreInsertionPoint(insertPt);
   return glob;
-}
-
-//===----------------------------------------------------------------------===//
-// LoopOp builder
-//===----------------------------------------------------------------------===//
-
-void Fortran::lower::FirOpBuilder::createLoop(
-    mlir::Value lb, mlir::Value ub, mlir::Value step,
-    const BodyGenerator &bodyGenerator) {
-  auto lbi = convertToIndexType(lb);
-  auto ubi = convertToIndexType(ub);
-  assert(step && "step must be an actual Value");
-  auto inc = convertToIndexType(step);
-  auto loop = createHere<fir::LoopOp>(lbi, ubi, inc);
-  auto insertPt = saveInsertionPoint();
-  setInsertionPointToStart(loop.getBody());
-  auto index = loop.getInductionVar();
-  bodyGenerator(*this, index);
-  restoreInsertionPoint(insertPt);
-}
-
-void Fortran::lower::FirOpBuilder::createLoop(
-    mlir::Value lb, mlir::Value ub, const BodyGenerator &bodyGenerator) {
-  createLoop(lb, ub, createIntegerConstant(getIndexType(), 1), bodyGenerator);
-}
-
-void Fortran::lower::FirOpBuilder::createLoop(
-    mlir::Value count, const BodyGenerator &bodyGenerator) {
-  auto indexType = getIndexType();
-  auto zero = createIntegerConstant(indexType, 0);
-  auto one = createIntegerConstant(count.getType(), 1);
-  auto up = createHere<mlir::SubIOp>(count, one);
-  createLoop(zero, up, one, bodyGenerator);
 }
 
 mlir::Value Fortran::lower::FirOpBuilder::convertWithSemantics(

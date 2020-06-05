@@ -31,71 +31,15 @@ namespace Fortran::lower {
 class AbstractConverter;
 
 //===----------------------------------------------------------------------===//
-// FirOpBuilder interface extensions
-//===----------------------------------------------------------------------===//
-
-// TODO: Used CRTP to extend the FirOpBuilder interface, but this leads to some
-// complex and downright ugly template code.
-
-/// Extension class to facilitate lowering of COMPLEX manipulations in FIR.
-template <typename T>
-class IntrinsicCallOpsBuilder {
-public:
-  // access the implementation
-  T &impl() { return *static_cast<T *>(this); }
-
-  // TODO: Expose interface to get specific intrinsic function address.
-  // TODO: Handle intrinsic subroutine.
-  // TODO: Intrinsics that do not require their arguments to be defined
-  //   (e.g shape inquiries) might not fit in the current interface that
-  //   requires mlir::Value to be provided.
-  // TODO: Error handling interface ?
-  // TODO: Implementation is incomplete. Many intrinsics to tbd.
-
-  /// Generate the FIR+MLIR operations for the generic intrinsic \p name
-  /// with arguments \p args and expected result type \p resultType.
-  /// Returned mlir::Value is the returned Fortran intrinsic value.
-  mlir::Value genIntrinsicCall(llvm::StringRef name, mlir::Type resultType,
-                               llvm::ArrayRef<mlir::Value> args);
-  /// Direct access to intrinsics that may be used by lowering outside
-  /// of intrinsic call lowering.
-
-  /// Generate maximum. There must be at least one argument and all arguments
-  /// must have the same type.
-  mlir::Value genMax(llvm::ArrayRef<mlir::Value> args);
-  /// Generate minimum. Same constraints as genMax.
-  mlir::Value genMin(llvm::ArrayRef<mlir::Value> args);
-  /// Generate power function x**y with given the expected
-  /// result type.
-  mlir::Value genPow(mlir::Type resultType, mlir::Value x, mlir::Value y);
-};
-
-//===----------------------------------------------------------------------===//
 // FirOpBuilder
 //===----------------------------------------------------------------------===//
 
 /// Extends the MLIR OpBuilder to provide methods for building common FIR
 /// patterns.
-class FirOpBuilder : public mlir::OpBuilder,
-                     public IntrinsicCallOpsBuilder<FirOpBuilder> {
+class FirOpBuilder : public mlir::OpBuilder {
 public:
   explicit FirOpBuilder(mlir::Operation *op, const fir::KindMapping &kindMap)
       : OpBuilder{op}, kindMap{kindMap} {}
-
-  /// TODO: remove this as caching the location may have the location
-  /// unexpectedly overridden along the way.
-  /// Set the current location. Used by createHere template method, etc.
-  void setLocation(mlir::Location loc) { currentLoc = loc; }
-
-  /// Get the current location (if any) or return unknown location.
-  mlir::Location getLoc() {
-    return currentLoc.hasValue() ? currentLoc.getValue() : getUnknownLoc();
-  }
-
-  template <typename OP, typename... AS>
-  auto createHere(AS... args) {
-    return create<OP>(getLoc(), std::forward<AS>(args)...);
-  }
 
   /// Get the current Region of the insertion point.
   mlir::Region &getRegion() { return *getBlock()->getParent(); }
@@ -127,7 +71,6 @@ public:
   mlir::Type getRefType(mlir::Type eleTy);
 
   /// Create an integer constant of type \p type and value \p i.
-  mlir::Value createIntegerConstant(mlir::Type integerType, std::int64_t i);
   mlir::Value createIntegerConstant(mlir::Location loc, mlir::Type integerType,
                                     std::int64_t i);
 
@@ -148,15 +91,10 @@ public:
                               llvm::StringRef name = {},
                               llvm::ArrayRef<mlir::Value> shape = {});
 
-  mlir::Value createTemporary(mlir::Type type, llvm::StringRef name = {},
-                              llvm::ArrayRef<mlir::Value> shape = {}) {
-    return createTemporary(getLoc(), type, name, shape);
-  }
-
   /// Create an unnamed and untracked temporary on the stack.
-  mlir::Value createTemporary(mlir::Type type,
+  mlir::Value createTemporary(mlir::Location loc, mlir::Type type,
                               llvm::ArrayRef<mlir::Value> shape) {
-    return createTemporary(getLoc(), type, llvm::StringRef{}, shape);
+    return createTemporary(loc, type, llvm::StringRef{}, shape);
   }
 
   /// Create a global value.
@@ -218,10 +156,6 @@ public:
     return createFunction(loc, getModule(), name, ty);
   }
 
-  mlir::FuncOp createFunction(llvm::StringRef name, mlir::FunctionType ty) {
-    return createFunction(getLoc(), name, ty);
-  }
-
   static mlir::FuncOp createFunction(mlir::Location loc, mlir::ModuleOp module,
                                      llvm::StringRef name,
                                      mlir::FunctionType ty);
@@ -235,12 +169,6 @@ public:
     return createFunction(loc, name, ty);
   }
 
-  mlir::FuncOp addNamedFunction(llvm::StringRef name, mlir::FunctionType ty) {
-    if (auto func = getNamedFunction(name))
-      return func;
-    return createFunction(name, ty);
-  }
-
   static mlir::FuncOp addNamedFunction(mlir::Location loc,
                                        mlir::ModuleOp module,
                                        llvm::StringRef name,
@@ -250,31 +178,12 @@ public:
     return createFunction(loc, module, name, ty);
   }
 
-  //===--------------------------------------------------------------------===//
-  // LoopOp helpers
-  //===--------------------------------------------------------------------===//
-
-  using BodyGenerator = std::function<void(FirOpBuilder &, mlir::Value)>;
-
-  /// Build loop [\p lb, \p ub] with step \p step.
-  /// If \p step is an empty value, 1 is used for the step.
-  void createLoop(mlir::Value lb, mlir::Value ub, mlir::Value step,
-                  const BodyGenerator &bodyGenerator);
-
-  /// Build loop [\p lb,  \p ub] with step 1.
-  void createLoop(mlir::Value lb, mlir::Value ub,
-                  const BodyGenerator &bodyGenerator);
-
-  /// Build loop [0, \p count) with step 1.
-  void createLoop(mlir::Value count, const BodyGenerator &bodyGenerator);
-
   /// Cast the input value to IndexType.
-  mlir::Value convertToIndexType(mlir::Value val) {
-    return createConvert(getLoc(), getIndexType(), val);
+  mlir::Value convertToIndexType(mlir::Location loc, mlir::Value val) {
+    return createConvert(loc, getIndexType(), val);
   }
 
 private:
-  llvm::Optional<mlir::Location> currentLoc{};
   const fir::KindMapping &kindMap;
 };
 
