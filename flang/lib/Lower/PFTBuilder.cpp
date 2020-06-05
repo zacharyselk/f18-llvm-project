@@ -1041,6 +1041,16 @@ private:
 
 void Fortran::lower::pft::FunctionLikeUnit::processSymbolTable(
     const semantics::Scope &scope) {
+  // TODO: handle equivalence and common blocks
+  if (!scope.equivalenceSets().empty()) {
+    llvm::errs() << "TODO: equivalence not yet handled in lowering.\n"
+                 << "note: equivalence used in "
+                 << (scope.GetName() && !scope.GetName()->empty()
+                         ? scope.GetName()->ToString()
+                         : "unnamed program"s)
+                 << "\n";
+    exit(1);
+  }
   SymbolDependenceDepth sdd{varList};
   for (const auto &iter : scope)
     sdd.analyze(iter.second.get());
