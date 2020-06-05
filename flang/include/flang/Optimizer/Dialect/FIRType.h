@@ -437,6 +437,12 @@ inline bool isa_real(mlir::Type t) {
   return t.isa<fir::RealType>() || t.isa<mlir::FloatType>();
 }
 
+/// Is `t` an integral type?
+inline bool isa_integer(mlir::Type t) {
+  return t.isa<mlir::IndexType>() || t.isa<mlir::IntegerType>() ||
+         t.isa<fir::IntType>();
+}
+
 /// Is `t` a FIR or MLIR Complex type?
 inline bool isa_complex(mlir::Type t) {
   return t.isa<fir::CplxType>() || t.isa<mlir::ComplexType>();

@@ -38,12 +38,6 @@ mlir::Type Fortran::lower::FirOpBuilder::getRefType(mlir::Type eleTy) {
   return fir::ReferenceType::get(eleTy);
 }
 
-mlir::Value
-Fortran::lower::FirOpBuilder::createIntegerConstant(mlir::Type intType,
-                                                    std::int64_t cst) {
-  return createIntegerConstant(getLoc(), intType, cst);
-}
-
 mlir::Value Fortran::lower::FirOpBuilder::createIntegerConstant(
     mlir::Location loc, mlir::Type ty, std::int64_t cst) {
   return create<mlir::ConstantOp>(loc, ty, getIntegerAttr(ty, cst));

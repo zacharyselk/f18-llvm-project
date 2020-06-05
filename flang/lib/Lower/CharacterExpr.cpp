@@ -70,12 +70,12 @@ Fortran::lower::CharacterExprHelper::toDataLengthPair(mlir::Value character) {
   if (auto boxCharType = type.dyn_cast<fir::BoxCharType>()) {
     auto refType = builder.getRefType(boxCharType.getEleTy());
     auto unboxed =
-        builder.createHere<fir::UnboxCharOp>(refType, lenType, character);
+        builder.create<fir::UnboxCharOp>(loc, refType, lenType, character);
     return {unboxed.getResult(0), unboxed.getResult(1)};
   }
   if (auto seqType = type.dyn_cast<fir::CharacterType>()) {
     // Materialize length for usage into character manipulations.
-    auto len = builder.createIntegerConstant(lenType, 1);
+    auto len = builder.createIntegerConstant(loc, lenType, 1);
     return {character, len};
   }
   if (auto refType = type.dyn_cast<fir::ReferenceType>())
@@ -86,14 +86,14 @@ Fortran::lower::CharacterExprHelper::toDataLengthPair(mlir::Value character) {
     auto shape = seqType.getShape();
     assert(shape.size() == 1 && "only scalar character supported");
     // Materialize length for usage into character manipulations.
-    auto len = builder.createIntegerConstant(lenType, shape[0]);
+    auto len = builder.createIntegerConstant(loc, lenType, shape[0]);
     // FIXME: this seems to work for tests, but don't think it is correct
     if (auto load = dyn_cast<fir::LoadOp>(character.getDefiningOp()))
       return {load.memref(), len};
     return {character, len};
   }
   if (auto charTy = type.dyn_cast<fir::CharacterType>()) {
-    auto len = builder.createIntegerConstant(lenType, 1);
+    auto len = builder.createIntegerConstant(loc, lenType, 1);
     return {character, len};
   }
   llvm::report_fatal_error("unexpected character type");
@@ -270,8 +270,7 @@ fir::CharBoxValue Fortran::lower::CharacterExprHelper::createSubstring(
 
   auto nbounds{bounds.size()};
   if (nbounds < 1 || nbounds > 2) {
-    mlir::emitError(builder.getLoc(),
-                    "Incorrect number of bounds in substring");
+    mlir::emitError(loc, "Incorrect number of bounds in substring");
     return {mlir::Value{}, mlir::Value{}};
   }
   mlir::SmallVector<mlir::Value, 2> castBounds;
@@ -357,7 +356,7 @@ mlir::Value Fortran::lower::CharacterExprHelper::createBlankConstantCode(
     fir::CharacterType type) {
   auto bits = builder.getKindMap().getCharacterBitsize(type.getFKind());
   auto intType = builder.getIntegerType(bits);
-  return builder.createIntegerConstant(loc, intType, 0x20);
+  return builder.createIntegerConstant(loc, intType, ' ');
 }
 
 mlir::Value Fortran::lower::CharacterExprHelper::createBlankConstant(
