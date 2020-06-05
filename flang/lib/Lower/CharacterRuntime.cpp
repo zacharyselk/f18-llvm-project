@@ -54,13 +54,14 @@ inline int64_t getLength(mlir::Type argTy) {
 
 /// Get (or generate) the MLIR FuncOp for a given runtime function.
 template <typename E>
-static mlir::FuncOp getRuntimeFunc(Fortran::lower::FirOpBuilder &builder) {
+static mlir::FuncOp getRuntimeFunc(mlir::Location loc,
+                                   Fortran::lower::FirOpBuilder &builder) {
   auto name = getName<E>();
   auto func = builder.getNamedFunction(name);
   if (func)
     return func;
   auto funTy = getTypeModel<E>()(builder.getContext());
-  func = builder.createFunction(name, funTy);
+  func = builder.createFunction(loc, name, funTy);
   func.setAttr("fir.runtime", builder.getUnitAttr());
   return func;
 }
@@ -90,17 +91,16 @@ Fortran::lower::genRawCharCompare(Fortran::lower::AbstractConverter &converter,
                                   mlir::Value lhsBuff, mlir::Value lhsLen,
                                   mlir::Value rhsBuff, mlir::Value rhsLen) {
   auto &builder = converter.getFirOpBuilder();
-  builder.setLocation(loc);
   mlir::FuncOp beginFunc;
   switch (discoverKind(lhsBuff.getType())) {
   case 1:
-    beginFunc = getRuntimeFunc<mkRTKey(CharacterCompareScalar1)>(builder);
+    beginFunc = getRuntimeFunc<mkRTKey(CharacterCompareScalar1)>(loc, builder);
     break;
   case 2:
-    beginFunc = getRuntimeFunc<mkRTKey(CharacterCompareScalar2)>(builder);
+    beginFunc = getRuntimeFunc<mkRTKey(CharacterCompareScalar2)>(loc, builder);
     break;
   case 4:
-    beginFunc = getRuntimeFunc<mkRTKey(CharacterCompareScalar4)>(builder);
+    beginFunc = getRuntimeFunc<mkRTKey(CharacterCompareScalar4)>(loc, builder);
     break;
   default:
     llvm_unreachable("runtime does not support CHARACTER KIND");
@@ -112,7 +112,7 @@ Fortran::lower::genRawCharCompare(Fortran::lower::AbstractConverter &converter,
   auto rlen = builder.createConvert(loc, fTy.getInput(3), rhsLen);
   llvm::SmallVector<mlir::Value, 4> args = {lptr, rptr, llen, rlen};
   auto tri = builder.create<mlir::CallOp>(loc, beginFunc, args).getResult(0);
-  auto zero = builder.createIntegerConstant(tri.getType(), 0);
+  auto zero = builder.createIntegerConstant(loc, tri.getType(), 0);
   return builder.create<mlir::CmpIOp>(loc, cmp, tri, zero);
 }
 
@@ -121,7 +121,6 @@ Fortran::lower::genBoxCharCompare(Fortran::lower::AbstractConverter &converter,
                                   mlir::Location loc, mlir::CmpIPredicate cmp,
                                   mlir::Value lhs, mlir::Value rhs) {
   auto &builder = converter.getFirOpBuilder();
-  builder.setLocation(loc);
   Fortran::lower::CharacterExprHelper helper{builder, loc};
   auto lhsPair = helper.materializeCharacter(lhs);
   auto rhsPair = helper.materializeCharacter(rhs);

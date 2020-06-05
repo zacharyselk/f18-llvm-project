@@ -41,21 +41,6 @@ public:
   explicit FirOpBuilder(mlir::Operation *op, const fir::KindMapping &kindMap)
       : OpBuilder{op}, kindMap{kindMap} {}
 
-  /// TODO: remove this as caching the location may have the location
-  /// unexpectedly overridden along the way.
-  /// Set the current location. Used by createHere template method, etc.
-  void setLocation(mlir::Location loc) { currentLoc = loc; }
-
-  /// Get the current location (if any) or return unknown location.
-  mlir::Location getLoc() {
-    return currentLoc.hasValue() ? currentLoc.getValue() : getUnknownLoc();
-  }
-
-  template <typename OP, typename... AS>
-  auto createHere(AS... args) {
-    return create<OP>(getLoc(), std::forward<AS>(args)...);
-  }
-
   /// Get the current Region of the insertion point.
   mlir::Region &getRegion() { return *getBlock()->getParent(); }
 
@@ -86,7 +71,6 @@ public:
   mlir::Type getRefType(mlir::Type eleTy);
 
   /// Create an integer constant of type \p type and value \p i.
-  mlir::Value createIntegerConstant(mlir::Type integerType, std::int64_t i);
   mlir::Value createIntegerConstant(mlir::Location loc, mlir::Type integerType,
                                     std::int64_t i);
 
@@ -107,15 +91,10 @@ public:
                               llvm::StringRef name = {},
                               llvm::ArrayRef<mlir::Value> shape = {});
 
-  mlir::Value createTemporary(mlir::Type type, llvm::StringRef name = {},
-                              llvm::ArrayRef<mlir::Value> shape = {}) {
-    return createTemporary(getLoc(), type, name, shape);
-  }
-
   /// Create an unnamed and untracked temporary on the stack.
-  mlir::Value createTemporary(mlir::Type type,
+  mlir::Value createTemporary(mlir::Location loc, mlir::Type type,
                               llvm::ArrayRef<mlir::Value> shape) {
-    return createTemporary(getLoc(), type, llvm::StringRef{}, shape);
+    return createTemporary(loc, type, llvm::StringRef{}, shape);
   }
 
   /// Create a global value.
@@ -177,10 +156,6 @@ public:
     return createFunction(loc, getModule(), name, ty);
   }
 
-  mlir::FuncOp createFunction(llvm::StringRef name, mlir::FunctionType ty) {
-    return createFunction(getLoc(), name, ty);
-  }
-
   static mlir::FuncOp createFunction(mlir::Location loc, mlir::ModuleOp module,
                                      llvm::StringRef name,
                                      mlir::FunctionType ty);
@@ -194,12 +169,6 @@ public:
     return createFunction(loc, name, ty);
   }
 
-  mlir::FuncOp addNamedFunction(llvm::StringRef name, mlir::FunctionType ty) {
-    if (auto func = getNamedFunction(name))
-      return func;
-    return createFunction(name, ty);
-  }
-
   static mlir::FuncOp addNamedFunction(mlir::Location loc,
                                        mlir::ModuleOp module,
                                        llvm::StringRef name,
@@ -210,12 +179,11 @@ public:
   }
 
   /// Cast the input value to IndexType.
-  mlir::Value convertToIndexType(mlir::Value val) {
-    return createConvert(getLoc(), getIndexType(), val);
+  mlir::Value convertToIndexType(mlir::Location loc, mlir::Value val) {
+    return createConvert(loc, getIndexType(), val);
   }
 
 private:
-  llvm::Optional<mlir::Location> currentLoc{};
   const fir::KindMapping &kindMap;
 };
 
