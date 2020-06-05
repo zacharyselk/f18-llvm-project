@@ -235,8 +235,11 @@ private:
         return Fortran::lower::genBoxCharCompare(
             converter, getLoc(), pred, lhs->getBuffer(), rhs->getBuffer());
       }
-    TODO();
+    // TODO: implement this
+    mlir::emitError(getLoc(), "TODO #119: unhandled character comparison");
+    exit(1);
   }
+
   template <typename A>
   mlir::Value createCharCompare(const A &ex, mlir::CmpIPredicate pred) {
     return createCharCompare(pred, genval(ex.left()), genval(ex.right()));
