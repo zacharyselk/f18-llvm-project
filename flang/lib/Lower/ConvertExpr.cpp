@@ -1112,10 +1112,29 @@ private:
     return false;
   }
 
+  /// helper to detect statement functions
+  static bool
+  isStatementFunctionCall(const Fortran::evaluate::ProcedureRef &procRef) {
+    if (const auto *symbol = procRef.proc().GetSymbol())
+      if (const auto *details =
+              symbol->detailsIf<Fortran::semantics::SubprogramDetails>())
+        return details->stmtFunction().has_value();
+    return false;
+  }
+
   mlir::Value genProcedureRef(const Fortran::evaluate::ProcedureRef &procRef,
                               mlir::ArrayRef<mlir::Type> resultType) {
     if (const auto *intrinsic = procRef.proc().GetSpecificIntrinsic())
       return genIntrinsicRef(procRef, *intrinsic, resultType[0]);
+
+    // TODO: Statement function: either directly inlined here,
+    // or as a normal call (the function would have to be generated,
+    // it may capture local variables in the expression).
+    if (isStatementFunctionCall(procRef)) {
+      mlir::emitError(getLoc(),
+                      "Statement function calls not yet handled in lowering");
+      exit(1);
+    }
 
     // Implicit interface implementation only
     // TODO: Explicit interface, we need to use Characterize here,
