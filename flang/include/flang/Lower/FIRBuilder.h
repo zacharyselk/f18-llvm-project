@@ -76,6 +76,8 @@ public:
 
   mlir::Value createRealConstant(mlir::Location loc, mlir::Type realType,
                                  const llvm::APFloat &val);
+  /// Create a real constant of type \p realType with a value zero.
+  mlir::Value createRealZeroConstant(mlir::Location loc, mlir::Type realType);
 
   /// Create a slot for a local on the stack. Besides the variable's type and
   /// shape, it may be given name or target attributes.
