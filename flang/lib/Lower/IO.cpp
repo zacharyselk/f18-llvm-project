@@ -316,12 +316,15 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
     itemAddr = builder.createConvert(loc, argType, itemAddr);
     llvm::SmallVector<mlir::Value, 3> inputFuncArgs = {cookie, itemAddr};
     Fortran::lower::CharacterExprHelper helper{builder, loc};
-    if (helper.isCharacter(itemType))
-      TODO();
-    else if (itemType.isa<mlir::IntegerType>())
+    if (helper.isCharacter(itemType)) {
+      auto len = helper.materializeCharacter(originalItemAddr).second;
+      inputFuncArgs.push_back(
+          builder.createConvert(loc, inputFunc.getType().getInput(2), len));
+    } else if (itemType.isa<mlir::IntegerType>()) {
       inputFuncArgs.push_back(builder.create<mlir::ConstantOp>(
           loc, builder.getI32IntegerAttr(
                    itemType.cast<mlir::IntegerType>().getWidth() / 8)));
+    }
     ok = builder.create<mlir::CallOp>(loc, inputFunc, inputFuncArgs)
              .getResult(0);
     if (complexPartType) { // imaginary part
