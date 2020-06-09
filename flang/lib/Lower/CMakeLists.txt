@@ -25,7 +25,7 @@ add_flang_library(FortranLower
 )
 
 target_link_libraries(FortranLower
-  FIRSupport
+  FIROptimizer
   MLIRAffineToStandard
   MLIRLLVMIR
   MLIRSCFToStandard
