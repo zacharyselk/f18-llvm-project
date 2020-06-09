@@ -88,3 +88,10 @@ llvm_config.add_tool_substitutions(tools, [config.flang_llvm_tools_dir])
 result = lit_config.params.get("LIBPGMATH")
 if result:
     config.environment["LIBPGMATH"] = True
+
+# Preserve the GCC environment for
+# Examples/hello.cpp and Lower/end-to-end-character-assignment-driver.cpp
+if 'C_INCLUDE_PATH' in os.environ:
+    config.environment['C_INCLUDE_PATH'] = os.environ.get('C_INCLUDE_PATH')
+if 'CPLUS_INCLUDE_PATH' in os.environ:
+    config.environment['CPLUS_INCLUDE_PATH'] = os.environ.get('CPLUS_INCLUDE_PATH')
