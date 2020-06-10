@@ -149,11 +149,16 @@ std::optional<char32_t> ExternalFileUnit::GetCurrentChar(
     }
     chunk = *recordLength - positionInRecord;
   }
+
+  // If reading from the terminal turn off buffering
+  if (isTerminal()) {
+    chunk = 0;
+  }
   auto at{recordOffsetInFrame_ + positionInRecord};
   std::size_t need{static_cast<std::size_t>(at + 1)};
   std::size_t want{need + chunk};
   auto got{ReadFrame(frameOffsetInFile_, want, handler)};
-  if (got <= need) {
+  if (got < need) {
     endfileRecordNumber = currentRecordNumber;
     handler.SignalEnd();
     return std::nullopt;

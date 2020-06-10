@@ -96,6 +96,7 @@ bool EditIntegerInput(
   std::optional<char32_t> next;
   bool negate{ScanNumericPrefix(io, edit, next, remaining)};
   common::UnsignedInt128 value;
+  bool intFound{false};
   for (; next; next = io.NextInField(remaining)) {
     char32_t ch{*next};
     if (ch == ' ') {
@@ -104,9 +105,16 @@ bool EditIntegerInput(
       } else {
         continue;
       }
+    } else if (ch == '\n') {
+      if (intFound) { // Check to see if an int has been found
+        break;        // yet and break if there has been,
+      } else {        // otherwise just conintue reading
+        continue;
+      }
     }
     int digit{0};
     if (ch >= '0' && ch <= '9') {
+      intFound = true;
       digit = ch - '0';
     } else {
       io.GetIoErrorHandler().SignalError(

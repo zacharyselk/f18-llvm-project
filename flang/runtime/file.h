@@ -15,6 +15,12 @@
 #include "memory.h"
 #include <cinttypes>
 #include <optional>
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace Fortran::runtime::io {
 
@@ -38,7 +44,7 @@ public:
   bool mayPosition() const { return mayPosition_; }
   void set_mayPosition(bool yes) { mayPosition_ = yes; }
   FileOffset position() const { return position_; }
-  bool isTerminal() const { return isTerminal_; }
+  bool isTerminal() const { return ::isatty(fd_) == 1; }
 
   bool IsOpen() const { return fd_ >= 0; }
   void Open(OpenStatus, Position, IoErrorHandler &);
