@@ -298,13 +298,14 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
     auto itemAddr =
         converter.genExprAddr(Fortran::semantics::GetExpr(pVar), loc);
     auto itemType = itemAddr.getType().cast<fir::ReferenceType>().getEleTy();
-    auto complexPartType = itemType.isa<fir::CplxType>()
-                               ? Fortran::lower::ComplexExprHelper{builder, loc}
-                                     .getComplexPartType(itemType)
-                               : mlir::Type{};
     auto inputFunc = getInputFunc(loc, builder, itemType);
     auto argType = inputFunc.getType().getInput(1);
     auto originalItemAddr = itemAddr;
+    mlir::Type complexPartType;
+    if (itemType.isa<fir::CplxType>())
+      complexPartType = builder.getRefType(
+          Fortran::lower::ComplexExprHelper{builder, loc}.getComplexPartType(
+              itemType));
     auto complexPartAddr = [&](int index) {
       return builder.create<fir::CoordinateOp>(
           loc, complexPartType, originalItemAddr,
