@@ -224,7 +224,8 @@ void printFirAttribute(FIROpsDialect *dialect, mlir::Attribute attr,
     a.getValue().bitcastToAPInt().toStringUnsigned(ss, 16);
     os << ss << '>';
   } else {
-    llvm_unreachable("attribute pretty-printer is not implemented");
+    // don't know how to print the attribute, so use a default
+    os << "<(unknown attribute)>";
   }
 }
 
