@@ -13,12 +13,6 @@
 #include <cstring>
 #include <fcntl.h>
 #include <stdlib.h>
-#ifdef _WIN32
-#include <io.h>
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
 
 namespace Fortran::runtime::io {
 
