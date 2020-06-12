@@ -1061,7 +1061,7 @@ def fir_EmboxOp : fir_Op<"embox", [NoSideEffect]> {
       p.printOperands(getLenParams());
       p << ')';
     }
-    if (getNumOperands() == 2) {
+    if (dims().size() > 0) {
       p << ", ";
       p.printOperands(dims());
     } else if (auto map = getAttr(layoutName())) {
@@ -1114,9 +1114,13 @@ def fir_EmboxOp : fir_Op<"embox", [NoSideEffect]> {
     operand_range getLenParams() {
       return {operand_begin(), operand_begin() + numLenParams()};
     }
+
+    // There should be 0 or 1 dims argument.
     operand_range dims() {
       return {operand_begin() + numLenParams() + 1, operand_end()};
     }
+
+    mlir::Value getDims();
   }];
 }
 
@@ -1571,6 +1575,22 @@ def fir_ArrayCoorOp : fir_Op<"array_coor", [NoSideEffect]> {
   let assemblyFormat = [{
     $ref `(` $dims `)` $coor attr-dict `:` functional-type(operands, results)
   }];
+
+  let verifier = [{
+    auto eleTy = fir::dyn_cast_ptrEleTy(ref().getType());
+    assert (eleTy && "must be a reference type");
+    auto arrTy = eleTy.dyn_cast<fir::SequenceType>();
+    if (!arrTy)
+      return emitOpError("must be a reference to an array");
+    auto dimTy = dims().getType().dyn_cast<fir::DimsType>();
+    assert (dimTy && "must be a dims type");
+    auto arrDim = arrTy.getDimension();
+    if (arrDim && arrDim != dimTy.getRank())
+      return emitOpError("rank of dimension mismatched");
+    if (dimTy.getRank() != coor().size())
+      return emitOpError("number of indices do not match dim rank");
+    return mlir::success();
+  }];
 }
 
 def fir_CoordinateOp : fir_Op<"coordinate_of", [NoSideEffect]> {
@@ -1796,10 +1816,14 @@ def fir_GenDimsOp : fir_OneResultOp<"gendims", [NoSideEffect]> {
 
   let verifier = [{
     auto size = triples().size();
-    if (size < 1 || size > 16 * 3)
+    if (size < 3 || size > 16 * 3)
       return emitOpError("incorrect number of args");
     if (size % 3 != 0)
       return emitOpError("requires a multiple of 3 args");
+    auto dimTy = getType().dyn_cast<fir::DimsType>();
+    assert(dimTy && "must be a dims type");
+    if (dimTy.getRank() * 3 != size)
+      return emitOpError("dims type rank mismatch");
     return mlir::success();
   }];
 }
@@ -1827,6 +1851,24 @@ def fir_InsertValueOp : fir_OneResultOp<"insert_value", [NoSideEffect]> {
   let arguments = (ins AnyCompositeLike:$adt, AnyType:$val,
                        Variadic<AnyComponentType>:$coor);
   let results = (outs AnyCompositeLike);
+
+  let assemblyFormat = [{
+    operands attr-dict `:` functional-type(operands, results)
+  }];
+}
+
+def fir_InsertOnRangeOp : fir_OneResultOp<"insert_on_range", [NoSideEffect]> {
+  let summary = "insert sub-value into a range on an existing sequence";
+
+  let description = [{
+    Insert a constant value into an entity with an array type. Returns a
+    new ssa value where the range of offsets from the original array have been
+    replaced with the constant. The result is an array type entity.
+  }];
+
+  let arguments = (ins fir_SequenceType:$seq, AnyType:$val,
+                       Index:$start, Index:$end);
+  let results = (outs fir_SequenceType);
 
   let assemblyFormat = [{
     operands attr-dict `:` functional-type(operands, results)
@@ -3020,6 +3062,53 @@ def fir_DTEntryOp : fir_Op<"dt_entry", []> {
   let extraClassDeclaration = [{
     static constexpr llvm::StringRef methodAttrName() { return "method"; }
     static constexpr llvm::StringRef procAttrName() { return "proc"; }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// Internal Use Ops:
+// Do not use these directly. They are special ops used for code gen.
+//===----------------------------------------------------------------------===//
+
+def fir_XEmboxOp : fir_Op<"ext_embox", []> {
+  let summary = "for internal conversion only";
+  
+  let skipDefaultBuilders = 1;
+  let builders = [OpBuilder<"OpBuilder &builder, OperationState &result,"
+    "mlir::Type type, mlir::Value memref, mlir::ValueRange lenParams,"
+    "mlir::ValueRange dims, llvm::ArrayRef<mlir::NamedAttribute> attrs">];
+
+  let arguments = (ins Variadic<AnyType>);
+  let results = (outs fir_BoxType);
+  
+  let extraClassDeclaration = [{
+    static constexpr llvm::StringRef lenParamAttrName() { return "lenparam"; }
+    static constexpr llvm::StringRef dimsAttrName() { return "dims"; }
+    static constexpr llvm::StringRef rankAttrName() { return "rank"; }
+    mlir::Operation::operand_range lenParamOperands();
+    mlir::Operation::operand_range dimsOperands();
+    unsigned getRank();
+  }];
+}
+
+def fir_XArrayCoorOp : fir_Op<"ext_array_coor", []> {
+  let summary = "for internal conversion only";
+
+  let skipDefaultBuilders = 1;
+  let builders = [OpBuilder<"OpBuilder &builder, OperationState &result,"
+    "mlir::Type type, mlir::Value memref, mlir::ValueRange dims,"
+    "mlir::ValueRange indices, llvm::ArrayRef<mlir::NamedAttribute> attrs">];
+
+  let arguments = (ins Variadic<AnyType>);
+  let results = (outs fir_ReferenceType);
+
+  let extraClassDeclaration = [{
+    static constexpr llvm::StringRef dimsAttrName() { return "dims"; }
+    static constexpr llvm::StringRef indexAttrName() { return "indices"; }
+    static constexpr llvm::StringRef rankAttrName() { return "rank"; }
+    mlir::Operation::operand_range dimsOperands();
+    mlir::Operation::operand_range indexOperands();
+    unsigned getRank();
   }];
 }
 
