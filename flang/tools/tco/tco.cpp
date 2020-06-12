@@ -11,11 +11,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "flang/Optimizer/CodeGen/CodeGen.h"
 #include "flang/Optimizer/Dialect/FIRDialect.h"
+#include "flang/Optimizer/OptPasses.h"
 #include "flang/Optimizer/Support/InternalNames.h"
 #include "flang/Optimizer/Support/KindMapping.h"
-#include "flang/Optimizer/Transforms/Passes.h"
 #include "mlir/Conversion/SCFToStandard/SCFToStandard.h"
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -92,20 +91,26 @@ static int compileFIR(const mlir::PassPipelineCLParser &passPipeline) {
   } else if (passPipeline.hasAnyOccurrences()) {
     passPipeline.addToPipeline(pm);
   } else {
-    // add all the passes
-    // the user can disable them individually
-    // convert fir dialect to affine
-    if (fir::inlinerIsEnabled())
-      pm.addPass(fir::createInlinerPass());
-    pm.addPass(fir::createPromoteToAffinePass());
-    // convert fir dialect to scf
-    pm.addPass(fir::createFirToCfgPass());
-    pm.addPass(fir::createControlFlowLoweringPass());
-    // convert scf dialect to standard
-    pm.addPass(mlir::createLowerToCFGPass());
-    // pm.addPass(fir::createMemToRegPass());
+    // simplify the IR
     pm.addPass(mlir::createCanonicalizerPass());
     pm.addPass(fir::createCSEPass());
+    if (fir::inlinerIsEnabled())
+      pm.addPass(fir::createInlinerPass());
+    pm.addPass(mlir::createCSEPass());
+
+    // convert fir dialect to affine
+    pm.addPass(fir::createPromoteToAffinePass());
+
+    // convert control flow to CFG form
+    pm.addPass(fir::createFirToCfgPass());
+    pm.addPass(fir::createControlFlowLoweringPass());
+    pm.addPass(mlir::createLowerToCFGPass());
+
+    pm.addPass(mlir::createCanonicalizerPass());
+    pm.addPass(fir::createCSEPass());
+
+    // pm.addPass(fir::createMemToRegPass());
+    pm.addPass(fir::createFirCodeGenRewritePass());
     pm.addPass(fir::createFIRToLLVMPass(uniquer));
     pm.addPass(fir::createLLVMDialectToLLVMPass(out.os()));
   }
@@ -127,7 +132,7 @@ static int compileFIR(const mlir::PassPipelineCLParser &passPipeline) {
 
 int main(int argc, char **argv) {
   fir::registerFIRPasses();
-  fir::registerOptTransformPasses();
+  fir::registerOptPasses();
   [[maybe_unused]] InitLLVM y(argc, argv);
   mlir::registerAsmPrinterCLOptions();
   mlir::registerMLIRContextCLOptions();

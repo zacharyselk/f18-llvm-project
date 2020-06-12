@@ -1899,41 +1899,6 @@ def fir_ArrayCoorOp : fir_Op<"array_coor",
   }];
 }
 
-def fir_ArrayCoorOp : fir_Op<"array_coor", [NoSideEffect]> {
-  let summary = "Find the coordinate of an element of an array";
-
-  let description = [{
-    Compute the location of an element in an array when the shape of the
-    array is only known at runtime.
-
-    This operation is intended to capture all the runtime values needed to
-    compute the address of an array reference in a single high-level op. Given
-    the following Fortran input:
-    
-    ```fortran
-      real :: a(n,m)
-      ...
-      ... a(i,j) ...
-    ```
-    
-    One can use `fir.array_coor` to determine the address of `a(i,j)`.
-    
-    ```mlir
-      %dim = fir.gendims %one, %n, %one, %one, %m, %one : (...) -> !fir.dims<2>
-      %1 = fir.array_coor %a(%dim), %i, %j : (!fir.ref<!fir.array<?x?xf32>>, ...) -> !fir.ref<f32>
-    ```
-  }];
-
-  let arguments = (ins AnyReferenceLike:$ref, fir_DimsType:$dims,
-                   Variadic<AnyIntegerType>:$coor);
-		   
-  let results = (outs fir_ReferenceType);
-  
-  let assemblyFormat = [{
-    $ref `(` $dims `)` $coor attr-dict `:` functional-type(operands, results)
-  }];
-}
-
 def fir_CoordinateOp : fir_Op<"coordinate_of", [NoSideEffect]> {
   let summary = "Finds the coordinate (location) of a value in memory";
 
