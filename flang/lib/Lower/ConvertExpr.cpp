@@ -16,9 +16,9 @@
 #include "flang/Lower/CallInterface.h"
 #include "flang/Lower/CharacterExpr.h"
 #include "flang/Lower/CharacterRuntime.h"
+#include "flang/Lower/Coarray.h"
 #include "flang/Lower/ComplexExpr.h"
 #include "flang/Lower/ConvertType.h"
-#include "flang/Lower/Image.h"
 #include "flang/Lower/IntrinsicCall.h"
 #include "flang/Lower/Runtime.h"
 #include "flang/Optimizer/Dialect/FIRDialect.h"
@@ -558,9 +558,11 @@ private:
 
   template <typename A>
   fir::ExtendedValue genval(const Fortran::evaluate::Parentheses<A> &op) {
-    auto input = genunbox(op.left());
-    assert(input && "boxed value not handled");
-    return builder.create<fir::NoReassocOp>(getLoc(), input.getType(), input);
+    auto input = genval(op.left());
+    auto base = fir::getBase(input);
+    mlir::Value newBase =
+        builder.create<fir::NoReassocOp>(getLoc(), base.getType(), base);
+    return fir::substBase(input, newBase);
   }
 
   template <int KIND>
@@ -1359,6 +1361,16 @@ mlir::Value fir::getBase(const fir::ExtendedValue &ex) {
                         [](const auto &x) { return x.getAddr(); },
                     },
                     ex.box);
+}
+
+fir::ExtendedValue fir::substBase(const fir::ExtendedValue &ex,
+                                  mlir::Value base) {
+  return std::visit(
+      Fortran::common::visitors{
+          [&](const fir::UnboxedValue &x) { return fir::ExtendedValue(base); },
+          [&](const auto &x) { return fir::ExtendedValue(x.clone(base)); },
+      },
+      ex.box);
 }
 
 llvm::raw_ostream &fir::operator<<(llvm::raw_ostream &os,

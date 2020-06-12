@@ -1,4 +1,4 @@
-//===-- Image.cpp ---------------------------------------------------------===//
+//===-- Coarray.cpp -------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -11,7 +11,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "flang/Lower/Image.h"
+#include "flang/Lower/Coarray.h"
 #include "RTBuilder.h"
 #include "SymbolMap.h"
 #include "flang/Lower/Bridge.h"

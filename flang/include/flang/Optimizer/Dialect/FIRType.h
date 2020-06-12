@@ -242,7 +242,7 @@ public:
   static bool kindof(unsigned kind) { return kind == TypeKind::FIR_DIMS; }
 
   /// returns -1 if the rank is unknown
-  int getRank() const;
+  unsigned getRank() const;
 };
 
 /// The type of a field name. Implementations may defer the layout of a Fortran

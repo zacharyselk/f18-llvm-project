@@ -180,6 +180,7 @@ SequenceType parseSequence(mlir::DialectAsmParser &parser, mlir::Location) {
 
 /// Is `ty` a standard or FIR integer type?
 static bool isaIntegerType(mlir::Type ty) {
+  // TODO: why aren't we using isa_integer? investigatation required.
   return ty.isa<mlir::IntegerType>() || ty.isa<fir::IntType>();
 }
 
@@ -385,24 +386,22 @@ struct DimsTypeStorage : public mlir::TypeStorage {
 
   static unsigned hashKey(const KeyTy &key) { return llvm::hash_combine(key); }
 
-  bool operator==(const KeyTy &key) const {
-    return key == static_cast<unsigned>(getRank());
-  }
+  bool operator==(const KeyTy &key) const { return key == getRank(); }
 
   static DimsTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
-                                    int rank) {
+                                    unsigned rank) {
     auto *storage = allocator.allocate<DimsTypeStorage>();
     return new (storage) DimsTypeStorage{rank};
   }
 
-  int getRank() const { return rank; }
+  unsigned getRank() const { return rank; }
 
 protected:
-  int rank;
+  unsigned rank;
 
 private:
   DimsTypeStorage() = delete;
-  explicit DimsTypeStorage(int rank) : rank{rank} {}
+  explicit DimsTypeStorage(unsigned rank) : rank{rank} {}
 };
 
 /// The type of a derived type part reference
@@ -875,7 +874,7 @@ DimsType fir::DimsType::get(mlir::MLIRContext *ctxt, unsigned rank) {
   return Base::get(ctxt, FIR_DIMS, rank);
 }
 
-int fir::DimsType::getRank() const { return getImpl()->getRank(); }
+unsigned fir::DimsType::getRank() const { return getImpl()->getRank(); }
 
 // Field
 

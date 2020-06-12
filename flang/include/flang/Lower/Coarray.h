@@ -1,20 +1,13 @@
-//===-- Lower/Image.h -- image related lowering -----------------*- C++ -*-===//
+//===-- Lower/Coarray.h -- image related lowering ---------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Builder routines for constructing the FIR dialect of MLIR. As FIR is a
-// dialect of MLIR, it makes extensive use of MLIR interfaces and MLIR's coding
-// style (https://mlir.llvm.org/getting_started/DeveloperGuide/) is used in this
-// module.
-//
-//===----------------------------------------------------------------------===//
 
-#ifndef FORTRAN_LOWER_IMAGE_H
-#define FORTRAN_LOWER_IMAGE_H
+#ifndef FORTRAN_LOWER_COARRAY_H
+#define FORTRAN_LOWER_COARRAY_H
 
 #include "flang/Lower/AbstractConverter.h"
 #include "flang/Lower/Support/BoxValue.h"
@@ -33,7 +26,9 @@ class CoarrayRef;
 } // namespace evaluate
 
 namespace lower {
+
 class SymMap;
+
 namespace pft {
 struct Evaluation;
 } // namespace pft
@@ -80,4 +75,4 @@ private:
 } // namespace lower
 } // namespace Fortran
 
-#endif // FORTRAN_LOWER_IMAGE_H
+#endif // FORTRAN_LOWER_COARRAY_H
