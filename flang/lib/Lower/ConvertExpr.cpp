@@ -225,19 +225,29 @@ private:
   mlir::Value createCharCompare(mlir::CmpIPredicate pred,
                                 const fir::ExtendedValue &left,
                                 const fir::ExtendedValue &right) {
-    if (auto *lhs = left.getUnboxed())
-      if (auto *rhs = right.getUnboxed())
+    if (auto *lhs = left.getUnboxed()) {
+      if (auto *rhs = right.getUnboxed()) {
         return Fortran::lower::genBoxCharCompare(converter, getLoc(), pred,
                                                  *lhs, *rhs);
-    if (auto *lhs = left.getCharBox())
+      } else if (auto *rhs = right.getCharBox()) {
+        return Fortran::lower::genBoxCharCompare(converter, getLoc(), pred,
+                                                 *lhs, rhs->getBuffer());
+      }
+    }
+    if (auto *lhs = left.getCharBox()) {
       if (auto *rhs = right.getCharBox()) {
         // FIXME: this should be passing the CharBoxValues and not just a buffer
         // addresses
         return Fortran::lower::genBoxCharCompare(
             converter, getLoc(), pred, lhs->getBuffer(), rhs->getBuffer());
+      } else if (auto *rhs = right.getUnboxed()) {
+        return Fortran::lower::genBoxCharCompare(converter, getLoc(), pred,
+                                                 lhs->getBuffer(), *rhs);
       }
-    // TODO: implement this
-    mlir::emitError(getLoc(), "TODO #119: unhandled character comparison");
+    }
+
+    // Error if execution reaches this point
+    mlir::emitError(getLoc(), "Unhandled character comparison");
     exit(1);
   }
 
