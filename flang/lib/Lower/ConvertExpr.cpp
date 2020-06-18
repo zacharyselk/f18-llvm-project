@@ -316,8 +316,28 @@ private:
   fir::ExtendedValue genval(const Fortran::evaluate::BOZLiteralConstant &) {
     TODO();
   }
-  fir::ExtendedValue genval(const Fortran::evaluate::ProcedureDesignator &) {
-    TODO();
+  fir::ExtendedValue
+  genval(const Fortran::evaluate::ProcedureDesignator &proc) {
+    const auto *symbol = proc.GetSymbol();
+    // TODO: non restricted specific intrinsics, needs to get runtime symbol,
+    // or think of something else.
+    if (!symbol)
+      TODO();
+    if (Fortran::semantics::IsDummy(*symbol)) {
+      auto val = symMap.lookupSymbol(*symbol);
+      assert(val && "Dummy procedure not in symbol map");
+      return val;
+    }
+    auto name = converter.mangleName(*symbol);
+    auto func = builder.getNamedFunction(name);
+    // TODO: If this is an external not called/defined in this file
+    // (e.g, it is just being passed as a dummy procedure argument)
+    // we need to create a funcOp for it with the interface we have.
+    if (!func)
+      TODO();
+    mlir::Value funcPtr = builder.create<mlir::ConstantOp>(
+        getLoc(), func.getType(), builder.getSymbolRefAttr(name));
+    return funcPtr;
   }
   fir::ExtendedValue genval(const Fortran::evaluate::NullPointer &) { TODO(); }
   fir::ExtendedValue genval(const Fortran::evaluate::StructureConstructor &) {
@@ -1143,7 +1163,6 @@ private:
     // evaluate::IntrinsicProcTable is required to use it.
     Fortran::lower::CallerInterface caller(procRef, converter);
     using PassBy = Fortran::lower::CallerInterface::PassEntityBy;
-    auto func = caller.getFuncOp();
 
     for (const auto &arg : caller.getPassedArguments()) {
       const auto *actual = arg.entity;
@@ -1162,7 +1181,8 @@ private:
         auto exv = genval(*expr);
         // FIXME: should use the box values, etc.
         argVal = fir::getBase(exv);
-        if (fir::isa_passbyref_type(argVal.getType())) {
+        auto type = argVal.getType();
+        if (fir::isa_passbyref_type(type) || type.isa<mlir::FunctionType>()) {
           argRef = argVal;
           argVal = {};
         }
@@ -1220,26 +1240,40 @@ private:
       }
     }
 
+    mlir::Value funcPointer;
+    mlir::SymbolRefAttr funcSymbolAttr;
+    if (const auto *sym = caller.getIfIndirectCallSymbol()) {
+      funcPointer = symMap.lookupSymbol(*sym);
+      assert(funcPointer &&
+             "dummy procedure or procedure pointer not in symbol map");
+    } else {
+      funcSymbolAttr = builder.getSymbolRefAttr(caller.getMangledName());
+    }
+
+    auto funcType =
+        funcPointer ? caller.genFunctionType() : caller.getFuncOp().getType();
+    llvm::SmallVector<mlir::Value, 8> operands;
+    // First operand of indirect call is the function pointer. Cast it to
+    // required function type for the call to handle procedures that have a
+    // compatible interface in Fortran, but that have different signatures in
+    // FIR.
+    if (funcPointer)
+      operands.push_back(
+          builder.createConvert(getLoc(), funcType, funcPointer));
     // In older Fortran, procedure argument types are inferenced. Deal with
     // the potential mismatches by adding casts to the arguments when the
     // inferenced types do not match exactly.
-    llvm::SmallVector<mlir::Value, 8> operands;
-    for (const auto &op :
-         llvm::zip(caller.getInputs(), func.getType().getInputs())) {
+    for (const auto &op : llvm::zip(caller.getInputs(), funcType.getInputs())) {
       auto cast = builder.convertWithSemantics(getLoc(), std::get<1>(op),
                                                std::get<0>(op));
       operands.push_back(cast);
     }
 
-    // Actually place the call
-    auto call = builder.create<fir::CallOp>(
-        getLoc(), caller.getResultType(),
-        builder.getSymbolRefAttr(caller.getMangledName()), operands);
-
+    auto call = builder.create<fir::CallOp>(getLoc(), caller.getResultType(),
+                                            funcSymbolAttr, operands);
     // Handle case where result was passed as argument
     if (caller.getPassedResult())
       return resRef;
-
     if (resultType.size() == 0)
       return {}; // subroutine call
     // For now, Fortran returned values are implemented with a single MLIR

@@ -832,6 +832,9 @@ bool isa_std_type(mlir::Type t) {
 }
 
 bool isa_fir_or_std_type(mlir::Type t) {
+  if (auto funcType = t.dyn_cast<mlir::FunctionType>())
+    return llvm::all_of(funcType.getInputs(), isa_fir_or_std_type) &&  
+      llvm::all_of(funcType.getResults(), isa_fir_or_std_type);
   return isa_fir_type(t) || isa_std_type(t);
 }
 
