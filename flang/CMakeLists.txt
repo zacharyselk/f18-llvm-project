@@ -35,7 +35,13 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 include(AddFlang)
 
-option(FLANG_ENABLE_WERROR "Fail and stop building flang if a warning is triggered." OFF)
+if (MSVC)
+  set(_FLANG_ENABLE_WERROR_DEFAULT OFF)
+else ()
+  set(_FLANG_ENABLE_WERROR_DEFAULT "${LLVM_ENABLE_WERROR}")
+endif()
+option(FLANG_ENABLE_WERROR "Fail and stop building flang if a warning is triggered."
+       "${_FLANG_ENABLE_WERROR_DEFAULT}")
 
 # Check for a standalone build and configure as appropriate from
 # there.
@@ -306,6 +312,9 @@ if (FLANG_ENABLE_WERROR)
     append("-Werror" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
     append("-Wno-error" CMAKE_REQUIRED_FLAGS)
   endif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
+  if (NOT LLVM_ENABLE_WERROR)
+      message(WARNING "FLANG_ENABLE_WERROR setting is different from LLVM_ENABLE_WERROR.")
+  endif()
 endif()
 
 # Builtin check_cxx_compiler_flag doesn't seem to work correctly
