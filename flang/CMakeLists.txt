@@ -38,7 +38,7 @@ include(AddFlang)
 if (MSVC)
   set(_FLANG_ENABLE_WERROR_DEFAULT OFF)
 else ()
-  set(_FLANG_ENABLE_WERROR_DEFAULT ON)
+  set(_FLANG_ENABLE_WERROR_DEFAULT "${LLVM_ENABLE_WERROR}")
 endif()
 option(FLANG_ENABLE_WERROR "Fail and stop building flang if a warning is triggered."
        "${_FLANG_ENABLE_WERROR_DEFAULT}")
