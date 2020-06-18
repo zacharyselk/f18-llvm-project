@@ -352,8 +352,8 @@ static void genIoLoop(Fortran::lower::AbstractConverter &converter,
   auto parentInsertPt = builder.saveInsertionPoint();
   const auto &itemList = std::get<0>(ioImpliedDo.t);
   const auto &control = std::get<1>(ioImpliedDo.t);
-  const Fortran::semantics::Symbol *loopSym = control.name.thing.thing.symbol;
-  auto loopVar = converter.lookupSymbol(*loopSym);
+  const auto &loopSym = *control.name.thing.thing.symbol;
+  auto loopVar = converter.getSymbolAddress(loopSym);
   auto genFIRLoopIndex = [&](const Fortran::parser::ScalarIntExpr &expr) {
     return builder.createConvert(
         loc, builder.getIndexType(),
@@ -377,7 +377,7 @@ static void genIoLoop(Fortran::lower::AbstractConverter &converter,
     auto loopOp =
         builder.create<fir::LoopOp>(loc, lowerValue, upperValue, stepValue);
     builder.setInsertionPointToStart(loopOp.getBody());
-    auto lcv = builder.createConvert(loc, converter.genType(*loopSym),
+    auto lcv = builder.createConvert(loc, converter.genType(loopSym),
                                      loopOp.getInductionVar());
     builder.create<fir::StoreOp>(loc, lcv, loopVar);
     insertPt = builder.saveInsertionPoint();
@@ -391,7 +391,7 @@ static void genIoLoop(Fortran::lower::AbstractConverter &converter,
   fir::IterWhileOp iterWhileOp = builder.create<fir::IterWhileOp>(
       loc, lowerValue, upperValue, stepValue, ok);
   builder.setInsertionPointToStart(iterWhileOp.getBody());
-  auto lcv = builder.createConvert(loc, converter.genType(*loopSym),
+  auto lcv = builder.createConvert(loc, converter.genType(loopSym),
                                    iterWhileOp.getInductionVar());
   builder.create<fir::StoreOp>(loc, lcv, loopVar);
   insertPt = builder.saveInsertionPoint();
