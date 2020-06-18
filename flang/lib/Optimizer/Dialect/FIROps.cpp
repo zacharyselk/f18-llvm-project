@@ -203,12 +203,9 @@ static mlir::ParseResult parseCallOp(mlir::OpAsmParser &parser,
   } else {
     auto funcArgs =
         llvm::ArrayRef<mlir::OpAsmParser::OperandType>(operands).drop_front();
-    llvm::SmallVector<mlir::Value, 8> resultArgs(
-        result.operands.begin() + (result.operands.empty() ? 0 : 1),
-        result.operands.end());
     if (parser.resolveOperand(operands[0], funcType, result.operands) ||
         parser.resolveOperands(funcArgs, funcType.getInputs(),
-                               parser.getNameLoc(), resultArgs))
+                               parser.getNameLoc(), result.operands))
       return mlir::failure();
   }
   result.addTypes(funcType.getResults());
