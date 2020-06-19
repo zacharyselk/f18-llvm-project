@@ -12,9 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "flang/Lower/Coarray.h"
-#include "RTBuilder.h"
 #include "SymbolMap.h"
-#include "flang/Lower/Bridge.h"
+#include "flang/Lower/AbstractConverter.h"
 #include "flang/Lower/FIRBuilder.h"
 #include "flang/Parser/parse-tree.h"
 #include "flang/Semantics/expression.h"
@@ -64,6 +63,7 @@ void Fortran::lower::genFormTeamStatement(
 
 Fortran::lower::ExValue Fortran::lower::CoarrayExprHelper::genAddr(
     const Fortran::evaluate::CoarrayRef &expr) {
+  (void)symMap;
   TODO("co-array address");
 }
 
