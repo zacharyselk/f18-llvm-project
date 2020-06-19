@@ -61,13 +61,13 @@ void Fortran::lower::genFormTeamStatement(
 // COARRAY expressions
 //===----------------------------------------------------------------------===//
 
-Fortran::lower::ExValue Fortran::lower::CoarrayExprHelper::genAddr(
+fir::ExtendedValue Fortran::lower::CoarrayExprHelper::genAddr(
     const Fortran::evaluate::CoarrayRef &expr) {
   (void)symMap;
   TODO("co-array address");
 }
 
-Fortran::lower::ExValue Fortran::lower::CoarrayExprHelper::genValue(
+fir::ExtendedValue Fortran::lower::CoarrayExprHelper::genValue(
     const Fortran::evaluate::CoarrayRef &expr) {
   TODO("co-array value");
 }

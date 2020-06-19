@@ -61,10 +61,10 @@ public:
   CoarrayExprHelper(const CoarrayExprHelper &) = delete;
 
   /// Generate the address of a co-array expression.
-  ExValue genAddr(const evaluate::CoarrayRef &expr);
+  fir::ExtendedValue genAddr(const evaluate::CoarrayRef &expr);
 
   /// Generate the value of a co-array expression.
-  ExValue genValue(const evaluate::CoarrayRef &expr);
+  fir::ExtendedValue genValue(const evaluate::CoarrayRef &expr);
 
 private:
   AbstractConverter &converter;
