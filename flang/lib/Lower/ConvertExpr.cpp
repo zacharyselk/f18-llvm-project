@@ -261,7 +261,7 @@ private:
     return std::visit(
         Fortran::common::visitors{
             [](const Fortran::lower::SymbolBox::Intrinsic &box) -> T {
-              return box.addr;
+              return box.getAddr();
             },
             [](const auto &box) -> T { return box; },
             [](const Fortran::lower::SymbolBox::None &) -> T {
@@ -926,14 +926,14 @@ private:
     auto one = builder.createIntegerConstant(getLoc(), idxTy, 1);
     auto zero = builder.createIntegerConstant(getLoc(), idxTy, 0);
     auto getLB = [&](const auto &arr, unsigned dim) -> mlir::Value {
-      return arr.lbounds.empty() ? one : arr.lbounds[dim];
+      return arr.getLBounds().empty() ? one : arr.getLBounds()[dim];
     };
     auto genFullDim = [&](const auto &arr, mlir::Value delta) -> mlir::Value {
       mlir::Value total = zero;
-      assert(arr.extents.size() == aref.subscript().size());
+      assert(arr.getExtents().size() == aref.subscript().size());
       unsigned idx = 0;
       unsigned dim = 0;
-      for (const auto &pair : llvm::zip(arr.extents, aref.subscript())) {
+      for (const auto &pair : llvm::zip(arr.getExtents(), aref.subscript())) {
         auto subVal = genComponent(std::get<1>(pair));
         if (auto *trip = std::get_if<fir::RangeBoxValue>(&subVal)) {
           // access A(i:j:k), decl A(m:n), iterspace (t1..)
@@ -981,7 +981,7 @@ private:
               return genFullDim(arr, one);
             },
             [&](const Fortran::lower::SymbolBox::CharFullDim &arr) {
-              return genFullDim(arr, arr.len);
+              return genFullDim(arr, arr.getLen());
             },
             [&](const Fortran::lower::SymbolBox::Derived &arr) {
               TODO();
@@ -1383,7 +1383,7 @@ llvm::raw_ostream &fir::operator<<(llvm::raw_ostream &os,
 llvm::raw_ostream &fir::operator<<(llvm::raw_ostream &os,
                                    const fir::ArrayBoxValue &box) {
   os << "boxarray { addr: " << box.getAddr();
-  if (box.lbounds.size()) {
+  if (box.getLBounds().size()) {
     os << ", lbounds: [";
     llvm::interleaveComma(box.getLBounds(), os);
     os << "]";
@@ -1399,7 +1399,7 @@ llvm::raw_ostream &fir::operator<<(llvm::raw_ostream &os,
 llvm::raw_ostream &fir::operator<<(llvm::raw_ostream &os,
                                    const fir::CharArrayBoxValue &box) {
   os << "boxchararray { addr: " << box.getAddr() << ", len : " << box.getLen();
-  if (box.lbounds.size()) {
+  if (box.getLBounds().size()) {
     os << ", lbounds: [";
     llvm::interleaveComma(box.getLBounds(), os);
     os << "]";
@@ -1415,21 +1415,21 @@ llvm::raw_ostream &fir::operator<<(llvm::raw_ostream &os,
 llvm::raw_ostream &fir::operator<<(llvm::raw_ostream &os,
                                    const fir::BoxValue &box) {
   os << "box { addr: " << box.getAddr();
-  if (box.len)
-    os << ", size: " << box.len;
+  if (box.getLen())
+    os << ", size: " << box.getLen();
   if (box.params.size()) {
     os << ", type params: [";
     llvm::interleaveComma(box.params, os);
     os << "]";
   }
-  if (box.lbounds.size()) {
+  if (box.getLBounds().size()) {
     os << ", lbounds: [";
-    llvm::interleaveComma(box.lbounds, os);
+    llvm::interleaveComma(box.getLBounds(), os);
     os << "]";
   }
-  if (box.extents.size()) {
+  if (box.getExtents().size()) {
     os << ", shape: [";
-    llvm::interleaveComma(box.extents, os);
+    llvm::interleaveComma(box.getExtents(), os);
     os << "]";
   }
   os << "}";
