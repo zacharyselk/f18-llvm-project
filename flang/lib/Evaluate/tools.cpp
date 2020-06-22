@@ -957,6 +957,21 @@ bool IsFunction(const Symbol &symbol) {
       symbol.details());
 }
 
+bool IsProcedure(const Symbol &symbol) {
+  return std::visit(
+      common::visitors{
+          [](const SubprogramDetails &) { return true; },
+          [](const SubprogramNameDetails &) { return true; },
+          [](const ProcEntityDetails &) { return true; },
+          [](const GenericDetails &) { return true; },
+          [](const ProcBindingDetails &) { return true; },
+          [](const UseDetails &x) { return IsProcedure(x.symbol()); },
+          // TODO: FinalProcDetails?
+          [](const auto &) { return false; },
+      },
+      symbol.details());
+}
+
 const Symbol *FindCommonBlockContaining(const Symbol &object) {
   const auto *details{object.detailsIf<ObjectEntityDetails>()};
   return details ? details->commonBlock() : nullptr;
