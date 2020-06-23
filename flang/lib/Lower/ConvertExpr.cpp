@@ -518,15 +518,14 @@ private:
   fir::ExtendedValue
   genval(const Fortran::evaluate::Extremum<Fortran::evaluate::Type<TC, KIND>>
              &op) {
-    std::string name =
-        op.ordering == Fortran::evaluate::Ordering::Greater ? "max"s : "min"s;
-    auto type = converter.genType(TC, KIND);
+    bool isMax = op.ordering == Fortran::evaluate::Ordering::Greater;
     auto lhs = genunbox(op.left());
     auto rhs = genunbox(op.right());
     assert(lhs && rhs && "boxed value not handled");
     llvm::SmallVector<mlir::Value, 2> operands{lhs, rhs};
-    return Fortran::lower::IntrinsicCallOpsHelper{builder, getLoc()}
-        .genIntrinsicCall(name, type, operands);
+    Fortran::lower::IntrinsicCallOpsHelper helper(builder, getLoc());
+
+    return isMax ? helper.genMax(operands) : helper.genMin(operands);
   }
 
   template <int KIND>
@@ -1099,14 +1098,14 @@ private:
     TODO(); // Derived type functions (user + intrinsics)
   }
 
-  mlir::Value
+  fir::ExtendedValue
   genIntrinsicRef(const Fortran::evaluate::ProcedureRef &procRef,
                   const Fortran::evaluate::SpecificIntrinsic &intrinsic,
                   mlir::ArrayRef<mlir::Type> resultType) {
     if (resultType.size() != 1)
       TODO(); // Intrinsic subroutine
 
-    llvm::SmallVector<mlir::Value, 2> operands;
+    llvm::SmallVector<fir::ExtendedValue, 2> operands;
     // Lower arguments
     // For now, logical arguments for intrinsic are lowered to `fir.logical`
     // so that TRANSFER can work. For some arguments, it could lead to useless
@@ -1116,11 +1115,9 @@ private:
     for (const auto &arg : procRef.arguments()) {
       if (auto *expr = Fortran::evaluate::UnwrapExpr<
               Fortran::evaluate::Expr<Fortran::evaluate::SomeType>>(arg)) {
-        auto x = genval(*expr);
-        auto arg = fir::getBase(x);
-        operands.push_back(arg);
+        operands.emplace_back(genval(*expr));
       } else {
-        operands.push_back(nullptr); // optional
+        operands.emplace_back(mlir::Value{}); // optional
       }
     }
     // Let the intrinsic library lower the intrinsic procedure call
@@ -1146,8 +1143,9 @@ private:
     return false;
   }
 
-  mlir::Value genProcedureRef(const Fortran::evaluate::ProcedureRef &procRef,
-                              mlir::ArrayRef<mlir::Type> resultType) {
+  fir::ExtendedValue
+  genProcedureRef(const Fortran::evaluate::ProcedureRef &procRef,
+                  mlir::ArrayRef<mlir::Type> resultType) {
     if (const auto *intrinsic = procRef.proc().GetSpecificIntrinsic())
       return genIntrinsicRef(procRef, *intrinsic, resultType[0]);
 
@@ -1277,7 +1275,7 @@ private:
     if (caller.getPassedResult())
       return resRef;
     if (resultType.size() == 0)
-      return {}; // subroutine call
+      return mlir::Value{}; // subroutine call
     // For now, Fortran returned values are implemented with a single MLIR
     // function return value.
     assert(call.getNumResults() == 1 &&

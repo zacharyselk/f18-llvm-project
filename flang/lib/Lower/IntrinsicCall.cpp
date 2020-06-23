@@ -183,8 +183,9 @@ struct IntrinsicLibrary {
 
   /// Generate FIR for call to Fortran intrinsic \p name with arguments \p arg
   /// and expected result type \p resultType.
-  mlir::Value genIntrinsicCall(llvm::StringRef name, mlir::Type resultType,
-                               llvm::ArrayRef<mlir::Value> arg);
+  fir::ExtendedValue genIntrinsicCall(llvm::StringRef name,
+                                      mlir::Type resultType,
+                                      llvm::ArrayRef<fir::ExtendedValue> arg);
 
   /// Search a runtime function that is associated to the generic intrinsic name
   /// and whose signature matches the intrinsic arguments and result types.
@@ -210,7 +211,8 @@ struct IntrinsicLibrary {
   mlir::Value genIchar(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genIEOr(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genIOr(mlir::Type, llvm::ArrayRef<mlir::Value>);
-  mlir::Value genLenTrim(mlir::Type, llvm::ArrayRef<mlir::Value>);
+  fir::ExtendedValue genLenTrim(mlir::Type, llvm::ArrayRef<fir::ExtendedValue>);
+  // mlir::Value genLenTrim(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genMerge(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genMod(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genNint(mlir::Type, llvm::ArrayRef<mlir::Value>);
@@ -222,7 +224,9 @@ struct IntrinsicLibrary {
 
   /// Define the different FIR generators that can be mapped to intrinsic to
   /// generate the related code.
-  using Generator = decltype(&IntrinsicLibrary::genAbs);
+  using ElementalGenerator = decltype(&IntrinsicLibrary::genAbs);
+  using ExtendedGenerator = decltype(&IntrinsicLibrary::genLenTrim);
+  using Generator = std::variant<ElementalGenerator, ExtendedGenerator>;
 
   /// All generators can be outlined. This will build a function named
   /// "fir."+ <generic name> + "." + <result type code> and generate the
@@ -230,9 +234,15 @@ struct IntrinsicLibrary {
   /// This can be used to keep the FIR more readable. Only one function will
   /// be generated for all the similar calls in a program.
   /// If the Generator is nullptr, the wrapper uses genRuntimeCall.
-  mlir::Value outlineInWrapper(Generator, llvm::StringRef name,
+  mlir::Value outlineInWrapper(ElementalGenerator g, llvm::StringRef name,
                                mlir::Type resultType,
                                llvm::ArrayRef<mlir::Value> args);
+
+  /// Generate calls to ElementalGenerator, handling the elemental aspects
+  fir::ExtendedValue genElementalCall(ElementalGenerator, llvm::StringRef name,
+                                      mlir::Type resultType,
+                                      llvm::ArrayRef<fir::ExtendedValue> args,
+                                      bool outline);
 
   Fortran::lower::FirOpBuilder &builder;
   mlir::Location loc;
@@ -245,6 +255,7 @@ struct IntrinsicLibrary {
 struct IntrinsicHandler {
   const char *name;
   IntrinsicLibrary::Generator generator;
+  bool isElemental = true;
   /// Code heavy intrinsic can be outlined to make FIR
   /// more readable.
   bool outline = false;
@@ -657,24 +668,49 @@ static std::string getIntrinsicWrapperName(const llvm::StringRef &intrinsic,
 // IntrinsicLibrary
 //===----------------------------------------------------------------------===//
 
-mlir::Value
+fir::ExtendedValue IntrinsicLibrary::genElementalCall(
+    ElementalGenerator generator, llvm::StringRef name, mlir::Type resultType,
+    llvm::ArrayRef<fir::ExtendedValue> args, bool outline) {
+  llvm::SmallVector<mlir::Value, 2> scalarArgs;
+  for (const auto &arg : args) {
+    if (arg.getUnboxed() || arg.getCharBox()) {
+      scalarArgs.emplace_back(fir::getBase(arg));
+    } else {
+      // TODO: get the result shape and create the loop...
+      mlir::emitError(loc, "array or descriptor not yet handled in elemental "
+                           "intrinsic lowering");
+      exit(1);
+    }
+  }
+  return outline || !generator
+             ? outlineInWrapper(generator, name, resultType, scalarArgs)
+             : std::invoke(generator, *this, resultType, scalarArgs);
+}
+
+fir::ExtendedValue
 IntrinsicLibrary::genIntrinsicCall(llvm::StringRef name, mlir::Type resultType,
-                                   llvm::ArrayRef<mlir::Value> args) {
+                                   llvm::ArrayRef<fir::ExtendedValue> args) {
   for (auto &handler : handlers)
     if (name == handler.name) {
-      assert(handler.generator != nullptr);
-      return handler.outline || outlineAllIntrinsics
-                 ? outlineInWrapper(handler.generator, name, resultType, args)
-                 : std::invoke(handler.generator, *this, resultType, args);
+      bool outline = handler.outline || outlineAllIntrinsics;
+      if (const auto *elementalGenerator =
+              std::get_if<ElementalGenerator>(&handler.generator))
+        return genElementalCall(*elementalGenerator, name, resultType, args,
+                                outline);
+      // Some extended generator are also elemental
+      const auto &generator = std::get<ExtendedGenerator>(handler.generator);
+      // TODO: Handle wrappers for calls with ExtendedValue
+      return std::invoke(generator, *this, resultType, args);
     }
+
   // Try the runtime if no special handler was defined for the
-  // intrinsic being called.
-  return outlineInWrapper(nullptr, name, resultType, args);
+  // intrinsic being called. Maths runtime only has numerical elemental.
+  return genElementalCall(nullptr, name, resultType, args, true);
 }
 
 mlir::Value
-IntrinsicLibrary::outlineInWrapper(Generator generator, llvm::StringRef name,
-                                   mlir::Type resultType,
+IntrinsicLibrary::outlineInWrapper(ElementalGenerator generator,
+                                   llvm::StringRef name, mlir::Type resultType,
                                    llvm::ArrayRef<mlir::Value> args) {
   auto funcType = getFunctionType(resultType, args, builder);
   std::string wrapperName = getIntrinsicWrapperName(name, funcType);
@@ -786,7 +822,7 @@ mlir::Value IntrinsicLibrary::genAbs(mlir::Type resultType,
     auto parts =
         Fortran::lower::ComplexExprHelper{builder, loc}.extractParts(arg);
     llvm::SmallVector<mlir::Value, 2> args = {parts.first, parts.second};
-    return genIntrinsicCall("hypot", resultType, args);
+    return genRuntimeCall("hypot", resultType, args);
   }
   llvm_unreachable("unexpected type in ABS argument");
 }
@@ -916,12 +952,13 @@ mlir::Value IntrinsicLibrary::genIOr(mlir::Type resultType,
 }
 
 // LEN_TRIM
-mlir::Value IntrinsicLibrary::genLenTrim(mlir::Type resultType,
-                                         llvm::ArrayRef<mlir::Value> args) {
+fir::ExtendedValue
+IntrinsicLibrary::genLenTrim(mlir::Type resultType,
+                             llvm::ArrayRef<fir::ExtendedValue> args) {
   // Optional KIND argument reflected in result type.
   assert(args.size() >= 1);
   Fortran::lower::CharacterExprHelper helper{builder, loc};
-  auto len = helper.createLenTrim(args[0]);
+  auto len = helper.createLenTrim(fir::getBase(args[0]));
   return builder.createConvert(loc, resultType, len);
 }
 
@@ -1053,9 +1090,9 @@ mlir::Value IntrinsicLibrary::genExtremum(mlir::Type,
 // IntrinsicCallOpsHelper
 //===----------------------------------------------------------------------===//
 
-mlir::Value Fortran::lower::IntrinsicCallOpsHelper::genIntrinsicCall(
+fir::ExtendedValue Fortran::lower::IntrinsicCallOpsHelper::genIntrinsicCall(
     llvm::StringRef name, mlir::Type resultType,
-    llvm::ArrayRef<mlir::Value> args) {
+    llvm::ArrayRef<fir::ExtendedValue> args) {
   return IntrinsicLibrary{builder, loc}.genIntrinsicCall(name, resultType,
                                                          args);
 }
