@@ -40,10 +40,10 @@ mlir::Type Fortran::lower::FirOpBuilder::getRefType(mlir::Type eleTy) {
 
 mlir::Value
 Fortran::lower::FirOpBuilder::createNullConstant(mlir::Location loc) {
-  auto indexType{this->getIndexType()};
-  auto zero{this->createIntegerConstant(loc, indexType, 0)};
-  auto noneRefType{this->getRefType(this->getNoneType())};
-  return this->createConvert(loc, noneRefType, zero);
+  auto indexType = getIndexType();
+  auto zero = createIntegerConstant(loc, indexType, 0);
+  auto noneRefType = getRefType(getNoneType());
+  return createConvert(loc, noneRefType, zero);
 }
 
 mlir::Value Fortran::lower::FirOpBuilder::createIntegerConstant(
