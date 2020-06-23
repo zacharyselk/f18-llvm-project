@@ -339,7 +339,9 @@ private:
         getLoc(), func.getType(), builder.getSymbolRefAttr(name));
     return funcPtr;
   }
-  fir::ExtendedValue genval(const Fortran::evaluate::NullPointer &) { TODO(); }
+  fir::ExtendedValue genval(const Fortran::evaluate::NullPointer &) {
+    return builder.createNullConstant(location);
+  }
   fir::ExtendedValue genval(const Fortran::evaluate::StructureConstructor &) {
     TODO();
   }
