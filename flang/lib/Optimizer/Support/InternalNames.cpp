@@ -7,7 +7,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "flang/Optimizer/Support/InternalNames.h"
+#include "flang/Optimizer/Dialect/FIRType.h"
 #include "mlir/IR/Diagnostics.h"
+#include "mlir/IR/StandardTypes.h"
 #include "llvm/Support/CommandLine.h"
 
 static llvm::cl::opt<std::string> mainEntryName(
@@ -273,4 +275,50 @@ fir::NameUniquer::deconstruct(llvm::StringRef uniq) {
     return {nk, DeconstructedName(modules, host, name, kinds)};
   }
   return {NameKind::NOT_UNIQUED, DeconstructedName(uniq)};
+}
+
+//===----------------------------------------------------------------------===//
+// Intrinsic Procedure Mangling
+//===----------------------------------------------------------------------===//
+
+/// Helper to encode type into string for intrinsic procedure names.
+/// Note: mlir has Type::dump(ostream) methods but it may add "!" that is not
+/// suitable for function names.
+static std::string typeToString(mlir::Type t) {
+  if (auto refT{t.dyn_cast<fir::ReferenceType>()})
+    return "ref_" + typeToString(refT.getEleTy());
+  if (auto i{t.dyn_cast<mlir::IntegerType>()}) {
+    return "i" + std::to_string(i.getWidth());
+  }
+  if (auto cplx{t.dyn_cast<fir::CplxType>()}) {
+    return "z" + std::to_string(cplx.getFKind());
+  }
+  if (auto real{t.dyn_cast<fir::RealType>()}) {
+    return "r" + std::to_string(real.getFKind());
+  }
+  if (auto f{t.dyn_cast<mlir::FloatType>()}) {
+    return "f" + std::to_string(f.getWidth());
+  }
+  if (auto logical{t.dyn_cast<fir::LogicalType>()}) {
+    return "l" + std::to_string(logical.getFKind());
+  }
+  if (auto character{t.dyn_cast<fir::CharacterType>()}) {
+    return "c" + std::to_string(character.getFKind());
+  }
+  if (auto boxCharacter{t.dyn_cast<fir::BoxCharType>()}) {
+    return "bc" + std::to_string(boxCharacter.getEleTy().getFKind());
+  }
+  llvm_unreachable("no mangling for type");
+}
+
+std::string fir::mangleIntrinsicProcedure(llvm::StringRef intrinsic,
+                                          mlir::FunctionType funTy) {
+  std::string name{"fir." + intrinsic.str() + "."};
+  assert(funTy.getNumResults() == 1 && "only function mangling supported");
+  name += typeToString(funTy.getResult(0));
+  auto e = funTy.getNumInputs();
+  for (decltype(e) i = 0; i < e; ++i) {
+    name += "." + typeToString(funTy.getInput(i));
+  }
+  return name;
 }
