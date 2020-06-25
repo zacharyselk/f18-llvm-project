@@ -711,6 +711,7 @@ private:
     // Convert Ev::ConstantSubs to SequenceType::Shape
     fir::SequenceType::Shape shape(con.shape().begin(), con.shape().end());
     auto arrayTy = fir::SequenceType::get(shape, converter.genType(TC, KIND));
+    auto eleTy = arrayTy.getEleTy();
     auto idxTy = builder.getIndexType();
     mlir::Value array = builder.create<fir::UndefOp>(getLoc(), arrayTy);
     Fortran::evaluate::ConstantSubscripts subscripts = con.lbounds();
@@ -722,9 +723,11 @@ private:
         const auto &lb = std::get<1>(pair);
         idx.push_back(builder.createIntegerConstant(getLoc(), idxTy, dim - lb));
       }
+      auto insVal = builder.createConvert(getLoc(), eleTy, constant);
       array = builder.create<fir::InsertValueOp>(getLoc(), arrayTy, array,
-                                                 constant, idx);
+                                                 insVal, idx);
     } while (con.IncrementSubscripts(subscripts));
+    // FIXME: return an ArrayBoxValue
     return array;
   }
 
