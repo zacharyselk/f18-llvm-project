@@ -94,8 +94,7 @@ static int compileFIR(const mlir::PassPipelineCLParser &passPipeline) {
     // simplify the IR
     pm.addPass(mlir::createCanonicalizerPass());
     pm.addPass(fir::createCSEPass());
-    if (fir::inlinerIsEnabled())
-      pm.addPass(fir::createInlinerPass());
+    pm.addPass(mlir::createInlinerPass());
     pm.addPass(mlir::createCSEPass());
 
     // convert fir dialect to affine
