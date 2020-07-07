@@ -98,9 +98,15 @@ def AnyRefOrBox : TypeConstraint<Or<[fir_ReferenceType.predicate,
     "any reference or box">;
 
 // A vector of Fortran triple notation describing a multidimensional array
-def fir_DimsType : Type<CPred<"$_self.isa<fir::DimsType>()">, "dim type">;
-def AnyEmboxLike : TypeConstraint<Or<[AnySignlessInteger.predicate,
-    Index.predicate, fir_IntegerType.predicate, fir_DimsType.predicate]>,
+def fir_ShapeType : Type<CPred<"$_self.isa<fir::ShapeType>()">, "shape type">;
+def fir_ShapeShiftType : Type<CPred<"$_self.isa<fir::ShapeShiftType>()">,
+    "shape shift type">;
+def AnyShapeLike : TypeConstraint<Or<[fir_ShapeType.predicate,
+    fir_ShapeShiftType.predicate]>, "any legal shape type">;
+def AnyShapeType : Type<AnyShapeLike.predicate, "any legal shape type">;
+def fir_SliceType : Type<CPred<"$_self.isa<fir::SliceType>()">, "slice type">;
+def AnyEmboxLike : TypeConstraint<Or<[AnyIntegerType.predicate,
+    AnyShapeType.predicate, fir_SliceType.predicate]>,
     "any legal embox argument type">;
 def AnyEmboxArg : Type<AnyEmboxLike.predicate, "embox argument type">;
 
@@ -268,27 +274,27 @@ class fir_AllocatableOp<string mnemonic, Resource resource,
     static constexpr llvm::StringRef inType() { return "in_type"; }
     static constexpr llvm::StringRef lenpName() { return "len_param_count"; }
     mlir::Type getAllocatedType();
-    
+
     bool hasLenParams() { return bool{getAttr(lenpName())}; }
-    
+
     unsigned numLenParams() {
       if (auto val = getAttrOfType<mlir::IntegerAttr>(lenpName()))
         return val.getInt();
       return 0;
     }
-    
+
     operand_range getLenParams() {
       return {operand_begin(), operand_begin() + numLenParams()};
     }
-    
+
     unsigned numShapeOperands() {
       return operand_end() - operand_begin() + numLenParams();
     }
-    
+
     operand_range getShapeOperands() {
       return {operand_begin() + numLenParams(), operand_end()};
     }
-    
+
     static mlir::Type getRefTy(mlir::Type ty);
 
     /// Get the input type of the allocation
@@ -1038,9 +1044,8 @@ def fir_EmboxOp : fir_Op<"embox", [NoSideEffect]> {
     ```mlir
       %c1 = constant 1 : index
       %c10 = constant 10 : index
-      %4 = fir.dims(%c1, %c10, %c1) : (index, index, index) -> !fir.dims<1>
       %5 = ... : !fir.ref<!fir.array<10 x i32>>
-      %6 = fir.embox %5, %4 : (!fir.ref<!fir.array<10 x i32>>, !fir.dims<1>) -> !fir.box<!fir.array<10 x i32>>
+      %6 = fir.embox %5 : (!fir.ref<!fir.array<10 x i32>>) -> !fir.box<!fir.array<10 x i32>>
     ```
 
     The descriptor tuple may contain additional implementation-specific
@@ -1056,28 +1061,34 @@ def fir_EmboxOp : fir_Op<"embox", [NoSideEffect]> {
   let printer = [{
     p << getOperationName() << ' ';
     p.printOperand(memref());
-    if (hasLenParams()) {
+    if (auto shape = getShape()) {
       p << '(';
-      p.printOperands(getLenParams());
+      p.printOperand(shape);
       p << ')';
     }
-    if (dims().size() > 0) {
-      p << ", ";
-      p.printOperands(dims());
-    } else if (auto map = getAttr(layoutName())) {
-      p << " [" << map << ']';
+    if (auto slice = getSlice()) {
+      p << '[';
+      p.printOperand(slice);
+      p << ']';
     }
-    p.printOptionalAttrDict(getAttrs(), {layoutName(), lenpName()});
+    if (auto map = getAttr(layoutName()))
+      p << " map " << map;
+    if (hasLenParams()) {
+      p << " typeparams ";
+      p.printOperands(getLenParams());
+    }
+    p.printOptionalAttrDict(getAttrs(), {layoutName(), lenpName(), shapeName(),
+      sliceName()});
     p << " : ";
     p.printFunctionalType(getOperation());
   }];
 
   let verifier = [{
+    auto eleTy = fir::dyn_cast_ptrEleTy(memref().getType());
+    if (!eleTy)
+      return emitOpError("must embox a memory reference type");
     if (hasLenParams()) {
       auto lenParams = numLenParams();
-      auto eleTy = fir::dyn_cast_ptrEleTy(memref().getType());
-      if (!eleTy)
-        return emitOpError("must embox a memory reference type");
       if (auto rt = eleTy.dyn_cast<fir::RecordType>()) {
         if (lenParams != rt.getNumLenParams())
           return emitOpError("number of LEN params does not correspond"
@@ -1086,18 +1097,18 @@ def fir_EmboxOp : fir_Op<"embox", [NoSideEffect]> {
         return emitOpError("LEN parameters require !fir.type type");
       }
       for (auto lp : getLenParams())
-        if (lp.getType().isa<fir::DimsType>())
+        if (!fir::isa_integer(lp.getType()))
           return emitOpError("LEN parameters must be integral type");
     }
-    if (dims().size() == 0) {
-      // Ok. If there is no dims and no layout map, then emboxing a scalar.
-      // TODO: Should the type be enforced? It already must agree.
-    } else if (dims().size() == 1) {
-      auto d = *dims().begin();
-      if (!d.getType().isa<fir::DimsType>())
-        return emitOpError("dimension argument must have !fir.dims type");
-    } else {
-      return emitOpError("embox can only have one !fir.dim argument");
+    if (getShape()) {
+      auto shapeTy = getShape().getType();
+      if (!(shapeTy.isa<fir::ShapeType>() || shapeTy.isa<ShapeShiftType>()))
+        return emitOpError("must be shape or shapeshift type");
+    }
+    if (getSlice()) {
+      auto sliceTy = getSlice().getType();
+      if (!sliceTy.isa<fir::SliceType>())
+        return emitOpError("must be a slice type");
     }
     return mlir::success();
   }];
@@ -1105,22 +1116,40 @@ def fir_EmboxOp : fir_Op<"embox", [NoSideEffect]> {
   let extraClassDeclaration = [{
     static constexpr llvm::StringRef layoutName() { return "layout_map"; }
     static constexpr llvm::StringRef lenpName() { return "len_param_count"; }
+    static constexpr llvm::StringRef shapeName() { return "shape"; }
+    static constexpr llvm::StringRef sliceName() { return "slice"; }
+
+    mlir::Value getShape() {
+      if (auto x = getAttrOfType<mlir::UnitAttr>(shapeName()))
+        return *std::next(operand_begin());
+      return {};
+    }
+
+    mlir::Value getSlice() {
+      if (auto x = getAttrOfType<mlir::UnitAttr>(sliceName())) {
+        auto iter = std::next(operand_begin());
+        if (getShape())
+          iter = std::next(iter);
+        return *iter;
+      }
+      return {};
+    }
+
     bool hasLenParams() { return bool{getAttr(lenpName())}; }
     unsigned numLenParams() {
       if (auto x = getAttrOfType<mlir::IntegerAttr>(lenpName()))
         return x.getInt();
       return 0;
     }
+
     operand_range getLenParams() {
-      return {operand_begin(), operand_begin() + numLenParams()};
+      auto iter = std::next(operand_begin());
+      if (getShape())
+        iter = std::next(iter);
+      if (getSlice())
+        iter = std::next(iter);
+      return {iter, operand_end()};
     }
-
-    // There should be 0 or 1 dims argument.
-    operand_range dims() {
-      return {operand_begin() + numLenParams() + 1, operand_end()};
-    }
-
-    mlir::Value getDims();
   }];
 }
 
@@ -1147,7 +1176,7 @@ def fir_EmboxCharOp : fir_Op<"emboxchar", [NoSideEffect]> {
   }];
 
   let arguments = (ins AnyReferenceLike:$memref, AnyIntegerLike:$len);
-  
+
   let results = (outs fir_BoxCharType);
 
   let assemblyFormat = [{
@@ -1263,7 +1292,7 @@ def fir_UnboxOp : fir_SimpleOp<"unbox", [NoSideEffect]> {
 
     ```mlir
       %40   = ... : !fir.box<!fir.type<T>>
-      %41:6 = fir.unbox %40 : (!fir.box<!fir.type<T>>) -> (!fir.ref<!fir.type<T>>, i32, i32, !fir.tdesc<!fir.type<T>>, i32, !fir.dims<4>)
+      %41:6 = fir.unbox %40 : (!fir.box<!fir.type<T>>) -> (!fir.ref<!fir.type<T>>, i32, i32, !fir.tdesc<!fir.type<T>>, i32, !fir.array<? x index>)
     ```
   }];
 
@@ -1275,7 +1304,7 @@ def fir_UnboxOp : fir_SimpleOp<"unbox", [NoSideEffect]> {
     AnyIntegerLike,     // rank of data
     fir_TypeDescType,   // abstract type descriptor
     AnyIntegerLike,     // attribute flags (bitfields)
-    fir_DimsType        // dimension information (if any)
+    fir_SequenceType    // dimension information (if any)
   );
 }
 
@@ -1375,16 +1404,17 @@ def fir_BoxDimsOp : fir_Op<"box_dims", [NoSideEffect]> {
 
     ```mlir
       %c1   = constant 0 : i32
-      %52:3 = fir.box_dims %40, %c1 : (!fir.box<!fir.array<*:f64>>, i32) -> (i32, i32, i32)
+      %52:3 = fir.box_dims %40, %c1 : (!fir.box<!fir.array<*:f64>>, i32) -> (index, index, index)
     ```
 
     The above is a request to return the left most row (at index 0) triple from
-    the box. The triple will be the lower bound, upper bound, and stride.
+    the box. The triple will be the lower bound, extent, and byte-stride, which
+    are the values encoded in a standard descriptor.
   }];
 
   let arguments = (ins fir_BoxType:$val, AnyIntegerLike:$dim);
 
-  let results = (outs AnyIntegerLike, AnyIntegerLike, AnyIntegerLike);
+  let results = (outs Index, Index, Index);
 
   let assemblyFormat = [{
     $val `,` $dim attr-dict `:` functional-type(operands, results)
@@ -1445,12 +1475,13 @@ def fir_BoxIsArrayOp : fir_SimpleOp<"box_isarray", [NoSideEffect]> {
   let description = [{
     Determine if the boxed value has a positive (> 0) rank. This will return
     true if the originating box value was from a fir.embox with a memory
-    reference value that had the type !fir.array<T> and/or a dims argument.
+    reference value that had the type !fir.array<T> and/or a shape argument.
 
     ```mlir
       %r = ... : !fir.ref<i64>
-      %d = fir.gendims(1, 100, 1) : (i32, i32, i32) -> !fir.dims<1>
-      %b = fir.embox %r, %d : (!fir.ref<i64>, !fir.dims<1>) -> !fir.box<i64>
+      %c_100 = constant 100 : index
+      %d = fir.shape(%c_100) : (index) -> !fir.shape<1>
+      %b = fir.embox %r shape %d : (!fir.ref<i64>, !fir.shape<1>) -> !fir.box<i64>
       %a = fir.box_isarray %b : (!fir.box<i64>) -> i1  // true
     ```
   }];
@@ -1552,44 +1583,130 @@ def fir_ArrayCoorOp : fir_Op<"array_coor", [NoSideEffect]> {
     This operation is intended to capture all the runtime values needed to
     compute the address of an array reference in a single high-level op. Given
     the following Fortran input:
-    
+
     ```fortran
       real :: a(n,m)
       ...
       ... a(i,j) ...
     ```
-    
+
     One can use `fir.array_coor` to determine the address of `a(i,j)`.
-    
+
     ```mlir
-      %dim = fir.gendims %one, %n, %one, %one, %m, %one : (...) -> !fir.dims<2>
-      %1 = fir.array_coor %a(%dim), %i, %j : (!fir.ref<!fir.array<?x?xf32>>, ...) -> !fir.ref<f32>
+      %s = fir.shape %n, %m : (index, index) -> !fir.shape<2>
+      %1 = fir.array_coor %a(%s) %i, %j : (!fir.ref<!fir.array<?x?xf32>>, !fir.shape<2>, index, index) -> !fir.ref<f32>
     ```
   }];
 
-  let arguments = (ins AnyReferenceLike:$ref, fir_DimsType:$dims,
-                   Variadic<AnyIntegerType>:$coor);
-		   
+  let arguments = (ins AnyReferenceLike:$memref, Variadic<AnyEmboxArg>:$args);
+
   let results = (outs fir_ReferenceType);
-  
-  let assemblyFormat = [{
-    $ref `(` $dims `)` $coor attr-dict `:` functional-type(operands, results)
+
+  let parser = "return parseArrayCoorOp(parser, result);";
+
+  let printer = [{
+    p << getOperationName() << ' ';
+    p.printOperand(memref());
+    if (auto shape = getShape()) {
+      p << '(';
+      p.printOperand(shape);
+      p << ')';
+    }
+    if (auto slice = getSlice()) {
+      p << '[';
+      p.printOperand(slice);
+      p << ']';
+    }
+    p << ' ';
+    p.printOperands(getIndices());
+    if (hasLenParams()) {
+      p << " typeparams ";
+      p.printOperands(getLenParams());
+    }
+    p.printOptionalAttrDict(getAttrs(), {indicesName(), lenpName(), shapeName(), sliceName()});
+    p << " : ";
+    p.printFunctionalType(getOperation());
   }];
 
   let verifier = [{
-    auto eleTy = fir::dyn_cast_ptrEleTy(ref().getType());
-    assert (eleTy && "must be a reference type");
+    auto eleTy = fir::dyn_cast_ptrEleTy(memref().getType());
+    if (!eleTy)
+       return emitOpError("must be a reference type");
     auto arrTy = eleTy.dyn_cast<fir::SequenceType>();
     if (!arrTy)
       return emitOpError("must be a reference to an array");
-    auto dimTy = dims().getType().dyn_cast<fir::DimsType>();
-    assert (dimTy && "must be a dims type");
+    auto shape = getShape();
+    if (!shape)
+      return emitOpError("must have a shape");
+    auto shapeTy = shape.getType();
+    if (!(shapeTy.isa<fir::ShapeType>() || shapeTy.isa<ShapeShiftType>()))
+      return emitOpError("must be a shape or shapeshift type");
+    if (auto slice = getSlice()) {
+      auto sliceTy = slice.getType();
+      if (!sliceTy.isa<fir::SliceType>())
+        return emitOpError("must be slice type");
+    }
     auto arrDim = arrTy.getDimension();
-    if (arrDim && arrDim != dimTy.getRank())
+    unsigned shapeTyRank = 0;
+    if (auto s = shapeTy.dyn_cast<fir::ShapeType>()) {
+      shapeTyRank = s.getRank();
+    } else {
+      auto ss = shapeTy.cast<fir::ShapeShiftType>();
+      shapeTyRank = ss.getRank();
+    }
+    if (arrDim && arrDim != shapeTyRank)
       return emitOpError("rank of dimension mismatched");
-    if (dimTy.getRank() != coor().size())
+    if (shapeTyRank != getIndices().size())
       return emitOpError("number of indices do not match dim rank");
     return mlir::success();
+  }];
+
+  let extraClassDeclaration = [{
+    static constexpr llvm::StringRef indicesName() { return "indices"; }
+    static constexpr llvm::StringRef lenpName() { return "len_param_count"; }
+    static constexpr llvm::StringRef shapeName() { return "shape"; }
+    static constexpr llvm::StringRef sliceName() { return "slice"; }
+    bool hasLenParams() { return bool{getAttr(lenpName())}; }
+    mlir::Value getShape() {
+      if (auto x = getAttrOfType<mlir::UnitAttr>(shapeName()))
+        return *std::next(operand_begin());
+      return {};
+    }
+    mlir::Value getSlice() {
+      if (auto x = getAttrOfType<mlir::UnitAttr>(sliceName())) {
+        auto iter = std::next(operand_begin());
+        if (getShape())
+          iter = std::next(iter);
+        return *iter;
+      }
+      return {};
+    }
+    unsigned numIndices() {
+      if (auto x = getAttrOfType<mlir::IntegerAttr>(indicesName()))
+        return x.getInt();
+      return 0;
+    }
+    operand_range getIndices() {
+      auto iter = std::next(operand_begin());
+      if (getShape())
+        iter = std::next(iter);
+      if (getSlice())
+        iter = std::next(iter);
+      return {iter, iter + numIndices()};
+    }
+    unsigned numLenParams() {
+      if (auto x = getAttrOfType<mlir::IntegerAttr>(lenpName()))
+        return x.getInt();
+      return 0;
+    }
+    operand_range getLenParams() {
+      auto offset = numIndices();
+      if (getShape())
+        ++offset;
+      if (getSlice())
+        ++offset;
+      return {std::next(operand_begin()) + offset, operand_end()};
+    }
   }];
 }
 
@@ -1630,7 +1747,7 @@ def fir_CoordinateOp : fir_Op<"coordinate_of", [NoSideEffect]> {
     p.printFunctionalType(getOperation()->getOperandTypes(),
         getOperation()->getResultTypes());
   }];
-  
+
   let verifier = [{
     auto refTy = ref().getType();
     if (fir::isa_ref_type(refTy)) {
@@ -1667,7 +1784,7 @@ def fir_CoordinateOp : fir_Op<"coordinate_of", [NoSideEffect]> {
     OpBuilder<"mlir::OpBuilder &builder, OperationState &result,"
               "Type type, ValueRange operands,"
 	      "ArrayRef<NamedAttribute> attrs = {}">];
-	      
+
   let extraClassDeclaration = [{
     static constexpr llvm::StringRef baseType() { return "base_type"; }
     mlir::Type getBaseType();
@@ -1788,27 +1905,102 @@ def fir_FieldIndexOp : fir_OneResultOp<"field_index", [NoSideEffect]> {
   }];
 }
 
-def fir_GenDimsOp : fir_OneResultOp<"gendims", [NoSideEffect]> {
+def fir_ShapeOp : fir_OneResultOp<"shape", [NoSideEffect]> {
 
-  let summary = "generate a value of type `!fir.dims`";
+  let summary = "generate an abstract shape vector of type `!fir.shape`";
+
+  let description = [{
+    The arguments are an ordered list of integral type values that define the
+    runtime extent of each dimension of an array. The shape information is
+    given in the same row-to-column order as Fortran. This abstract shape value
+    must be applied to a reified object, so all shape information must be
+    specified.  The extent must be nonnegative.
+
+    ```mlir
+      %d = fir.shape %row_sz, %col_sz : (index, index) -> !fir.shape<2>
+    ```
+  }];
+
+  let arguments = (ins Variadic<AnyIntegerType>:$extents);
+
+  let results = (outs fir_ShapeType);
+
+  let assemblyFormat = [{
+    operands attr-dict `:` functional-type(operands, results)
+  }];
+
+  let verifier = [{
+    auto size = extents().size();
+    auto shapeTy = getType().dyn_cast<fir::ShapeType>();
+    assert(shapeTy && "must be a shape type");
+    if (shapeTy.getRank() != size)
+      return emitOpError("shape type rank mismatch");
+    return mlir::success();
+  }];
+}
+
+def fir_ShapeShiftOp : fir_OneResultOp<"shape_shift", [NoSideEffect]> {
+
+  let summary = [{
+    generate an abstract shape and shift vector of type `!fir.shapeshift`
+  }];
+
+  let description = [{
+    The arguments are an ordered list of integral type values that is a multiple
+    of 2 in length. Each such pair is defined as: the lower bound and the
+    extent for that dimension. The shifted shape information is given in the
+    same row-to-column order as Fortran. This abstract shifted shape value must
+    be applied to a reified object, so all shifted shape information must be
+    specified.  The extent must be nonnegative.
+
+    ```mlir
+      %d = fir.shape_shift %lo, %extent : (index, index) -> !fir.shapeshift<1>
+    ```
+  }];
+
+  let arguments = (ins Variadic<AnyIntegerType>:$pairs);
+
+  let results = (outs fir_ShapeShiftType);
+
+  let assemblyFormat = [{
+    operands attr-dict `:` functional-type(operands, results)
+  }];
+
+  let verifier = [{
+    auto size = pairs().size();
+    if (size < 2 || size > 16 * 2)
+      return emitOpError("incorrect number of args");
+    if (size % 2 != 0)
+      return emitOpError("requires a multiple of 2 args");
+    auto shapeTy = getType().dyn_cast<fir::ShapeShiftType>();
+    assert(shapeTy && "must be a shape shift type");
+    if (shapeTy.getRank() * 2 != size)
+      return emitOpError("shape type rank mismatch");
+    return mlir::success();
+  }];
+}
+
+def fir_SliceOp : fir_OneResultOp<"slice", [NoSideEffect]> {
+
+  let summary = "generate an abstract slice vector of type `!fir.slice`";
 
   let description = [{
     The arguments are an ordered list of integral type values that is a
     multiple of 3 in length.  Each such triple is defined as: the lower
-    index, the extent, and the stride for that dimension. The dimension
-    information is given in the same row-to-column order as Fortran. This
-    abstract dimension value must describe a reified object, so all dimension
-    information must be specified.  The extent must be nonnegative and the
-    stride must not be zero.
+    bound, the upper bound, and the stride for that dimension. Both bounds are
+    inclusive. The slice information is given in the same row-to-column order
+    as Fortran. This abstract slice value must be applied to a reified object,
+    so all slice information must be specified.  The extent must be nonnegative
+    and the stride must not be zero.
 
     ```mlir
-      %d = fir.gendims %lo, %ext, %str : (index, index, index) -> !fir.dims<1>
+      %d = fir.slice %lo, %hi, %step : (index, index, index) -> !fir.slice<1>
     ```
   }];
 
   let arguments = (ins Variadic<AnyIntegerType>:$triples);
 
-  let results = (outs fir_DimsType);
+  let results = (outs fir_SliceType);
 
   let assemblyFormat = [{
     operands attr-dict `:` functional-type(operands, results)
@@ -1820,10 +2012,10 @@ def fir_GenDimsOp : fir_OneResultOp<"gendims", [NoSideEffect]> {
       return emitOpError("incorrect number of args");
     if (size % 3 != 0)
       return emitOpError("requires a multiple of 3 args");
-    auto dimTy = getType().dyn_cast<fir::DimsType>();
-    assert(dimTy && "must be a dims type");
-    if (dimTy.getRank() * 3 != size)
-      return emitOpError("dims type rank mismatch");
+    auto sliceTy = getType().dyn_cast<fir::SliceType>();
+    assert(sliceTy && "must be a slice type");
+    if (sliceTy.getRank() * 3 != size)
+      return emitOpError("slice type rank mismatch");
     return mlir::success();
   }];
 }
@@ -2138,7 +2330,7 @@ def fir_IterWhileOp : region_Op<"iterate_while",
               "ValueRange iterArgs = llvm::None,"
               "ArrayRef<NamedAttribute> attributes = {}">
   ];
-  
+
   let extraClassDeclaration = [{
     mlir::Block *getBody() { return &region().front(); }
     mlir::Value getIterateVar() { return getBody()->getArgument(1); }
@@ -2422,11 +2614,11 @@ def fir_ConstfOp : fir_Op<"constf", [NoSideEffect]> {
   }];
 
   let arguments = (ins FirRealAttr:$constant);
-  
+
   let results = (outs fir_RealType:$res);
 
   let assemblyFormat = "`(` $constant `)` attr-dict `:` type($res)";
-  
+
   let verifier = [{
     if (!getType().isa<fir::RealType>())
       return emitOpError("must be a !fir.real type");
@@ -2503,7 +2695,7 @@ def fir_ConstcOp : fir_Op<"constc", [NoSideEffect]> {
   }];
 
   let results = (outs fir_ComplexType);
-  
+
   let parser = [{
     fir::RealAttr realp;
     fir::RealAttr imagp;
@@ -2601,7 +2793,7 @@ def fir_CmpcOp : fir_Op<"cmpc",
 
 def fir_AddrOfOp : fir_OneResultOp<"address_of", [NoSideEffect]> {
   let summary = "convert a symbol to an SSA value";
-  
+
   let description = [{
     Convert a symbol (a function or global reference) to an SSA-value to be
     used in other Operations.
@@ -2620,7 +2812,7 @@ def fir_AddrOfOp : fir_OneResultOp<"address_of", [NoSideEffect]> {
 
 def fir_ConvertOp : fir_OneResultOp<"convert", [NoSideEffect]> {
   let summary = "encapsulates all Fortran scalar type conversions";
-  
+
   let description = [{
     Generalized type conversion. Convert the ssa value from type T to type U.
     Not all pairs of types have conversions. When types T and U are the same
@@ -2856,7 +3048,7 @@ def fir_GlobalOp : fir_Op<"global", [IsolatedFromAbove, Symbol]> {
     mlir::Type resultType() {
       return fir::AllocaOp::wrapResultType(getType());
     }
-    
+
     /// Return the initializer attribute if it exists, or a null attribute.
     Attribute getValueOrNull() { return initVal().getValueOr(Attribute()); }
 
@@ -3073,21 +3265,39 @@ def fir_DTEntryOp : fir_Op<"dt_entry", []> {
 
 def fir_XEmboxOp : fir_Op<"ext_embox", []> {
   let summary = "for internal conversion only";
-  
+
+  let description = [{
+    Prior to lowering to LLVM IR dialect, a non-scalar non-trivial embox op will
+    be converted to an extended embox. This op will have the following sets of
+    arguments.
+
+       - shape: A vector that is the runtime shape of the underlying array.
+       - shift: A vector that is the runtime origin of the first element.
+         The default is a vector of the value 1.
+       - slice: A vector of triples that describe an array slice.
+       - LEN type parameters: A vector of runtime LEN type parameters that
+         describe an correspond to the elemental derived type.
+  }];
+
   let skipDefaultBuilders = 1;
   let builders = [OpBuilder<"OpBuilder &builder, OperationState &result,"
-    "mlir::Type type, mlir::Value memref, mlir::ValueRange lenParams,"
-    "mlir::ValueRange dims, llvm::ArrayRef<mlir::NamedAttribute> attrs">];
+    "mlir::Type type, mlir::Value memref, mlir::ValueRange shape,"
+    "mlir::ValueRange shift, mlir::ValueRange slice,"
+    "mlir::ValueRange lenParams, llvm::ArrayRef<mlir::NamedAttribute> attrs">];
 
   let arguments = (ins Variadic<AnyType>);
   let results = (outs fir_BoxType);
-  
+
   let extraClassDeclaration = [{
     static constexpr llvm::StringRef lenParamAttrName() { return "lenparam"; }
-    static constexpr llvm::StringRef dimsAttrName() { return "dims"; }
     static constexpr llvm::StringRef rankAttrName() { return "rank"; }
+    static constexpr llvm::StringRef shapeAttrName() { return "shape"; }
+    static constexpr llvm::StringRef shiftAttrName() { return "shift"; }
+    static constexpr llvm::StringRef sliceAttrName() { return "slice"; }
     mlir::Operation::operand_range lenParamOperands();
-    mlir::Operation::operand_range dimsOperands();
+    mlir::Operation::operand_range shapeOperands();
+    mlir::Operation::operand_range shiftOperands();
+    mlir::Operation::operand_range sliceOperands();
     unsigned getRank();
   }];
 }
@@ -3095,20 +3305,42 @@ def fir_XEmboxOp : fir_Op<"ext_embox", []> {
 def fir_XArrayCoorOp : fir_Op<"ext_array_coor", []> {
   let summary = "for internal conversion only";
 
-  let skipDefaultBuilders = 1;
+  let description = [{
+    Prior to lowering to LLVM IR dialect, a non-scalar non-trivial embox op will
+    be converted to an extended embox. This op will have the following sets of
+    arguments.
+
+       - shape: A vector that is the runtime shape of the underlying array.
+       - shift: A vector that is the runtime origin of the first element.
+         The default is a vector of the value 1.
+       - slice: A vector of triples that describe an array slice.
+       - indices: A vector of runtime values that describe the coordinate of
+         the element of the array to be computed.
+       - LEN type parameters: A vector of runtime LEN type parameters that
+         describe an correspond to the elemental derived type.
+  }];
+
+let skipDefaultBuilders = 1;
   let builders = [OpBuilder<"OpBuilder &builder, OperationState &result,"
-    "mlir::Type type, mlir::Value memref, mlir::ValueRange dims,"
-    "mlir::ValueRange indices, llvm::ArrayRef<mlir::NamedAttribute> attrs">];
+    "mlir::Type type, mlir::Value memref, mlir::ValueRange shape,"
+    "mlir::ValueRange shift, mlir::ValueRange slice, mlir::ValueRange indices,"
+    "mlir::ValueRange lenParams, llvm::ArrayRef<mlir::NamedAttribute> attrs">];
 
   let arguments = (ins Variadic<AnyType>);
   let results = (outs fir_ReferenceType);
 
   let extraClassDeclaration = [{
-    static constexpr llvm::StringRef dimsAttrName() { return "dims"; }
     static constexpr llvm::StringRef indexAttrName() { return "indices"; }
+    static constexpr llvm::StringRef lenParamAttrName() { return "lenparam"; }
     static constexpr llvm::StringRef rankAttrName() { return "rank"; }
-    mlir::Operation::operand_range dimsOperands();
+    static constexpr llvm::StringRef shapeAttrName() { return "shape"; }
+    static constexpr llvm::StringRef shiftAttrName() { return "shift"; }
+    static constexpr llvm::StringRef sliceAttrName() { return "slice"; }
     mlir::Operation::operand_range indexOperands();
+    mlir::Operation::operand_range lenParamOperands();
+    mlir::Operation::operand_range shapeOperands();
+    mlir::Operation::operand_range shiftOperands();
+    mlir::Operation::operand_range sliceOperands();
     unsigned getRank();
   }];
 }
