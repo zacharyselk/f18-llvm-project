@@ -43,9 +43,10 @@ struct FIRInlinerInterface : public mlir::DialectInlinerInterface {
 
 fir::FIROpsDialect::FIROpsDialect(mlir::MLIRContext *ctx)
     : mlir::Dialect("fir", ctx, mlir::TypeID::get<FIROpsDialect>()) {
-  addTypes<BoxType, BoxCharType, BoxProcType, CharacterType, CplxType, DimsType,
+  addTypes<BoxType, BoxCharType, BoxProcType, CharacterType, CplxType,
            FieldType, HeapType, IntType, LenType, LogicalType, PointerType,
-           RealType, RecordType, ReferenceType, SequenceType, TypeDescType>();
+           RealType, RecordType, ReferenceType, SequenceType, ShapeType,
+           ShapeShiftType, SliceType, TypeDescType>();
   addAttributes<ClosedIntervalAttr, ExactTypeAttr, LowerBoundAttr,
                 PointIntervalAttr, RealAttr, SubclassAttr, UpperBoundAttr>();
   addOperations<

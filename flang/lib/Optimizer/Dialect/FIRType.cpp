@@ -91,9 +91,19 @@ CplxType parseComplex(mlir::DialectAsmParser &parser) {
   return parseKindSingleton<CplxType>(parser);
 }
 
-// `dims` `<` rank `>`
-DimsType parseDims(mlir::DialectAsmParser &parser) {
-  return parseRankSingleton<DimsType>(parser);
+// `shape` `<` rank `>`
+ShapeType parseShape(mlir::DialectAsmParser &parser) {
+  return parseRankSingleton<ShapeType>(parser);
+}
+
+// `shapeshift` `<` rank `>`
+ShapeShiftType parseShapeShift(mlir::DialectAsmParser &parser) {
+  return parseRankSingleton<ShapeShiftType>(parser);
+}
+
+// `slice` `<` rank `>`
+SliceType parseSlice(mlir::DialectAsmParser &parser) {
+  return parseRankSingleton<SliceType>(parser);
 }
 
 // `field`
@@ -186,9 +196,10 @@ static bool isaIntegerType(mlir::Type ty) {
 
 bool verifyRecordMemberType(mlir::Type ty) {
   return !(ty.isa<BoxType>() || ty.isa<BoxCharType>() ||
-           ty.isa<BoxProcType>() || ty.isa<DimsType>() || ty.isa<FieldType>() ||
-           ty.isa<LenType>() || ty.isa<ReferenceType>() ||
-           ty.isa<TypeDescType>());
+           ty.isa<BoxProcType>() || ty.isa<ShapeType>() ||
+           ty.isa<ShapeShiftType>() || ty.isa<SliceType>() ||
+           ty.isa<FieldType>() || ty.isa<LenType>() ||
+           ty.isa<ReferenceType>() || ty.isa<TypeDescType>());
 }
 
 bool verifySameLists(llvm::ArrayRef<RecordType::TypePair> a1,
@@ -325,8 +336,6 @@ mlir::Type fir::parseFirType(FIROpsDialect *, mlir::DialectAsmParser &parser) {
     return parseCharacter(parser);
   if (typeNameLit == "complex")
     return parseComplex(parser);
-  if (typeNameLit == "dims")
-    return parseDims(parser);
   if (typeNameLit == "field")
     return parseField(parser);
   if (typeNameLit == "heap")
@@ -343,6 +352,12 @@ mlir::Type fir::parseFirType(FIROpsDialect *, mlir::DialectAsmParser &parser) {
     return parseReal(parser);
   if (typeNameLit == "ref")
     return parseReference(parser, loc);
+  if (typeNameLit == "shape")
+    return parseShape(parser);
+  if (typeNameLit == "shapeshift")
+    return parseShapeShift(parser);
+  if (typeNameLit == "slice")
+    return parseSlice(parser);
   if (typeNameLit == "tdesc")
     return parseTypeDesc(parser, loc);
   if (typeNameLit == "type")
@@ -383,17 +398,17 @@ private:
   explicit CharacterTypeStorage(KindTy kind) : kind{kind} {}
 };
 
-struct DimsTypeStorage : public mlir::TypeStorage {
+struct ShapeTypeStorage : public mlir::TypeStorage {
   using KeyTy = unsigned;
 
   static unsigned hashKey(const KeyTy &key) { return llvm::hash_combine(key); }
 
   bool operator==(const KeyTy &key) const { return key == getRank(); }
 
-  static DimsTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
-                                    unsigned rank) {
-    auto *storage = allocator.allocate<DimsTypeStorage>();
-    return new (storage) DimsTypeStorage{rank};
+  static ShapeTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
+                                     unsigned rank) {
+    auto *storage = allocator.allocate<ShapeTypeStorage>();
+    return new (storage) ShapeTypeStorage{rank};
   }
 
   unsigned getRank() const { return rank; }
@@ -402,8 +417,52 @@ protected:
   unsigned rank;
 
 private:
-  DimsTypeStorage() = delete;
-  explicit DimsTypeStorage(unsigned rank) : rank{rank} {}
+  ShapeTypeStorage() = delete;
+  explicit ShapeTypeStorage(unsigned rank) : rank{rank} {}
+};
+struct ShapeShiftTypeStorage : public mlir::TypeStorage {
+  using KeyTy = unsigned;
+
+  static unsigned hashKey(const KeyTy &key) { return llvm::hash_combine(key); }
+
+  bool operator==(const KeyTy &key) const { return key == getRank(); }
+
+  static ShapeShiftTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
+                                          unsigned rank) {
+    auto *storage = allocator.allocate<ShapeShiftTypeStorage>();
+    return new (storage) ShapeShiftTypeStorage{rank};
+  }
+
+  unsigned getRank() const { return rank; }
+
+protected:
+  unsigned rank;
+
+private:
+  ShapeShiftTypeStorage() = delete;
+  explicit ShapeShiftTypeStorage(unsigned rank) : rank{rank} {}
+};
+struct SliceTypeStorage : public mlir::TypeStorage {
+  using KeyTy = unsigned;
+
+  static unsigned hashKey(const KeyTy &key) { return llvm::hash_combine(key); }
+
+  bool operator==(const KeyTy &key) const { return key == getRank(); }
+
+  static SliceTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
+                                     unsigned rank) {
+    auto *storage = allocator.allocate<SliceTypeStorage>();
+    return new (storage) SliceTypeStorage{rank};
+  }
+
+  unsigned getRank() const { return rank; }
+
+protected:
+  unsigned rank;
+
+private:
+  SliceTypeStorage() = delete;
+  explicit SliceTypeStorage(unsigned rank) : rank{rank} {}
 };
 
 /// The type of a derived type part reference
@@ -833,8 +892,8 @@ bool isa_std_type(mlir::Type t) {
 
 bool isa_fir_or_std_type(mlir::Type t) {
   if (auto funcType = t.dyn_cast<mlir::FunctionType>())
-    return llvm::all_of(funcType.getInputs(), isa_fir_or_std_type) &&  
-      llvm::all_of(funcType.getResults(), isa_fir_or_std_type);
+    return llvm::all_of(funcType.getInputs(), isa_fir_or_std_type) &&
+           llvm::all_of(funcType.getResults(), isa_fir_or_std_type);
   return isa_fir_type(t) || isa_std_type(t);
 }
 
@@ -870,14 +929,6 @@ CharacterType fir::CharacterType::get(mlir::MLIRContext *ctxt, KindTy kind) {
 }
 
 int fir::CharacterType::getFKind() const { return getImpl()->getFKind(); }
-
-// Dims
-
-DimsType fir::DimsType::get(mlir::MLIRContext *ctxt, unsigned rank) {
-  return Base::get(ctxt, rank);
-}
-
-unsigned fir::DimsType::getRank() const { return getImpl()->getRank(); }
 
 // Field
 
@@ -992,8 +1043,10 @@ mlir::Type fir::ReferenceType::getEleTy() const {
 mlir::LogicalResult
 fir::ReferenceType::verifyConstructionInvariants(mlir::Location loc,
                                                  mlir::Type eleTy) {
-  if (eleTy.isa<DimsType>() || eleTy.isa<FieldType>() || eleTy.isa<LenType>() ||
-      eleTy.isa<ReferenceType>() || eleTy.isa<TypeDescType>())
+  if (eleTy.isa<ShapeType>() || eleTy.isa<ShapeShiftType>() ||
+      eleTy.isa<SliceType>() || eleTy.isa<FieldType>() ||
+      eleTy.isa<LenType>() || eleTy.isa<ReferenceType>() ||
+      eleTy.isa<TypeDescType>())
     return mlir::emitError(loc, "cannot build a reference to type: ")
            << eleTy << '\n';
   return mlir::success();
@@ -1012,7 +1065,8 @@ mlir::Type fir::PointerType::getEleTy() const {
 
 static bool canBePointerOrHeapElementType(mlir::Type eleTy) {
   return eleTy.isa<BoxType>() || eleTy.isa<BoxCharType>() ||
-         eleTy.isa<BoxProcType>() || eleTy.isa<DimsType>() ||
+         eleTy.isa<BoxProcType>() || eleTy.isa<ShapeType>() ||
+         eleTy.isa<ShapeShiftType>() || eleTy.isa<SliceType>() ||
          eleTy.isa<FieldType>() || eleTy.isa<LenType>() ||
          eleTy.isa<HeapType>() || eleTy.isa<PointerType>() ||
          eleTy.isa<ReferenceType>() || eleTy.isa<TypeDescType>();
@@ -1100,7 +1154,8 @@ mlir::LogicalResult fir::SequenceType::verifyConstructionInvariants(
     mlir::AffineMapAttr map) {
   // DIMENSION attribute can only be applied to an intrinsic or record type
   if (eleTy.isa<BoxType>() || eleTy.isa<BoxCharType>() ||
-      eleTy.isa<BoxProcType>() || eleTy.isa<DimsType>() ||
+      eleTy.isa<BoxProcType>() || eleTy.isa<ShapeType>() ||
+      eleTy.isa<ShapeShiftType>() || eleTy.isa<SliceType>() ||
       eleTy.isa<FieldType>() || eleTy.isa<LenType>() || eleTy.isa<HeapType>() ||
       eleTy.isa<PointerType>() || eleTy.isa<ReferenceType>() ||
       eleTy.isa<TypeDescType>() || eleTy.isa<SequenceType>())
@@ -1128,6 +1183,31 @@ llvm::hash_code fir::hash_value(const SequenceType::Shape &sh) {
   }
   return llvm::hash_combine(0);
 }
+
+// Shape
+
+ShapeType fir::ShapeType::get(mlir::MLIRContext *ctxt, unsigned rank) {
+  return Base::get(ctxt, FIR_SHAPE, rank);
+}
+
+unsigned fir::ShapeType::getRank() const { return getImpl()->getRank(); }
+
+// Shapeshift
+
+ShapeShiftType fir::ShapeShiftType::get(mlir::MLIRContext *ctxt,
+                                        unsigned rank) {
+  return Base::get(ctxt, FIR_SHAPESHIFT, rank);
+}
+
+unsigned fir::ShapeShiftType::getRank() const { return getImpl()->getRank(); }
+
+// Slice
+
+SliceType fir::SliceType::get(mlir::MLIRContext *ctxt, unsigned rank) {
+  return Base::get(ctxt, FIR_SLICE, rank);
+}
+
+unsigned fir::SliceType::getRank() const { return getImpl()->getRank(); }
 
 /// RecordType
 ///
@@ -1186,7 +1266,8 @@ mlir::LogicalResult
 fir::TypeDescType::verifyConstructionInvariants(mlir::Location loc,
                                                 mlir::Type eleTy) {
   if (eleTy.isa<BoxType>() || eleTy.isa<BoxCharType>() ||
-      eleTy.isa<BoxProcType>() || eleTy.isa<DimsType>() ||
+      eleTy.isa<BoxProcType>() || eleTy.isa<ShapeType>() ||
+      eleTy.isa<ShapeShiftType>() || eleTy.isa<SliceType>() ||
       eleTy.isa<FieldType>() || eleTy.isa<LenType>() ||
       eleTy.isa<ReferenceType>() || eleTy.isa<TypeDescType>())
     return mlir::emitError(loc, "cannot build a type descriptor of type: ")
@@ -1274,13 +1355,17 @@ void fir::printFirType(FIROpsDialect *, mlir::Type ty,
       recordTypeVisited.erase(type.uniqueKey());
     }
     os << '>';
-    return;
-  }
-  if (auto type = ty.dyn_cast<DimsType>()) {
-    os << "dims<" << type.getRank() << '>';
-    return;
-  }
-  if (ty.isa<FieldType>()) {
+  } break;
+  case fir::FIR_SHAPE:
+    os << "shape<" << ty.cast<ShapeType>().getRank() << '>';
+    break;
+  case fir::FIR_SHAPESHIFT:
+    os << "shapeshift<" << ty.cast<ShapeShiftType>().getRank() << '>';
+    break;
+  case fir::FIR_SLICE:
+    os << "slice<" << ty.cast<SliceType>().getRank() << '>';
+    break;
+  case fir::FIR_FIELD:
     os << "field";
     return;
   }

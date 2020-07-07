@@ -40,7 +40,6 @@ struct BoxCharTypeStorage;
 struct BoxProcTypeStorage;
 struct CharacterTypeStorage;
 struct CplxTypeStorage;
-struct DimsTypeStorage;
 struct FieldTypeStorage;
 struct HeapTypeStorage;
 struct IntTypeStorage;
@@ -51,6 +50,9 @@ struct RealTypeStorage;
 struct RecordTypeStorage;
 struct ReferenceTypeStorage;
 struct SequenceTypeStorage;
+struct ShapeTypeStorage;
+struct ShapeShiftTypeStorage;
+struct SliceTypeStorage;
 struct TypeDescTypeStorage;
 } // namespace detail
 
@@ -192,16 +194,41 @@ public:
                                                           mlir::Type eleTy);
 };
 
-/// The type of a runtime vector that describes triples of array dimension
-/// information. A triple consists of a lower bound, upper bound, and
-/// stride. Each dimension of an array entity may have an associated triple that
-/// maps how elements of the array are accessed.
-class DimsType : public mlir::Type::TypeBase<DimsType, mlir::Type,
-                                             detail::DimsTypeStorage> {
+/// Type of a vector of runtime values that define the shape of a
+/// multidimensional array object. The vector is the extents of each array
+/// dimension. The rank of a ShapeType must be at least 1.
+class ShapeType : public mlir::Type::TypeBase<ShapeType, mlir::Type,
+                                              detail::ShapeTypeStorage> {
 public:
   using Base::Base;
-  static DimsType get(mlir::MLIRContext *ctx, unsigned rank);
-  static bool kindof(unsigned kind) { return kind == TypeKind::FIR_DIMS; }
+  static ShapeType get(mlir::MLIRContext *ctx, unsigned rank);
+  static bool kindof(unsigned kind) { return kind == TypeKind::FIR_SHAPE; }
+  unsigned getRank() const;
+};
+
+/// Type of a vector of runtime values that define the shape and the origin of a
+/// multidimensional array object. The vector is of pairs, origin offset and
+/// extent, of each array dimension. The rank of a ShapeShiftType must be at
+/// least 1.
+class ShapeShiftType
+    : public mlir::Type::TypeBase<ShapeShiftType, mlir::Type,
+                                  detail::ShapeShiftTypeStorage> {
+public:
+  using Base::Base;
+  static ShapeShiftType get(mlir::MLIRContext *ctx, unsigned rank);
+  static bool kindof(unsigned kind) { return kind == TypeKind::FIR_SHAPESHIFT; }
+  unsigned getRank() const;
+};
+
+/// Type of a vector that represents an array slice operation on an array.
+/// Fortran slices are triples of lower bound, upper bound, and stride. The rank
+/// of a SliceType must be at least 1.
+class SliceType : public mlir::Type::TypeBase<SliceType, mlir::Type,
+                                              detail::SliceTypeStorage> {
+public:
+  using Base::Base;
+  static SliceType get(mlir::MLIRContext *ctx, unsigned rank);
+  static bool kindof(unsigned kind) { return kind == TypeKind::FIR_SLICE; }
   unsigned getRank() const;
 };
 
