@@ -98,12 +98,12 @@ func @instructions() {
   %23 = fir.extract_value %22, %21 : (!fir.type<derived{f:f32}>, !fir.field) -> f32
 
 // CHECK: [[VAL_26:%.*]] = constant 1 : i32
-// CHECK: [[VAL_27:%.*]] = fir.gendims [[VAL_26]], [[VAL_21]], [[VAL_26]] : (i32, i32, i32) -> !fir.dims<1>
+// CHECK: [[VAL_27:%.*]] = fir.shape [[VAL_21]] : (i32) -> !fir.shape<1>
 // CHECK: [[VAL_28:%.*]] = constant 1.0
 // CHECK: [[VAL_29:%.*]] = fir.insert_value [[VAL_24]], [[VAL_28]], [[VAL_23]] : (!fir.type<derived{f:f32}>, f32, !fir.field) -> !fir.type<derived{f:f32}>
 // CHECK: [[VAL_30:%.*]] = fir.len_param_index f, !fir.type<derived3{f:f32}>
   %c1 = constant 1 : i32
-  %24 = fir.gendims %c1, %19, %c1 : (i32, i32, i32) -> !fir.dims<1>
+  %24 = fir.shape %19 : (i32) -> !fir.shape<1>
   %cf1 = constant 1.0 : f32
   %25 = fir.insert_value %22, %cf1, %21 : (!fir.type<derived{f:f32}>, f32, !fir.field) -> !fir.type<derived{f:f32}>
   %26 = fir.len_param_index f, !fir.type<derived3{f:f32}>
@@ -143,7 +143,7 @@ func @boxing_match() {
 // CHECK: [[VAL_40:%.*]] = fir.alloca !fir.char<1>
 // CHECK: [[VAL_41:%.*]] = fir.alloca tuple<i32, f64>
 // CHECK: [[VAL_42:%.*]] = fir.embox [[VAL_38]] : (!fir.ref<i32>) -> !fir.box<i32>
-// CHECK: [[VAL_43:%.*]]:6 = fir.unbox [[VAL_42]] : (!fir.box<i32>) -> (!fir.ref<i32>, i32, i32, !fir.tdesc<i32>, i32, !fir.dims<0>)
+// CHECK: [[VAL_43:%.*]]:6 = fir.unbox [[VAL_42]] : (!fir.box<i32>) -> (!fir.ref<i32>, i32, i32, !fir.tdesc<i32>, i32, !fir.array<3x?xindex>)
 // CHECK: [[VAL_44:%.*]] = constant 8 : i32
 // CHECK: [[VAL_45:%.*]] = fir.undefined !fir.char<1>
 // CHECK: [[VAL_46:%.*]] = fir.emboxchar [[VAL_40]], [[VAL_44]] : (!fir.ref<!fir.char<1>>, i32) -> !fir.boxchar<1>
@@ -169,7 +169,7 @@ func @boxing_match() {
   %d3 = fir.alloca !fir.char<1>
   %e6 = fir.alloca tuple<i32,f64>
   %1 = fir.embox %0 : (!fir.ref<i32>) -> !fir.box<i32>
-  %2:6 = fir.unbox %1 : (!fir.box<i32>) -> (!fir.ref<i32>,i32,i32,!fir.tdesc<i32>,i32,!fir.dims<0>)
+  %2:6 = fir.unbox %1 : (!fir.box<i32>) -> (!fir.ref<i32>,i32,i32,!fir.tdesc<i32>,i32,!fir.array<3x?xindex>)
   %c8 = constant 8 : i32
   %3 = fir.undefined !fir.char<1>
   %4 = fir.emboxchar %d3, %c8 : (!fir.ref<!fir.char<1>>, i32) -> !fir.boxchar<1>
@@ -603,4 +603,35 @@ func @early_exit(%ok : i1, %k : i32) -> i1 {
 // CHECK: return [[VAL_190]] : i1
 // CHECK: }
   return %newOk#0 : i1
+}
+
+// CHECK-LABEL: @array_access
+func @array_access(%arr : !fir.ref<!fir.array<?x?xf32>>) {
+  // CHECK-DAG: %[[c1:.*]] = constant 100
+  // CHECK-DAG: %[[c2:.*]] = constant 50
+  %c100 = constant 100 : index
+  %c50 = constant 50 : index
+  // CHECK: %[[sh:.*]] = fir.shape %[[c1]], %[[c2]] : {{.*}} -> !fir.shape<2>
+  %shape = fir.shape %c100, %c50 : (index, index) -> !fir.shape<2>
+  %c47 = constant 47 : index
+  %c78 = constant 78 : index
+  %c3 = constant 3 : index
+  %c18 = constant 18 : index
+  %c36 = constant 36 : index
+  %c4 = constant 4 : index
+  // CHECK: %[[sl:.*]] = fir.slice {{.*}} -> !fir.slice<2>
+  %slice = fir.slice %c47, %c78, %c3, %c18, %c36, %c4 : (index,index,index,index,index,index) -> !fir.slice<2>
+  %c0 = constant 0 : index
+  %c99 = constant 99 : index
+  %c1 = constant 1 : index
+  fir.do_loop %i = %c0 to %c99 step %c1 {
+    %c49 = constant 49 : index
+    fir.do_loop %j = %c0 to %c49 step %c1 {
+      // CHECK: fir.array_coor %{{.*}}(%[[sh]])[%[[sl]]] %{{.*}}, %{{.*}} :
+      %p = fir.array_coor %arr(%shape)[%slice] %i, %j : (!fir.ref<!fir.array<?x?xf32>>, !fir.shape<2>, !fir.slice<2>, index, index) -> !fir.ref<f32>
+      %x = constant 42.0 : f32
+      fir.store %x to %p : !fir.ref<f32>
+    }
+  }
+  return
 }

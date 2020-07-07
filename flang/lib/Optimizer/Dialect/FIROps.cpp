@@ -117,6 +117,57 @@ mlir::Type fir::AllocMemOp::wrapResultType(mlir::Type intype) {
 }
 
 //===----------------------------------------------------------------------===//
+// ArrayCoorOp
+//===----------------------------------------------------------------------===//
+
+/// Custom parser for the fir.embox operation.
+static mlir::ParseResult parseArrayCoorOp(mlir::OpAsmParser &parser,
+                                          mlir::OperationState &result) {
+  mlir::FunctionType type;
+  llvm::SmallVector<mlir::OpAsmParser::OperandType, 8> operands;
+  mlir::OpAsmParser::OperandType memref;
+  unsigned argCounter = 1;
+  if (parser.parseOperand(memref))
+    return mlir::failure();
+  operands.push_back(memref);
+  auto &builder = parser.getBuilder();
+  if (mlir::succeeded(parser.parseOptionalLParen())) {
+    mlir::OpAsmParser::OperandType shape;
+    if (parser.parseOperand(shape) || parser.parseRParen())
+      return mlir::failure();
+    operands.push_back(shape);
+    result.addAttribute(fir::ArrayCoorOp::shapeName(), builder.getUnitAttr());
+    argCounter++;
+  }
+  if (mlir::succeeded(parser.parseOptionalLSquare())) {
+    mlir::OpAsmParser::OperandType slice;
+    if (parser.parseOperand(slice) || parser.parseRSquare())
+      return mlir::failure();
+    operands.push_back(slice);
+    result.addAttribute(fir::ArrayCoorOp::sliceName(), builder.getUnitAttr());
+    argCounter++;
+  }
+  if (parser.parseOperandList(operands, mlir::OpAsmParser::Delimiter::None))
+    return mlir::failure();
+  auto indices = builder.getI32IntegerAttr(operands.size() - argCounter);
+  result.addAttribute(fir::ArrayCoorOp::indicesName(), indices);
+  argCounter = operands.size();
+  if (mlir::succeeded(parser.parseOptionalKeyword("typeparams"))) {
+    if (parser.parseOperandList(operands, mlir::OpAsmParser::Delimiter::None))
+      return mlir::failure();
+    auto lens = builder.getI32IntegerAttr(operands.size() - argCounter);
+    result.addAttribute(fir::ArrayCoorOp::lenpName(), lens);
+  }
+  if (parser.parseOptionalAttrDict(result.attributes) ||
+      parser.parseColonType(type) ||
+      parser.resolveOperands(operands, type.getInputs(), parser.getNameLoc(),
+                             result.operands) ||
+      parser.addTypesToList(type.getResults(), result.types))
+    return mlir::failure();
+  return mlir::success();
+}
+
+//===----------------------------------------------------------------------===//
 // BoxAddrOp
 //===----------------------------------------------------------------------===//
 
@@ -436,25 +487,35 @@ static mlir::ParseResult parseEmboxOp(mlir::OpAsmParser &parser,
   if (parser.parseOperand(memref))
     return mlir::failure();
   operands.push_back(memref);
+  unsigned argCounter = 1;
   auto &builder = parser.getBuilder();
-  if (!parser.parseOptionalLParen()) {
-    if (parser.parseOperandList(operands, mlir::OpAsmParser::Delimiter::None) ||
-        parser.parseRParen())
+  if (mlir::succeeded(parser.parseOptionalLParen())) {
+    mlir::OpAsmParser::OperandType shape;
+    if (parser.parseOperand(shape) || parser.parseRParen())
       return mlir::failure();
-    auto lens = builder.getI32IntegerAttr(operands.size());
-    result.addAttribute(fir::EmboxOp::lenpName(), lens);
+    operands.push_back(shape);
+    result.addAttribute(fir::EmboxOp::shapeName(), builder.getUnitAttr());
+    argCounter++;
   }
-  if (!parser.parseOptionalComma()) {
-    mlir::OpAsmParser::OperandType dims;
-    if (parser.parseOperand(dims))
+  if (mlir::succeeded(parser.parseOptionalLSquare())) {
+    mlir::OpAsmParser::OperandType slice;
+    if (parser.parseOperand(slice) || parser.parseRSquare())
       return mlir::failure();
-    operands.push_back(dims);
-  } else if (!parser.parseOptionalLSquare()) {
+    operands.push_back(slice);
+    result.addAttribute(fir::EmboxOp::sliceName(), builder.getUnitAttr());
+    argCounter++;
+  }
+  if (mlir::succeeded(parser.parseOptionalKeyword("map"))) {
     mlir::AffineMapAttr map;
     if (parser.parseAttribute(map, fir::EmboxOp::layoutName(),
-                              result.attributes) ||
-        parser.parseRSquare())
+                              result.attributes))
       return mlir::failure();
+  }
+  if (mlir::succeeded(parser.parseOptionalKeyword("typeparams"))) {
+    if (parser.parseOperandList(operands, mlir::OpAsmParser::Delimiter::None))
+      return mlir::failure();
+    auto lens = builder.getI32IntegerAttr(operands.size() - argCounter);
+    result.addAttribute(fir::EmboxOp::lenpName(), lens);
   }
   if (parser.parseOptionalAttrDict(result.attributes) ||
       parser.parseColonType(type) ||
@@ -463,17 +524,6 @@ static mlir::ParseResult parseEmboxOp(mlir::OpAsmParser &parser,
       parser.addTypesToList(type.getResults(), result.types))
     return mlir::failure();
   return mlir::success();
-}
-
-/// Get the dims argument to the embox op. If there was no dims argument (i.e.,
-/// the box is on a scalar), then return an null value.
-mlir::Value fir::EmboxOp::getDims() {
-  auto size = dims().size();
-  if (size > 0) {
-    assert(size == 1 && "incorrect number of dims arguments");
-    return *dims().begin();
-  }
-  return {};
 }
 
 //===----------------------------------------------------------------------===//
@@ -1124,7 +1174,7 @@ static mlir::ParseResult parseSelectCase(mlir::OpAsmParser &parser,
       return mlir::failure();
     dests.push_back(dest);
     destArgs.push_back(destArg);
-    if (!parser.parseOptionalRSquare())
+    if (mlir::succeeded(parser.parseOptionalRSquare()))
       break;
     if (parser.parseComma())
       return mlir::failure();
@@ -1323,7 +1373,7 @@ static ParseResult parseSelectType(OpAsmParser &parser,
     attrs.push_back(attr);
     dests.push_back(dest);
     destArgs.push_back(destArg);
-    if (!parser.parseOptionalRSquare())
+    if (mlir::succeeded(parser.parseOptionalRSquare()))
       break;
     if (parser.parseComma())
       return mlir::failure();
@@ -1431,7 +1481,7 @@ static mlir::ParseResult parseWhereOp(OpAsmParser &parser,
     return mlir::failure();
   WhereOp::ensureTerminator(*thenRegion, parser.getBuilder(), result.location);
 
-  if (!parser.parseOptionalKeyword("else")) {
+  if (mlir::succeeded(parser.parseOptionalKeyword("else"))) {
     if (parser.parseRegion(*elseRegion, {}, {}))
       return mlir::failure();
     WhereOp::ensureTerminator(*elseRegion, parser.getBuilder(),
@@ -1477,23 +1527,55 @@ static void print(mlir::OpAsmPrinter &p, fir::WhereOp op) {
 
 void fir::XArrayCoorOp::build(mlir::OpBuilder &builder, OperationState &result,
                               mlir::Type ty, mlir::Value memref,
-                              mlir::ValueRange dims, mlir::ValueRange indices,
+                              mlir::ValueRange shape, mlir::ValueRange shift,
+                              mlir::ValueRange slice, mlir::ValueRange indices,
+                              mlir::ValueRange lenParams,
                               llvm::ArrayRef<mlir::NamedAttribute> attr) {
   result.addOperands(memref);
-  result.addOperands(dims);
+  result.addOperands(shape);
+  result.addOperands(shift);
+  result.addOperands(slice);
   result.addOperands(indices);
+  result.addOperands(lenParams);
   result.addTypes(ty);
   result.addAttributes(attr);
 }
 
-mlir::Operation::operand_range fir::XArrayCoorOp::dimsOperands() {
+mlir::Operation::operand_range fir::XArrayCoorOp::shapeOperands() {
   auto first = std::next(getOperation()->operand_begin());
-  auto off = getAttrOfType<mlir::IntegerAttr>(dimsAttrName()).getInt();
+  auto off = getAttrOfType<mlir::IntegerAttr>(shapeAttrName()).getInt();
   return {first, first + off};
 }
 
+mlir::Operation::operand_range fir::XArrayCoorOp::shiftOperands() {
+  auto off = getAttrOfType<mlir::IntegerAttr>(shapeAttrName()).getInt();
+  auto size = getAttrOfType<mlir::IntegerAttr>(shiftAttrName()).getInt();
+  auto first = std::next(getOperation()->operand_begin() + off);
+  return {first, first + size};
+}
+
+mlir::Operation::operand_range fir::XArrayCoorOp::sliceOperands() {
+  auto off = getAttrOfType<mlir::IntegerAttr>(shapeAttrName()).getInt() +
+             getAttrOfType<mlir::IntegerAttr>(shiftAttrName()).getInt();
+  auto size = getAttrOfType<mlir::IntegerAttr>(sliceAttrName()).getInt();
+  auto first = std::next(getOperation()->operand_begin() + off);
+  return {first, first + size};
+}
+
 mlir::Operation::operand_range fir::XArrayCoorOp::indexOperands() {
-  auto off = getAttrOfType<mlir::IntegerAttr>(dimsAttrName()).getInt();
+  auto off = getAttrOfType<mlir::IntegerAttr>(shapeAttrName()).getInt() +
+             getAttrOfType<mlir::IntegerAttr>(shiftAttrName()).getInt() +
+             getAttrOfType<mlir::IntegerAttr>(sliceAttrName()).getInt();
+  auto size = getAttrOfType<mlir::IntegerAttr>(indexAttrName()).getInt();
+  auto first = std::next(getOperation()->operand_begin() + off);
+  return {first, first + size};
+}
+
+mlir::Operation::operand_range fir::XArrayCoorOp::lenParamOperands() {
+  auto off = getAttrOfType<mlir::IntegerAttr>(shapeAttrName()).getInt() +
+             getAttrOfType<mlir::IntegerAttr>(shiftAttrName()).getInt() +
+             getAttrOfType<mlir::IntegerAttr>(sliceAttrName()).getInt() +
+             getAttrOfType<mlir::IntegerAttr>(indexAttrName()).getInt();
   auto first = std::next(getOperation()->operand_begin() + off);
   return {first, getOperation()->operand_end()};
 }
@@ -1504,23 +1586,43 @@ unsigned fir::XArrayCoorOp::getRank() {
 
 void fir::XEmboxOp::build(mlir::OpBuilder &builder, OperationState &result,
                           mlir::Type ty, mlir::Value memref,
-                          mlir::ValueRange lenParams, mlir::ValueRange dims,
+                          mlir::ValueRange shape, mlir::ValueRange shift,
+                          mlir::ValueRange slice, mlir::ValueRange lenParams,
                           llvm::ArrayRef<mlir::NamedAttribute> attr) {
   result.addOperands(memref);
+  result.addOperands(shape);
+  result.addOperands(shift);
+  result.addOperands(slice);
   result.addOperands(lenParams);
-  result.addOperands(dims);
   result.addTypes(ty);
   result.addAttributes(attr);
 }
 
-mlir::Operation::operand_range fir::XEmboxOp::lenParamOperands() {
+mlir::Operation::operand_range fir::XEmboxOp::shapeOperands() {
   auto first = std::next(getOperation()->operand_begin());
-  auto off = getAttrOfType<mlir::IntegerAttr>(lenParamAttrName()).getInt();
+  auto off = getAttrOfType<mlir::IntegerAttr>(shapeAttrName()).getInt();
   return {first, first + off};
 }
 
-mlir::Operation::operand_range fir::XEmboxOp::dimsOperands() {
-  auto off = getAttrOfType<mlir::IntegerAttr>(lenParamAttrName()).getInt();
+mlir::Operation::operand_range fir::XEmboxOp::shiftOperands() {
+  auto off = getAttrOfType<mlir::IntegerAttr>(shapeAttrName()).getInt();
+  auto size = getAttrOfType<mlir::IntegerAttr>(shiftAttrName()).getInt();
+  auto first = std::next(getOperation()->operand_begin() + off);
+  return {first, first + size};
+}
+
+mlir::Operation::operand_range fir::XEmboxOp::sliceOperands() {
+  auto off = getAttrOfType<mlir::IntegerAttr>(shapeAttrName()).getInt() +
+             getAttrOfType<mlir::IntegerAttr>(shiftAttrName()).getInt();
+  auto size = getAttrOfType<mlir::IntegerAttr>(sliceAttrName()).getInt();
+  auto first = std::next(getOperation()->operand_begin() + off);
+  return {first, first + size};
+}
+
+mlir::Operation::operand_range fir::XEmboxOp::lenParamOperands() {
+  auto off = getAttrOfType<mlir::IntegerAttr>(shapeAttrName()).getInt() +
+             getAttrOfType<mlir::IntegerAttr>(shiftAttrName()).getInt() +
+             getAttrOfType<mlir::IntegerAttr>(sliceAttrName()).getInt();
   auto first = std::next(getOperation()->operand_begin() + off);
   return {first, getOperation()->operand_end()};
 }
