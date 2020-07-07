@@ -4,8 +4,8 @@
 ! RUN:   FileCheck %s --check-prefix=FIRDialect
 ! RUN: bbc -fopenmp -emit-llvm %s -o - | \
 ! RUN:   FileCheck %s --check-prefix=LLVMIRDialect
-! RUN: bbc -fopenmp -emit-llvm %s -o - | \
-! RUN:   mlir-translate -mlir-to-llvmir - | FileCheck %s --check-prefix=LLVMIR
+! RUN: bbc -fopenmp -emit-fir %s -o - | \
+! RUN:   tco | FileCheck %s --check-prefix=LLVMIR
 
 program barrier
 
