@@ -240,8 +240,6 @@ public:
   using Base::Base;
   static DimsType get(mlir::MLIRContext *ctx, unsigned rank);
   static bool kindof(unsigned kind) { return kind == TypeKind::FIR_DIMS; }
-
-  /// returns -1 if the rank is unknown
   unsigned getRank() const;
 };
 
