@@ -201,8 +201,7 @@ class DimsType : public mlir::Type::TypeBase<DimsType, mlir::Type,
 public:
   using Base::Base;
   static DimsType get(mlir::MLIRContext *ctx, unsigned rank);
-
-  /// returns -1 if the rank is unknown
+  static bool kindof(unsigned kind) { return kind == TypeKind::FIR_DIMS; }
   unsigned getRank() const;
 };
 
