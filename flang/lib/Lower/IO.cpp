@@ -12,6 +12,7 @@
 #include "flang/Lower/Bridge.h"
 #include "flang/Lower/CharacterExpr.h"
 #include "flang/Lower/ComplexExpr.h"
+#include "flang/Lower/ConvertExpr.h"
 #include "flang/Lower/FIRBuilder.h"
 #include "flang/Lower/PFTBuilder.h"
 #include "flang/Lower/Runtime.h"
@@ -487,13 +488,10 @@ lowerSourceTextAsStringLit(Fortran::lower::AbstractConverter &converter,
   text = text.drop_front(text.find('('));
   text = text.take_front(text.rfind(')') + 1);
   auto &builder = converter.getFirOpBuilder();
-  auto lit = builder.createStringLit(
-      loc, /*FIXME*/ fir::CharacterType::get(builder.getContext(), 1), text);
-  auto data =
-      Fortran::lower::CharacterExprHelper{builder, loc}.materializeCharacter(
-          lit);
-  auto buff = builder.createConvert(loc, strTy, data.first);
-  auto len = builder.createConvert(loc, lenTy, data.second);
+  auto addrGlobalStringLit =
+      fir::getBase(createStringLiteral(loc, converter, text, text.size()));
+  auto buff = builder.createConvert(loc, strTy, addrGlobalStringLit);
+  auto len = builder.createIntegerConstant(loc, lenTy, text.size());
   return {buff, len, mlir::Value{}};
 }
 
