@@ -1,7 +1,6 @@
 // Test the FIR types
 
 // RUN: tco -emit-fir %s | tco -emit-fir | FileCheck %s
-// UNSUPPORTED: !fir
 
 // Fortran Intrinsic types
 // CHECK-LABEL: func @it1() -> !fir.int<4>
@@ -9,11 +8,15 @@
 // CHECK-LABEL: func @it3() -> !fir.complex<8>
 // CHECK-LABEL: func @it4() -> !fir.logical<1>
 // CHECK-LABEL: func @it5() -> !fir.char<1>
+// CHECK-LABEL: func @it6() -> !fir.char<2,10>
+// CHECK-LABEL: func @it7() -> !fir.char<4,?>
 func @it1() -> !fir.int<4>
 func @it2() -> !fir.real<8>
 func @it3() -> !fir.complex<8>
 func @it4() -> !fir.logical<1>
 func @it5() -> !fir.char<1>
+func @it6() -> !fir.char<2,10>
+func @it7() -> !fir.char<4,?>
 
 // Fortran Derived types (records)
 // CHECK-LABEL: func @dvd1() -> !fir.type<derived1>
