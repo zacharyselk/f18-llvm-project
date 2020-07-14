@@ -47,7 +47,6 @@ inline void registerFIR() {
     mlir::registerDialect<mlir::StandardOpsDialect>();
     mlir::registerDialect<mlir::vector::VectorDialect>();
     mlir::registerDialect<FIROpsDialect>();
-    mlir::registerDialect<mlir::omp::OpenMPDialect>();
     return true;
   }();
 }
