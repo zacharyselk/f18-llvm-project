@@ -5,6 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// Coding style: https://mlir.llvm.org/getting_started/DeveloperGuide/
+//
+//===----------------------------------------------------------------------===//
 
 #ifndef OPTIMIZER_DIALECT_FIRTYPE_H
 #define OPTIMIZER_DIALECT_FIRTYPE_H
@@ -93,15 +97,28 @@ mlir::Type dyn_cast_ptrEleTy(mlir::Type t);
 // Intrinsic types
 
 /// Model of the Fortran CHARACTER intrinsic type, including the KIND type
-/// parameter. The model does not include a LEN type parameter. A CharacterType
-/// is thus the type of a single character value.
+/// parameter. The model optionally includes a LEN type parameter. A
+/// CharacterType is thus the type of both a single character value and a
+/// character with a LEN parameter.
 class CharacterType
     : public mlir::Type::TypeBase<CharacterType, mlir::Type,
                                   detail::CharacterTypeStorage> {
 public:
   using Base::Base;
-  static CharacterType get(mlir::MLIRContext *ctxt, KindTy kind);
+  static CharacterType get(mlir::MLIRContext *ctxt, KindTy kind,
+                           std::int64_t len = 1);
+  static constexpr bool kindof(unsigned kind) {
+    return kind == TypeKind::FIR_CHARACTER;
+  }
   KindTy getFKind() const;
+
+  /// CHARACTER is a singleton and has a LEN of 1.
+  static constexpr std::int64_t singleton() { return 1; }
+  /// CHARACTER has an unknown LEN property.
+  static constexpr std::int64_t unknownLen() { return -1; }
+
+  /// Access to a CHARACTER's LEN property. Defaults to 1.
+  std::int64_t getLen() const;
 };
 
 /// Model of a Fortran COMPLEX intrinsic type, including the KIND type

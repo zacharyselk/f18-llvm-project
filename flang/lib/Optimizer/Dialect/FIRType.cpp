@@ -5,6 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// Coding style: https://mlir.llvm.org/getting_started/DeveloperGuide/
+//
+//===----------------------------------------------------------------------===//
 
 #include "flang/Optimizer/Dialect/FIRType.h"
 #include "flang/Optimizer/Dialect/FIRDialect.h"
@@ -83,7 +87,24 @@ BoxProcType parseBoxProc(mlir::DialectAsmParser &parser, mlir::Location loc) {
 
 // `char` `<` kind `>`
 CharacterType parseCharacter(mlir::DialectAsmParser &parser) {
-  return parseKindSingleton<CharacterType>(parser);
+  int kind = 0;
+  if (parser.parseLess() || parser.parseInteger(kind)) {
+    parser.emitError(parser.getCurrentLocation(), "kind value expected");
+    return {};
+  }
+  std::int64_t len = 1;
+  if (mlir::succeeded(parser.parseOptionalComma()))
+    if (parser.parseInteger(len)) {
+      if (mlir::succeeded(parser.parseOptionalQuestion())) {
+        len = fir::CharacterType::unknownLen();
+      } else {
+        parser.emitError(parser.getCurrentLocation(), "len value expected");
+        return {};
+      }
+    }
+  if (parser.parseGreater())
+    return {};
+  return CharacterType::get(parser.getBuilder().getContext(), kind, len);
 }
 
 // `complex` `<` kind `>`
@@ -376,26 +397,35 @@ namespace detail {
 
 /// `CHARACTER` storage
 struct CharacterTypeStorage : public mlir::TypeStorage {
-  using KeyTy = KindTy;
+  using KeyTy = std::tuple<KindTy, std::int64_t>;
 
-  static unsigned hashKey(const KeyTy &key) { return llvm::hash_combine(key); }
+  static unsigned hashKey(const KeyTy &key) {
+    auto hashVal = llvm::hash_combine(std::get<0>(key));
+    return llvm::hash_combine(hashVal, llvm::hash_combine(std::get<1>(key)));
+  }
 
-  bool operator==(const KeyTy &key) const { return key == getFKind(); }
+  bool operator==(const KeyTy &key) const {
+    return key == KeyTy{getFKind(), getLen()};
+  }
 
   static CharacterTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
-                                         KindTy kind) {
+                                         const KeyTy &key) {
     auto *storage = allocator.allocate<CharacterTypeStorage>();
-    return new (storage) CharacterTypeStorage{kind};
+    return new (storage)
+        CharacterTypeStorage{std::get<0>(key), std::get<1>(key)};
   }
 
   KindTy getFKind() const { return kind; }
+  std::int64_t getLen() const { return len; }
 
 protected:
   KindTy kind;
+  std::int64_t len;
 
 private:
   CharacterTypeStorage() = delete;
-  explicit CharacterTypeStorage(KindTy kind) : kind{kind} {}
+  explicit CharacterTypeStorage(KindTy kind, std::int64_t len)
+      : kind{kind}, len{len} {}
 };
 
 struct ShapeTypeStorage : public mlir::TypeStorage {
@@ -924,11 +954,14 @@ mlir::Type dyn_cast_ptrEleTy(mlir::Type t) {
 
 // CHARACTER
 
-CharacterType fir::CharacterType::get(mlir::MLIRContext *ctxt, KindTy kind) {
-  return Base::get(ctxt, kind);
+CharacterType fir::CharacterType::get(mlir::MLIRContext *ctxt, KindTy kind,
+                                      std::int64_t len) {
+  return Base::get(ctxt, kind, len);
 }
 
-int fir::CharacterType::getFKind() const { return getImpl()->getFKind(); }
+KindTy fir::CharacterType::getFKind() const { return getImpl()->getFKind(); }
+
+std::int64_t fir::CharacterType::getLen() const { return getImpl()->getLen(); }
 
 // Field
 
@@ -948,7 +981,7 @@ LogicalType fir::LogicalType::get(mlir::MLIRContext *ctxt, KindTy kind) {
   return Base::get(ctxt, kind);
 }
 
-int fir::LogicalType::getFKind() const { return getImpl()->getFKind(); }
+KindTy fir::LogicalType::getFKind() const { return getImpl()->getFKind(); }
 
 // INTEGER
 
@@ -956,7 +989,7 @@ IntType fir::IntType::get(mlir::MLIRContext *ctxt, KindTy kind) {
   return Base::get(ctxt, kind);
 }
 
-int fir::IntType::getFKind() const { return getImpl()->getFKind(); }
+KindTy fir::IntType::getFKind() const { return getImpl()->getFKind(); }
 
 // COMPLEX
 
@@ -976,7 +1009,7 @@ RealType fir::RealType::get(mlir::MLIRContext *ctxt, KindTy kind) {
   return Base::get(ctxt, kind);
 }
 
-int fir::RealType::getFKind() const { return getImpl()->getFKind(); }
+KindTy fir::RealType::getFKind() const { return getImpl()->getFKind(); }
 
 // Box<T>
 
@@ -1322,15 +1355,25 @@ void fir::printFirType(FIROpsDialect *, mlir::Type ty,
     os << '>';
     return;
   }
-  if (auto type = ty.dyn_cast<CharacterType>()) {
-    os << "char<" << type.getFKind() << '>';
+  if (auto chTy = ty.dyn_cast<CharacterType>()) { // intrinsic
+    os << "char<" << chTy.getFKind();
+    auto len = chTy.getLen();
+    if (len != fir::CharacterType::singleton()) {
+      os << ',';
+      if (len == fir::CharacterType::unknownLen())
+        os << '?';
+      else
+        os << len;
+    }
+    os << '>';
     return;
   }
-  if (auto type = ty.dyn_cast<CplxType>()) {
+  if (auto type = ty.dyn_cast<CplxType>()) { // intrinsic
     os << "complex<" << type.getFKind() << '>';
     return;
   }
-  if (auto type = ty.dyn_cast<RecordType>()) {
+  if (auto type = ty.dyn_cast<RecordType>()) { // derived
+    auto type = ty.cast<fir::RecordType>();
     os << "type<" << type.getName();
     if (!recordTypeVisited.count(type.uniqueKey())) {
       recordTypeVisited.insert(type.uniqueKey());
@@ -1355,17 +1398,21 @@ void fir::printFirType(FIROpsDialect *, mlir::Type ty,
       recordTypeVisited.erase(type.uniqueKey());
     }
     os << '>';
-  } break;
-  case fir::FIR_SHAPE:
-    os << "shape<" << ty.cast<ShapeType>().getRank() << '>';
-    break;
-  case fir::FIR_SHAPESHIFT:
-    os << "shapeshift<" << ty.cast<ShapeShiftType>().getRank() << '>';
-    break;
-  case fir::FIR_SLICE:
-    os << "slice<" << ty.cast<SliceType>().getRank() << '>';
-    break;
-  case fir::FIR_FIELD:
+    return;
+  }
+  if (auto type = ty.dyn_cast<ShapeType>()) {
+    os << "shape<" << type.getRank() << '>';
+    return;
+  }
+  if (auto type = ty.dyn_cast<ShapeShiftType>()) {
+    os << "shapeshift<" << type.getRank() << '>';
+    return;
+  }
+  if (auto type = ty.dyn_cast<SliceType>()) {
+    os << "slice<" << type.getRank() << '>';
+    return;
+  }
+  if (ty.isa<FieldType>()) {  
     os << "field";
     return;
   }
@@ -1375,7 +1422,7 @@ void fir::printFirType(FIROpsDialect *, mlir::Type ty,
     os << '>';
     return;
   }
-  if (auto type = ty.dyn_cast<fir::IntType>()) {
+  if (auto type = ty.dyn_cast<fir::IntType>()) { // intrinsic
     os << "int<" << type.getFKind() << '>';
     return;
   }
@@ -1383,7 +1430,7 @@ void fir::printFirType(FIROpsDialect *, mlir::Type ty,
     os << "len";
     return;
   }
-  if (auto type = ty.dyn_cast<LogicalType>()) {
+  if (auto type = ty.dyn_cast<LogicalType>()) { // intrinsic
     os << "logical<" << type.getFKind() << '>';
     return;
   }
@@ -1393,7 +1440,7 @@ void fir::printFirType(FIROpsDialect *, mlir::Type ty,
     os << '>';
     return;
   }
-  if (auto type = ty.dyn_cast<fir::RealType>()) {
+  if (auto type = ty.dyn_cast<fir::RealType>()) { // intrinsic
     os << "real<" << type.getFKind() << '>';
     return;
   }
