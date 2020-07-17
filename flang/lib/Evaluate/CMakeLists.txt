@@ -46,5 +46,6 @@ add_flang_library(FortranEvaluate
 
   DEPENDS
   omp_gen
+  acc_gen
 )
 
