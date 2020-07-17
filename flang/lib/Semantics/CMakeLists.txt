@@ -46,6 +46,7 @@ add_flang_library(FortranSemantics
   DEPENDS
   acc_gen
   omp_gen
+  acc_gen
 
   LINK_LIBS
   FortranCommon
