@@ -175,13 +175,13 @@ static void makeNextConditionalOn(Fortran::lower::FirOpBuilder &builder,
   // A previous I/O call for a statement returned the bool `ok`.  If this call
   // is in a fir.iterate_while loop, the result must be propagated up to the
   // loop scope.  That is done in genIoLoop, but it is enabled here.
-  auto whereOp =
+  auto ifOp =
       inIterWhileLoop
-          ? builder.create<fir::WhereOp>(loc, builder.getI1Type(), ok, true)
-          : builder.create<fir::WhereOp>(loc, ok, /*withOtherwise=*/false);
+          ? builder.create<fir::IfOp>(loc, builder.getI1Type(), ok, true)
+          : builder.create<fir::IfOp>(loc, ok, /*withOtherwise=*/false);
   if (!insertPt.isSet())
     insertPt = builder.saveInsertionPoint();
-  builder.setInsertionPointToStart(&whereOp.whereRegion().front());
+  builder.setInsertionPointToStart(&ifOp.whereRegion().front());
 }
 
 template <typename D>
@@ -410,13 +410,13 @@ static void genIoLoop(Fortran::lower::AbstractConverter &converter,
   auto falseValue = builder.createIntegerConstant(loc, builder.getI1Type(), 0);
   genItemList(ioImpliedDo, true);
   // Unwind nested I/O call scopes, filling in true and false ResultOp's.
-  for (auto *op = builder.getBlock()->getParentOp(); isa<fir::WhereOp>(op);
+  for (auto *op = builder.getBlock()->getParentOp(); isa<fir::IfOp>(op);
        op = op->getBlock()->getParentOp()) {
-    auto whereOp = dyn_cast<fir::WhereOp>(op);
-    auto *lastOp = &whereOp.whereRegion().front().back();
+    auto ifOp = dyn_cast<fir::IfOp>(op);
+    auto *lastOp = &ifOp.whereRegion().front().back();
     builder.setInsertionPointAfter(lastOp);
     builder.create<fir::ResultOp>(loc, lastOp->getResult(0)); // runtime result
-    builder.setInsertionPointToStart(&whereOp.otherRegion().front());
+    builder.setInsertionPointToStart(&ifOp.otherRegion().front());
     builder.create<fir::ResultOp>(loc, falseValue); // known false result
   }
   builder.restoreInsertionPoint(insertPt);
