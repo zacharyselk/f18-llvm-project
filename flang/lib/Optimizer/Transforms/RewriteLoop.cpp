@@ -136,8 +136,8 @@ public:
   using OpRewritePattern::OpRewritePattern;
 
   mlir::LogicalResult
-  matchAndRewrite(IfOp ifop, mlir::PatternRewriter &rewriter) const override {
-    auto loc = ifop.getLoc();
+  matchAndRewrite(IfOp ifOp, mlir::PatternRewriter &rewriter) const override {
+    auto loc = ifOp.getLoc();
 
     // Split the block containing the 'fir.if' into two parts.  The part before
     // will contain the condition, the part after will be the continuation
@@ -146,30 +146,30 @@ public:
     auto opPosition = rewriter.getInsertionPoint();
     auto *remainingOpsBlock = rewriter.splitBlock(condBlock, opPosition);
     mlir::Block *continueBlock;
-    if (ifop.getNumResults() == 0) {
+    if (ifOp.getNumResults() == 0) {
       continueBlock = remainingOpsBlock;
     } else {
       continueBlock =
-          rewriter.createBlock(remainingOpsBlock, ifop.getResultTypes());
+          rewriter.createBlock(remainingOpsBlock, ifOp.getResultTypes());
       rewriter.create<mlir::BranchOp>(loc, remainingOpsBlock);
     }
 
     // Move blocks from the "then" region to the region containing 'fir.if',
     // place it before the continuation block, and branch to it.
-    auto &ifopRegion = ifop.whereRegion();
-    auto *ifopBlock = &ifopRegion.front();
-    auto *ifopTerminator = ifopRegion.back().getTerminator();
-    auto ifopTerminatorOperands = ifopTerminator->getOperands();
-    rewriter.setInsertionPointToEnd(&ifopRegion.back());
-    rewriter.create<mlir::BranchOp>(loc, continueBlock, ifopTerminatorOperands);
-    rewriter.eraseOp(ifopTerminator);
-    rewriter.inlineRegionBefore(ifopRegion, continueBlock);
+    auto &ifOpRegion = ifOp.whereRegion();
+    auto *ifOpBlock = &ifOpRegion.front();
+    auto *ifOpTerminator = ifOpRegion.back().getTerminator();
+    auto ifOpTerminatorOperands = ifOpTerminator->getOperands();
+    rewriter.setInsertionPointToEnd(&ifOpRegion.back());
+    rewriter.create<mlir::BranchOp>(loc, continueBlock, ifOpTerminatorOperands);
+    rewriter.eraseOp(ifOpTerminator);
+    rewriter.inlineRegionBefore(ifOpRegion, continueBlock);
 
     // Move blocks from the "else" region (if present) to the region containing
     // 'fir.if', place it before the continuation block and branch to it.  It
     // will be placed after the "then" regions.
     auto *otherwiseBlock = continueBlock;
-    auto &otherwiseRegion = ifop.otherRegion();
+    auto &otherwiseRegion = ifOp.otherRegion();
     if (!otherwiseRegion.empty()) {
       otherwiseBlock = &otherwiseRegion.front();
       auto *otherwiseTerm = otherwiseRegion.back().getTerminator();
@@ -183,9 +183,9 @@ public:
 
     rewriter.setInsertionPointToEnd(condBlock);
     rewriter.create<mlir::CondBranchOp>(
-        loc, ifop.condition(), ifopBlock, llvm::ArrayRef<mlir::Value>(),
+        loc, ifOp.condition(), ifOpBlock, llvm::ArrayRef<mlir::Value>(),
         otherwiseBlock, llvm::ArrayRef<mlir::Value>());
-    rewriter.replaceOp(ifop, continueBlock->getArguments());
+    rewriter.replaceOp(ifOp, continueBlock->getArguments());
     return success();
   }
 };

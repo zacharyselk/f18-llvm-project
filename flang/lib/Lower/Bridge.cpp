@@ -547,10 +547,10 @@ private:
     auto cond = genExprValue(*Fortran::semantics::GetExpr(
         std::get<Fortran::parser::ScalarLogicalExpr>(stmt->t)));
     auto bcc = builder->createConvert(toLocation(), builder->getI1Type(), cond);
-    auto ifop = builder->create<fir::IfOp>(toLocation(), bcc, withElse);
+    auto ifOp = builder->create<fir::IfOp>(toLocation(), bcc, withElse);
     auto insPt = builder->saveInsertionPoint();
-    builder->setInsertionPointToStart(&ifop.whereRegion().front());
-    return {insPt, ifop};
+    builder->setInsertionPointToStart(&ifOp.whereRegion().front());
+    return {insPt, ifOp};
   }
 
   mlir::Value genFIRLoopIndex(const Fortran::parser::ScalarExpr &x,
