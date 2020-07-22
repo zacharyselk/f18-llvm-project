@@ -211,8 +211,9 @@ static mlir::FuncOp getOutputFunc(mlir::Location loc,
     return getIORuntimeFunc<mkIOKey(OutputDescriptor)>(loc, builder);
   if (Fortran::lower::CharacterExprHelper::isCharacter(type))
     return getIORuntimeFunc<mkIOKey(OutputAscii)>(loc, builder);
-  if (type.isa<fir::SequenceType>())
-    return getIORuntimeFunc<mkIOKey(OutputDescriptor)>(loc, builder);
+  if (auto refTy = type.dyn_cast<fir::ReferenceType>())
+    if (refTy.getEleTy().isa<fir::SequenceType>())
+      return getIORuntimeFunc<mkIOKey(OutputDescriptor)>(loc, builder);
   // TODO: unaccounted for type to be handled
   mlir::emitError(loc, "output for entity type ") << type << " not implemented";
   return {};
@@ -255,6 +256,11 @@ genOutputItemList(Fortran::lower::AbstractConverter &converter,
       outputFuncArgs.push_back(parts.first);
       outputFuncArgs.push_back(parts.second);
     } else {
+      if (argType.isa<fir::BoxType>()) {
+        // TODO: add dynamic shape op
+        itemValue = builder.create<fir::EmboxOp>(
+            loc, fir::BoxType::get(itemType), itemValue);
+      }
       itemValue = builder.createConvert(loc, argType, itemValue);
       outputFuncArgs.push_back(itemValue);
     }
