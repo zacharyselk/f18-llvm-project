@@ -906,6 +906,105 @@ constexpr bool isDataTransferNamelist<Fortran::parser::PrintStmt>(
   return false;
 }
 
+/// Lowers a format statment that uses a assigned varible label reference as
+/// a select operation to allow for run-time selection of the format statement
+// Possible TODO: Instead of inlining a selectOp every time there is a format
+// statement a function with the selectOpcould be generated to reduce code size
+static std::tuple<mlir::Value, mlir::Value, mlir::Value>
+lowerReferenceAsStringSelect(Fortran::lower::AbstractConverter &converter,
+                             mlir::Location loc,
+                             const Fortran::evaluate::Expr
+                             <Fortran::evaluate::SomeType> &expr,
+                             Fortran::lower::pft::LabelEvalMap *labelMap,
+                             Fortran::lower::pft::SymbolLabelMap &assignMap,
+                             Fortran::lower::SymMap &localSymbols,
+                             mlir::Type strTy, mlir::Type lenTy) {
+
+  // Create the requisite blocks to inline a selectOp
+  auto &builder = converter.getFirOpBuilder();
+  auto* startBlock = builder.getBlock();
+  auto* endBlock = startBlock->splitBlock(builder.getInsertionPoint());
+  auto* block = startBlock->splitBlock(builder.getInsertionPoint());
+  builder.setInsertionPointToEnd(block);
+
+  llvm::SmallVector<int64_t, 5> indexList;
+  llvm::SmallVector<mlir::Block *, 5> blockList;
+  auto stringRefType = builder.getRefType(
+    fir::SequenceType::get({fir::SequenceType::getUnknownExtent()},
+                           fir::CharacterType::get(builder.getContext(), 1)));
+  auto symbol = GetLastSymbol(&expr);
+  auto labelIter = assignMap.find(*symbol);
+  assert(labelIter != assignMap.end() && "ICE: Label not found in map");
+  auto labels = labelIter->second;
+
+  for (auto label : labels) {
+    indexList.push_back(label);
+    auto iter = labelMap->find(label);
+    assert(iter != labelMap->end() && "ICE: Label is missing from the table");
+
+    // Extract the inner text from the format statement
+    auto text = toStringRef(iter->second->position);
+    text = text.drop_front(text.find('('));
+    text = text.take_front(text.rfind(')') + 1);
+
+    // Lower the format string as a string literal and get the reference to it
+    auto formatString = fir::getBase
+      (createStringLiteral(loc, converter, text, text.size()));
+    auto stringLen = builder.create<mlir::ConstantIntOp>
+      (loc, text.size(), builder.getI64Type());
+    auto formatStringConv = builder.createConvert
+      (loc, stringRefType, formatString);
+
+    // Pass the format string reference and the string length out of the select
+    // statement
+    llvm::SmallVector<mlir::Value, 8> args;
+    args.push_back(formatStringConv);
+    args.push_back(stringLen);
+    builder.create<mlir::BranchOp>(loc, endBlock, args);
+
+    // Add block to the list of cases and make a new one
+    blockList.push_back(block);
+    block = block->splitBlock(builder.getInsertionPoint());
+    builder.setInsertionPointToEnd(block);
+  }
+
+  // Create the unit case which should result in an error
+  auto* unitBlock = block->splitBlock(builder.getInsertionPoint());
+  builder.setInsertionPointToEnd(unitBlock);
+
+  // TODO: Replace with instructions to crash the program
+  auto emptyString = fir::getBase(createStringLiteral(loc, converter, "", 0));
+  auto emptyStringConv = builder.createConvert(loc, stringRefType, emptyString);
+  auto zero = builder.create<mlir::ConstantIntOp>(loc, 0, builder.getI64Type());
+  llvm::SmallVector<mlir::Value, 8> args;
+  args.push_back(emptyStringConv);
+  args.push_back(zero);
+  builder.create<mlir::BranchOp>(loc, endBlock, args);
+
+  // Add unit case to the select statement
+  blockList.push_back(unitBlock);
+
+  // Lower the selectOp
+  builder.setInsertionPointToEnd(startBlock);
+  auto label = Fortran::lower::createSomeExpression(loc, converter,
+                                                    expr, localSymbols);
+  builder.create<fir::SelectOp>(loc, label, indexList, blockList);
+
+  builder.setInsertionPointToEnd(endBlock);
+  endBlock->addArgument(stringRefType);
+  endBlock->addArgument(builder.getI64Type());
+
+  // Handle and return the string reference and length selected by the selectOp
+  auto stringRef = endBlock->getArgument(0);
+  auto stringLen = endBlock->getArgument(1);
+  auto helper = Fortran::lower::CharacterExprHelper{builder,loc};
+  auto charBox = helper.toExtendedValue(stringRef, stringLen).getCharBox();
+  auto buff = builder.createConvert(loc, strTy, charBox->getBuffer());
+  auto len = builder.createConvert(loc, lenTy, charBox->getLen());
+
+  return {buff, len, mlir::Value{}};
+}
+
 /// Generate a reference to a format string.  There are four cases - a format
 /// statement label, a character format expression, an integer that holds the
 /// label of a format statement, and the * case.  The first three are done here.
@@ -914,7 +1013,8 @@ static std::tuple<mlir::Value, mlir::Value, mlir::Value>
 genFormat(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
           const Fortran::parser::Format &format, mlir::Type strTy,
           mlir::Type lenTy, Fortran::lower::pft::LabelEvalMap &labelMap,
-          Fortran::lower::pft::SymbolLabelMap &assignMap) {
+          Fortran::lower::pft::SymbolLabelMap &assignMap,
+          SymMap &localSymbols) {
   if (const auto *label = std::get_if<Fortran::parser::Label>(&format.u)) {
     // format statement label
     auto iter = labelMap.find(*label);
@@ -929,12 +1029,12 @@ genFormat(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
           *e, Fortran::common::TypeCategory::Character))
     // character expression
     return lowerStringLit(converter, loc, *pExpr, strTy, lenTy);
+
   // integer variable containing an ASSIGN label
   assert(Fortran::semantics::ExprHasTypeCategory(
       *e, Fortran::common::TypeCategory::Integer));
-  // TODO - implement this
-  llvm::report_fatal_error(
-      "using a variable to reference a FORMAT statement; not implemented yet");
+  return lowerReferenceAsStringSelect(converter, loc, *e, &labelMap,
+                                      assignMap, localSymbols, strTy, lenTy);
 }
 
 template <typename A>
@@ -942,12 +1042,13 @@ std::tuple<mlir::Value, mlir::Value, mlir::Value>
 getFormat(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
           const A &stmt, mlir::Type strTy, mlir::Type lenTy,
           Fortran::lower::pft::LabelEvalMap &labelMap,
-          Fortran::lower::pft::SymbolLabelMap &assignMap) {
+          Fortran::lower::pft::SymbolLabelMap &assignMap,
+          SymMap &localSymbols) {
   if (stmt.format && !formatIsActuallyNamelist(*stmt.format))
     return genFormat(converter, loc, *stmt.format, strTy, lenTy, labelMap,
-                     assignMap);
+                     assignMap, localSymbols);
   return genFormat(converter, loc, *getIOControl<Fortran::parser::Format>(stmt),
-                   strTy, lenTy, labelMap, assignMap);
+                   strTy, lenTy, labelMap, assignMap, localSymbols);
 }
 template <>
 std::tuple<mlir::Value, mlir::Value, mlir::Value>
@@ -955,9 +1056,10 @@ getFormat<Fortran::parser::PrintStmt>(
     Fortran::lower::AbstractConverter &converter, mlir::Location loc,
     const Fortran::parser::PrintStmt &stmt, mlir::Type strTy, mlir::Type lenTy,
     Fortran::lower::pft::LabelEvalMap &labelMap,
-    Fortran::lower::pft::SymbolLabelMap &assignMap) {
+    Fortran::lower::pft::SymbolLabelMap &assignMap,
+    SymMap &localSymbols) {
   return genFormat(converter, loc, std::get<Fortran::parser::Format>(stmt.t),
-                   strTy, lenTy, labelMap, assignMap);
+                   strTy, lenTy, labelMap, assignMap, localSymbols);
 }
 
 /// Generate a reference to a buffer and the length of buffer.There are 3 cases
@@ -1234,7 +1336,8 @@ void genBeginCallArguments(llvm::SmallVector<mlir::Value, 8> &ioArgs,
                            bool isList, bool isIntern, bool isOtherIntern,
                            bool isAsynch, bool isNml,
                            Fortran::lower::pft::LabelEvalMap &labelMap,
-                           Fortran::lower::pft::SymbolLabelMap &assignMap) {
+                           Fortran::lower::pft::SymbolLabelMap &assignMap,
+                           SymMap &localSymbols) {
   auto &builder = converter.getFirOpBuilder();
   if constexpr (hasIOCtrl) {
     // READ/WRITE cases have a wide variety of argument permutations
@@ -1257,7 +1360,8 @@ void genBeginCallArguments(llvm::SmallVector<mlir::Value, 8> &ioArgs,
         // | [format, LEN], ...
         auto pair = getFormat(
             converter, loc, stmt, ioFuncTy.getInput(ioArgs.size()),
-            ioFuncTy.getInput(ioArgs.size() + 1), labelMap, assignMap);
+            ioFuncTy.getInput(ioArgs.size() + 1), labelMap, assignMap,
+            localSymbols);
         ioArgs.push_back(std::get<0>(pair));
         ioArgs.push_back(std::get<1>(pair));
       }
@@ -1278,7 +1382,8 @@ void genBeginCallArguments(llvm::SmallVector<mlir::Value, 8> &ioArgs,
         // | [format, LEN], ...
         auto pair = getFormat(
             converter, loc, stmt, ioFuncTy.getInput(ioArgs.size()),
-            ioFuncTy.getInput(ioArgs.size() + 1), labelMap, assignMap);
+            ioFuncTy.getInput(ioArgs.size() + 1), labelMap, assignMap,
+            localSymbols);
         ioArgs.push_back(std::get<0>(pair));
         ioArgs.push_back(std::get<1>(pair));
       }
@@ -1293,7 +1398,8 @@ void genBeginCallArguments(llvm::SmallVector<mlir::Value, 8> &ioArgs,
         // [format, LEN], ...
         auto pair = getFormat(
             converter, loc, stmt, ioFuncTy.getInput(ioArgs.size()),
-            ioFuncTy.getInput(ioArgs.size() + 1), labelMap, assignMap);
+            ioFuncTy.getInput(ioArgs.size() + 1), labelMap, assignMap,
+            localSymbols);
         ioArgs.push_back(std::get<0>(pair));
         ioArgs.push_back(std::get<1>(pair));
       }
@@ -1308,7 +1414,8 @@ void genBeginCallArguments(llvm::SmallVector<mlir::Value, 8> &ioArgs,
       // [format, LEN], ...
       auto pair =
           getFormat(converter, loc, stmt, ioFuncTy.getInput(ioArgs.size()),
-                    ioFuncTy.getInput(ioArgs.size() + 1), labelMap, assignMap);
+                    ioFuncTy.getInput(ioArgs.size() + 1), labelMap, assignMap,
+                    localSymbols);
       ioArgs.push_back(std::get<0>(pair));
       ioArgs.push_back(std::get<1>(pair));
     }
@@ -1323,7 +1430,8 @@ template <bool isInput, bool hasIOCtrl = true, typename A>
 static mlir::Value
 genDataTransferStmt(Fortran::lower::AbstractConverter &converter, const A &stmt,
                     Fortran::lower::pft::LabelEvalMap &labelMap,
-                    Fortran::lower::pft::SymbolLabelMap &assignMap) {
+                    Fortran::lower::pft::SymbolLabelMap &assignMap,
+                    SymMap &localSymbols) {
   auto &builder = converter.getFirOpBuilder();
   auto loc = converter.getCurrentLocation();
   const bool isFormatted = isDataTransferFormatted(stmt);
@@ -1344,7 +1452,8 @@ genDataTransferStmt(Fortran::lower::AbstractConverter &converter, const A &stmt,
   llvm::SmallVector<mlir::Value, 8> ioArgs;
   genBeginCallArguments<hasIOCtrl>(ioArgs, converter, loc, stmt, ioFuncTy,
                                    isFormatted, isList, isIntern, isOtherIntern,
-                                   isAsynch, isNml, labelMap, assignMap);
+                                   isAsynch, isNml, labelMap, assignMap,
+                                   localSymbols);
   ioArgs.push_back(
       getDefaultFilename(builder, loc, ioFuncTy.getInput(ioArgs.size())));
   ioArgs.push_back(
@@ -1385,29 +1494,33 @@ void Fortran::lower::genPrintStatement(
     Fortran::lower::AbstractConverter &converter,
     const Fortran::parser::PrintStmt &stmt,
     Fortran::lower::pft::LabelEvalMap &labelMap,
-    Fortran::lower::pft::SymbolLabelMap &assignMap) {
+    Fortran::lower::pft::SymbolLabelMap &assignMap,
+    SymMap &localSymbols) {
   // PRINT does not take an io-control-spec. It only has a format specifier, so
   // it is a simplified case of WRITE.
   genDataTransferStmt</*isInput=*/false, /*ioCtrl=*/false>(converter, stmt,
-                                                           labelMap, assignMap);
+                                                           labelMap, assignMap,
+                                                           localSymbols);
 }
 
 mlir::Value Fortran::lower::genWriteStatement(
     Fortran::lower::AbstractConverter &converter,
     const Fortran::parser::WriteStmt &stmt,
     Fortran::lower::pft::LabelEvalMap &labelMap,
-    Fortran::lower::pft::SymbolLabelMap &assignMap) {
+    Fortran::lower::pft::SymbolLabelMap &assignMap,
+    SymMap &localSymbols) {
   return genDataTransferStmt</*isInput=*/false>(converter, stmt, labelMap,
-                                                assignMap);
+                                                assignMap, localSymbols);
 }
 
 mlir::Value Fortran::lower::genReadStatement(
     Fortran::lower::AbstractConverter &converter,
     const Fortran::parser::ReadStmt &stmt,
     Fortran::lower::pft::LabelEvalMap &labelMap,
-    Fortran::lower::pft::SymbolLabelMap &assignMap) {
+    Fortran::lower::pft::SymbolLabelMap &assignMap,
+    SymMap &localSymbols) {
   return genDataTransferStmt</*isInput=*/true>(converter, stmt, labelMap,
-                                               assignMap);
+                                               assignMap, localSymbols);
 }
 
 /// Get the file expression from the inquire spec list. Also return if the

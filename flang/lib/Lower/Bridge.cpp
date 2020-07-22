@@ -1142,12 +1142,13 @@ private:
   void genFIR(const Fortran::parser::PrintStmt &stmt) {
     auto &owningProc = *getEval().getOwningProcedure();
     genPrintStatement(*this, stmt, owningProc.labelEvaluationMap,
-                      owningProc.assignSymbolLabelMap);
+                      owningProc.assignSymbolLabelMap, localSymbols);
   }
   void genFIR(const Fortran::parser::ReadStmt &stmt) {
     auto &owningProc = *getEval().getOwningProcedure();
     auto iostat = genReadStatement(*this, stmt, owningProc.labelEvaluationMap,
-                                   owningProc.assignSymbolLabelMap);
+                                   owningProc.assignSymbolLabelMap,
+                                   localSymbols);
     genIoConditionBranches(getEval(), stmt.controls, iostat);
   }
   void genFIR(const Fortran::parser::RewindStmt &stmt) {
@@ -1161,7 +1162,8 @@ private:
   void genFIR(const Fortran::parser::WriteStmt &stmt) {
     auto &owningProc = *getEval().getOwningProcedure();
     auto iostat = genWriteStatement(*this, stmt, owningProc.labelEvaluationMap,
-                                    owningProc.assignSymbolLabelMap);
+                                    owningProc.assignSymbolLabelMap,
+                                    localSymbols);
     genIoConditionBranches(getEval(), stmt.controls, iostat);
   }
 

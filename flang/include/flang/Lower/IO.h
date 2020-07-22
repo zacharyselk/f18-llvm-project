@@ -17,6 +17,7 @@
 #include "flang/Semantics/symbol.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallSet.h"
+#include "SymbolMap.h"
 
 namespace mlir {
 class Value;
@@ -76,25 +77,29 @@ mlir::Value genOpenStatement(AbstractConverter &, const parser::OpenStmt &);
 void genPrintStatement(AbstractConverter &converter,
                        const parser::PrintStmt &stmt,
                        pft::LabelEvalMap &labelMap,
-                       pft::SymbolLabelMap &assignMap);
+                       pft::SymbolLabelMap &assignMap,
+                       Fortran::lower::SymMap &localSymbols);
 
 /// Generate IO call(s) for READ; return the IOSTAT code
 mlir::Value genReadStatement(AbstractConverter &converter,
                              const parser::ReadStmt &stmt,
                              pft::LabelEvalMap &labelMap,
-                             pft::SymbolLabelMap &assignMap);
+                             pft::SymbolLabelMap &assignMap,
+                             Fortran::lower::SymMap &localSymbols);
 
 /// Generate IO call(s) for REWIND; return the IOSTAT code
 mlir::Value genRewindStatement(AbstractConverter &, const parser::RewindStmt &);
 
 /// Generate IO call(s) for WAIT; return the IOSTAT code
-mlir::Value genWaitStatement(AbstractConverter &, const parser::WaitStmt &);
+mlir::Value genWaitStatement(AbstractConverter &,
+                             const parser::WaitStmt &);
 
 /// Generate IO call(s) for WRITE; return the IOSTAT code
 mlir::Value genWriteStatement(AbstractConverter &converter,
                               const parser::WriteStmt &stmt,
                               pft::LabelEvalMap &labelMap,
-                              pft::SymbolLabelMap &assignMap);
+                              pft::SymbolLabelMap &assignMap,
+                              Fortran::lower::SymMap &localSymbols);
 
 } // namespace lower
 } // namespace Fortran
