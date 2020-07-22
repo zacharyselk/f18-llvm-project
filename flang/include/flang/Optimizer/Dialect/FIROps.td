@@ -2136,7 +2136,7 @@ def fir_LenParamIndexOp : fir_OneResultOp<"len_param_index", [NoSideEffect]> {
 
 def fir_ResultOp : fir_Op<"result",
     [NoSideEffect, ReturnLike, Terminator,
-     ParentOneOf<["IfOp", "LoopOp", "IterWhileOp"]>]> {
+     ParentOneOf<["IfOp", "DoLoopOp", "IterWhileOp"]>]> {
   let summary = "special terminator for use in fir region operations";
 
   let description = [{
@@ -2166,7 +2166,7 @@ class region_Op<string mnemonic, list<OpTrait> traits = []> :
   let parser = [{ return ::parse$cppClass(parser, result); }];
 }
 
-def fir_LoopOp : region_Op<"do_loop",
+def fir_DoLoopOp : region_Op<"do_loop",
     [DeclareOpInterfaceMethods<LoopLikeOpInterface>]> {
   let summary = "generalized loop operation";
   let description = [{
@@ -2305,7 +2305,7 @@ def fir_IterWhileOp : region_Op<"iterate_while",
   let summary = "DO loop with early exit condition";
   let description = [{
     This construct is useful for lowering implied-DO loops. It is very similar
-    to `fir::LoopOp` with the addition that it requires a single loop-carried
+    to `fir::DoLoopOp` with the addition that it requires a single loop-carried
     bool value that signals an early exit condition to the operation. A `true`
     disposition means the next loop iteration should proceed. A `false`
     indicates that the `fir.iterate_while` operation should terminate and
