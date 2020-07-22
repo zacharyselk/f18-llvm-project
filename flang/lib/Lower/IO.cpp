@@ -211,6 +211,8 @@ static mlir::FuncOp getOutputFunc(mlir::Location loc,
     return getIORuntimeFunc<mkIOKey(OutputDescriptor)>(loc, builder);
   if (Fortran::lower::CharacterExprHelper::isCharacter(type))
     return getIORuntimeFunc<mkIOKey(OutputAscii)>(loc, builder);
+  if (type.isa<fir::SequenceType>())
+    return getIORuntimeFunc<mkIOKey(OutputDescriptor)>(loc, builder);
   // TODO: handle arrays
   mlir::emitError(loc, "output for entity type ") << type << " not implemented";
   return {};
@@ -283,6 +285,8 @@ static mlir::FuncOp getInputFunc(mlir::Location loc,
     return getIORuntimeFunc<mkIOKey(InputDescriptor)>(loc, builder);
   if (Fortran::lower::CharacterExprHelper::isCharacter(type))
     return getIORuntimeFunc<mkIOKey(InputAscii)>(loc, builder);
+  if (type.isa<fir::SequenceType>())
+    return getIORuntimeFunc<mkIOKey(InputDescriptor)>(loc, builder);
   // TODO: handle arrays
   mlir::emitError(loc, "input for entity type ") << type << " not implemented";
   return {};
@@ -323,8 +327,13 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
           llvm::SmallVector<mlir::Value, 1>{builder.create<mlir::ConstantOp>(
               loc, builder.getI32IntegerAttr(index))});
     };
-    if (complexPartType)
+    if (complexPartType) {
       itemAddr = complexPartAddr(0); // real part
+    } else if (argType.isa<fir::BoxType>()) {
+      // TODO: add dynamic shape op
+      itemAddr = builder.create<fir::EmboxOp>(loc, fir::BoxType::get(itemType),
+                                              itemAddr);
+    }
     itemAddr = builder.createConvert(loc, argType, itemAddr);
     llvm::SmallVector<mlir::Value, 3> inputFuncArgs = {cookie, itemAddr};
     Fortran::lower::CharacterExprHelper helper{builder, loc};
