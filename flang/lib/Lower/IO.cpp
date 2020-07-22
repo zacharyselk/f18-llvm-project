@@ -213,7 +213,7 @@ static mlir::FuncOp getOutputFunc(mlir::Location loc,
     return getIORuntimeFunc<mkIOKey(OutputAscii)>(loc, builder);
   if (type.isa<fir::SequenceType>())
     return getIORuntimeFunc<mkIOKey(OutputDescriptor)>(loc, builder);
-  // TODO: handle arrays
+  // TODO: unaccounted for type to be handled
   mlir::emitError(loc, "output for entity type ") << type << " not implemented";
   return {};
 }
@@ -287,7 +287,7 @@ static mlir::FuncOp getInputFunc(mlir::Location loc,
     return getIORuntimeFunc<mkIOKey(InputAscii)>(loc, builder);
   if (type.isa<fir::SequenceType>())
     return getIORuntimeFunc<mkIOKey(InputDescriptor)>(loc, builder);
-  // TODO: handle arrays
+  // TODO: unaccounted for type to be handled
   mlir::emitError(loc, "input for entity type ") << type << " not implemented";
   return {};
 }
