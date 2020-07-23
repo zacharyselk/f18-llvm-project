@@ -56,8 +56,9 @@ static constexpr std::tuple<
     mkIOKey(OutputUnformattedBlock), mkIOKey(InputUnformattedBlock),
     mkIOKey(OutputInteger64), mkIOKey(InputInteger), mkIOKey(OutputReal32),
     mkIOKey(InputReal32), mkIOKey(OutputReal64), mkIOKey(InputReal64),
-    mkIOKey(OutputComplex64), mkIOKey(OutputComplex32), mkIOKey(OutputAscii),
-    mkIOKey(InputAscii), mkIOKey(OutputLogical), mkIOKey(InputLogical),
+    mkIOKey(OutputComplex32), mkIOKey(InputComplex32), mkIOKey(OutputComplex64),
+    mkIOKey(InputComplex64), mkIOKey(OutputAscii), mkIOKey(InputAscii),
+    mkIOKey(OutputLogical), mkIOKey(InputLogical),
     mkIOKey(SetAccess), mkIOKey(SetAction), mkIOKey(SetAsynchronous),
     mkIOKey(SetCarriagecontrol), mkIOKey(SetEncoding), mkIOKey(SetForm),
     mkIOKey(SetPosition), mkIOKey(SetRecl), mkIOKey(SetStatus),
@@ -283,8 +284,8 @@ static mlir::FuncOp getInputFunc(mlir::Location loc,
                : getIORuntimeFunc<mkIOKey(InputReal64)>(loc, builder);
   if (auto ty = type.dyn_cast<fir::CplxType>())
     return ty.getFKind() <= 4
-               ? getIORuntimeFunc<mkIOKey(InputReal32)>(loc, builder)
-               : getIORuntimeFunc<mkIOKey(InputReal64)>(loc, builder);
+               ? getIORuntimeFunc<mkIOKey(InputComplex32)>(loc, builder)
+               : getIORuntimeFunc<mkIOKey(InputComplex64)>(loc, builder);
   if (type.isa<fir::LogicalType>())
     return getIORuntimeFunc<mkIOKey(InputLogical)>(loc, builder);
   if (type.isa<fir::BoxType>())
@@ -334,7 +335,7 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
               loc, builder.getI32IntegerAttr(index))});
     };
     if (complexPartType) {
-      itemAddr = complexPartAddr(0); // real part
+      itemAddr = complexPartAddr(0); // pass real part, but both can be input
     } else if (argType.isa<fir::BoxType>()) {
       // TODO: add dynamic shape op
       itemAddr = builder.create<fir::EmboxOp>(loc, fir::BoxType::get(itemType),
@@ -354,14 +355,6 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
     }
     ok = builder.create<mlir::CallOp>(loc, inputFunc, inputFuncArgs)
              .getResult(0);
-    if (complexPartType) { // imaginary part
-      makeNextConditionalOn(builder, loc, insertPt, checkResult, ok,
-                            inIterWhileLoop);
-      inputFuncArgs = {cookie,
-                       builder.createConvert(loc, argType, complexPartAddr(1))};
-      ok = builder.create<mlir::CallOp>(loc, inputFunc, inputFuncArgs)
-               .getResult(0);
-    }
   }
 }
 
