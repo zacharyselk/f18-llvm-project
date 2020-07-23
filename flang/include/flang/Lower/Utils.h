@@ -16,6 +16,25 @@
 #include "flang/Common/indirection.h"
 #include "flang/Parser/char-block.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallSet.h"
+#include "flang/Semantics/symbol.h"
+#include "flang/Parser/parse-tree.h"
+
+namespace Fortran {
+namespace lower {
+namespace pft {
+struct Evaluation;
+
+using SomeExpr = Fortran::evaluate::Expr<Fortran::evaluate::SomeType>;
+using SymbolRef = Fortran::common::Reference<const Fortran::semantics::Symbol>;
+using Label = std::uint64_t;
+using LabelSet = llvm::SmallSet<Label, 4>;
+using SymbolLabelMap = llvm::DenseMap<SymbolRef, LabelSet>;
+using LabelEvalMap = llvm::DenseMap<Label, Evaluation *>;
+}
+}
+}
 
 /// Convert an F18 CharBlock to an LLVM StringRef
 inline llvm::StringRef toStringRef(const Fortran::parser::CharBlock &cb) {
