@@ -118,7 +118,8 @@ public:
 
   // Block data
   bool Pre(const parser::BlockData &node) {
-    addUnit(lower::pft::BlockDataUnit{node, parentVariantStack.back()});
+    addUnit(lower::pft::BlockDataUnit{node, parentVariantStack.back(),
+                                      semanticsContext});
     return false;
   }
 
@@ -1259,8 +1260,12 @@ Fortran::lower::pft::ModuleLikeUnit::ModuleLikeUnit(
       endStmt{getModuleStmt<parser::EndSubmoduleStmt>(m)} {}
 
 Fortran::lower::pft::BlockDataUnit::BlockDataUnit(
-    const parser::BlockData &bd, const lower::pft::ParentVariant &parent)
-    : ProgramUnit{bd, parent} {}
+    const parser::BlockData &bd, const lower::pft::ParentVariant &parent,
+    const semantics::SemanticsContext &semanticsContext)
+    : ProgramUnit{bd, parent},
+      symTab{semanticsContext.FindScope(
+          std::get<parser::Statement<parser::EndBlockDataStmt>>(bd.t).source)} {
+}
 
 std::unique_ptr<lower::pft::Program>
 Fortran::lower::createPFT(const parser::Program &root,
@@ -1291,6 +1296,7 @@ void Fortran::lower::pft::Variable::dump() const {
                  << std::get<1>(*store) << "]:";
   else
     llvm_unreachable("not a Variable");
+  
   llvm::errs() << " depth: " << depth;
   if (global)
     llvm::errs() << ", global";
@@ -1311,4 +1317,9 @@ void Fortran::lower::pft::FunctionLikeUnit::dump() const {
 
 void Fortran::lower::pft::ModuleLikeUnit::dump() const {
   PFTDumper{}.dumpModuleLikeUnit(llvm::errs(), *this);
+}
+
+/// The BlockDataUnit dump is just the associated symbol table.
+void Fortran::lower::pft::BlockDataUnit::dump() const {
+  llvm::errs() << "block data {\n" << symTab << "\n}\n";
 }
