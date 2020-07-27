@@ -15,6 +15,7 @@
 
 #include "flang/Common/Fortran.h"
 #include "mlir/IR/Module.h"
+#include "Utils.h"
 
 namespace Fortran {
 namespace common {
@@ -60,6 +61,12 @@ public:
 
   /// Get the mlir instance of a symbol.
   virtual mlir::Value getSymbolAddress(SymbolRef sym) = 0;
+
+  /// Get the label set associated with a symbol.
+  virtual bool lookupLabelSet(SymbolRef sym, pft::LabelSet &labelSet) = 0;
+
+  /// Get the code defined by a label
+  virtual Fortran::lower::pft::Evaluation* lookupLabel(pft::Label label) = 0;
 
   //===--------------------------------------------------------------------===//
   // Expressions
