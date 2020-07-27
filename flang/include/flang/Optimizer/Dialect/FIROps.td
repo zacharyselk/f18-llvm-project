@@ -2392,11 +2392,29 @@ def fir_CallOp : fir_Op<"call", [CallOpInterface]> {
     OptionalAttr<SymbolRefAttr>:$callee,
     Variadic<AnyType>:$args
   );
-
   let results = (outs Variadic<AnyType>);
 
   let parser = "return parseCallOp(parser, result);";
   let printer = "printCallOp(p, *this);";
+
+  let builders = [OpBuilder<
+    "OpBuilder &builder, OperationState &result, FuncOp callee,"
+    "ValueRange operands = {}", [{
+      result.addOperands(operands);
+      result.addAttribute(calleeAttrName(), builder.getSymbolRefAttr(callee));
+      result.addTypes(callee.getType().getResults());
+  }]>, OpBuilder<
+    "OpBuilder &builder, OperationState &result, SymbolRefAttr callee,"
+    "ArrayRef<Type> results, ValueRange operands = {}", [{
+      result.addOperands(operands);
+      result.addAttribute(calleeAttrName(), callee);
+      result.addTypes(results);
+  }]>, OpBuilder<
+    "OpBuilder &builder, OperationState &result, StringRef callee,"
+    "ArrayRef<Type> results, ValueRange operands = {}", [{
+      build(builder, result, builder.getSymbolRefAttr(callee), results,
+            operands);
+  }]>];
 
   let extraClassDeclaration = [{
     static constexpr StringRef calleeAttrName() { return "callee"; }
