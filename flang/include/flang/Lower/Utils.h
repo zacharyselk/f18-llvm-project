@@ -18,10 +18,21 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallSet.h"
-#include "flang/Semantics/symbol.h"
-#include "flang/Parser/parse-tree.h"
 
 namespace Fortran {
+namespace semantics {
+  class Symbol;
+}
+
+namespace evaluate {
+  template <typename A> class Expr;
+  struct SomeType;
+}
+
+namespace common {
+  template <typename A> class Reference;
+}
+
 namespace lower {
 namespace pft {
 struct Evaluation;
@@ -32,9 +43,9 @@ using Label = std::uint64_t;
 using LabelSet = llvm::SmallSet<Label, 4>;
 using SymbolLabelMap = llvm::DenseMap<SymbolRef, LabelSet>;
 using LabelEvalMap = llvm::DenseMap<Label, Evaluation *>;
-}
-}
-}
+}  // namespace pft
+}  // namespace lower
+}  // namespace Fortran
 
 /// Convert an F18 CharBlock to an LLVM StringRef
 inline llvm::StringRef toStringRef(const Fortran::parser::CharBlock &cb) {

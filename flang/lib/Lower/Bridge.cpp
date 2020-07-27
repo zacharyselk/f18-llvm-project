@@ -328,10 +328,10 @@ public:
   bool lookupLabelSet(Fortran::lower::SymbolRef sym, Fortran::lower::pft::LabelSet &labelSet) override final {
     auto &owningProc = *getEval().getOwningProcedure();
     auto iter = owningProc.assignSymbolLabelMap.find(sym);
-    labelSet = iter->second;
     if (iter == owningProc.assignSymbolLabelMap.end()) {
       return false;
     }
+    labelSet = iter->second;
     return true;
   }
 
