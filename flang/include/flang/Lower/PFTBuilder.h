@@ -19,11 +19,9 @@
 
 #include "flang/Common/reference.h"
 #include "flang/Common/template.h"
+#include "flang/Lower/Utils.h"
 #include "flang/Parser/parse-tree.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/SmallSet.h"
 #include "llvm/Support/raw_ostream.h"
-#include "Utils.h"
 
 namespace mlir {
 class Block;
@@ -65,7 +63,7 @@ public:
 
   template <typename B>
   constexpr BaseType<B> &get() const {
-    return std::get<Ref<B>>> (u).get();
+    return std::get<Ref<B>>(u).get();
   }
   template <typename B>
   constexpr BaseType<B> *getIf() const {
@@ -549,7 +547,7 @@ struct BlockDataUnit : public ProgramUnit {
   BlockDataUnit(const BlockDataUnit &) = delete;
 
   LLVM_DUMP_METHOD void dump() const;
-  
+
   const Fortran::semantics::Scope &symTab; // symbol table
 };
 
