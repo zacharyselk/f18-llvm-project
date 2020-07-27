@@ -9,7 +9,6 @@
 #include "flang/Lower/IO.h"
 #include "../../runtime/io-api.h"
 #include "RTBuilder.h"
-#include "flang/Common/reference.h"
 #include "flang/Lower/Bridge.h"
 #include "flang/Lower/CharacterExpr.h"
 #include "flang/Lower/ComplexExpr.h"
@@ -19,7 +18,6 @@
 #include "flang/Lower/Runtime.h"
 #include "flang/Lower/Utils.h"
 #include "flang/Parser/parse-tree.h"
-#include "flang/Semantics/symbol.h"
 #include "flang/Semantics/tools.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 
