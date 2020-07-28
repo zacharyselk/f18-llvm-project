@@ -937,13 +937,13 @@ lowerReferenceAsStringSelect(
 
   auto symbol = GetLastSymbol(&expr);
   Fortran::lower::pft::LabelSet labels;
-  assert(converter.lookupLabelSet(*symbol, labels) &&
-         "ICE: Label not found in map");
+  [[maybe_unused]] auto foundLabelSet = converter.lookupLabelSet(*symbol, labels);
+  assert(foundLabelSet && "Label not found in map");
 
   for (auto label : labels) {
     indexList.push_back(label);
     auto eval = converter.lookupLabel(label);
-    assert(eval && "ICE: Label is missing from the table");
+    assert(eval && "Label is missing from the table");
 
     auto stringLit = lowerSourceTextAsStringLit(
         converter, loc, toStringRef(eval->position), strTy, lenTy);
