@@ -211,10 +211,10 @@ public:
 private:
   friend LLVMDialect;
   friend llvm::Type *convertLLVMType(LLVMType type);
-
+public:
   /// Get the underlying LLVM IR type.
   llvm::Type *getUnderlyingType() const;
-
+private:
   /// Get the underlying LLVM IR types for the given array of types.
   static void getUnderlyingTypes(ArrayRef<LLVMType> types,
                                  SmallVectorImpl<llvm::Type *> &result);
