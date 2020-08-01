@@ -16,6 +16,7 @@
 #include "mlir/Transforms/Passes.h"
 #include "mlir/Transforms/LocationSnapshot.h"
 #include "mlir/Dialect/Affine/Passes.h"
+#include "mlir/Conversion/Passes.h"
 
 namespace fir {
 
@@ -53,36 +54,34 @@ inline void registerFIRDialects(mlir::DialectRegistry &registry) {
 /// Register the standard passes we use. This comes from registerAllPasses(),
 /// but is a smaller set since we aren't using many of the passes found there.
 inline void registerGeneralPasses() {
-using mlir::Pass;
-#define GEN_PASS_REGISTRATION_Canonicalizer
-#define GEN_PASS_REGISTRATION_CSE
-#define GEN_PASS_REGISTRATION_AffineLoopFusion
-#define GEN_PASS_REGISTRATION_LoopInvariantCodeMotion
-#define GEN_PASS_REGISTRATION_LoopCoalescing
-#define GEN_PASS_REGISTRATION_StripDebugInfo
-#define GEN_PASS_REGISTRATION_PrintOpStats
-#define GEN_PASS_REGISTRATION_Inliner
-#define GEN_PASS_REGISTRATION_SCCP
-#define GEN_PASS_REGISTRATION_MemRefDataFlowOpt
-#define GEN_PASS_REGISTRATION_SymbolDCE
-#define GEN_PASS_REGISTRATION_LocationSnapshot
-#define GEN_PASS_REGISTRATION_PipelineDataTransfer
-#include "mlir/Transforms/Passes.h.inc"
+  mlir::registerCanonicalizerPass();
+  mlir::registerCSEPass();
+  mlir::registerAffineLoopFusionPass();
+  mlir::registerLoopInvariantCodeMotionPass();
+  mlir::registerLoopCoalescingPass();
+  mlir::registerStripDebugInfoPass();
+  mlir::registerPrintOpStatsPass();
+  mlir::registerInlinerPass();
+  mlir::registerSCCPPass();
+  mlir::registerMemRefDataFlowOptPass();
+  mlir::registerSymbolDCEPass();
+  mlir::registerLocationSnapshotPass();
+  mlir::registerAffinePipelineDataTransferPass();
 
-#define GEN_PASS_REGISTRATION_AffineVectorize
-#define GEN_PASS_REGISTRATION_AffineLoopUnroll
-#define GEN_PASS_REGISTRATION_AffineLoopUnrollAndJam
-#define GEN_PASS_REGISTRATION_SimplifyAffineStructures
-#define GEN_PASS_REGISTRATION_AffineLoopInvariantCodeMotion
-#define GEN_PASS_REGISTRATION_AffineLoopTiling
-#define GEN_PASS_REGISTRATION_AffineDataCopyGeneration
-#include "mlir/Dialect/Affine/Passes.h.inc"
+  mlir::registerAffineVectorizePass();
+  mlir::registerAffineLoopUnrollPass();
+  mlir::registerAffineLoopUnrollAndJamPass();
+  mlir::registerSimplifyAffineStructuresPass();
+  mlir::registerAffineLoopInvariantCodeMotionPass();
+  mlir::registerAffineLoopTilingPass();
+  mlir::registerAffineDataCopyGenerationPass();
 
-#define GEN_PASS_REGISTRATION_ConvertAffineToStandard
-#include "mlir/Conversion/Passes.h.inc"
+  mlir::registerConvertAffineToStandardPass();
 }
 
-inline void registerFIRPasses() { registerGeneralPasses(); }
+inline void registerFIRPasses() {
+  registerGeneralPasses();
+}
 
 } // namespace fir
 
