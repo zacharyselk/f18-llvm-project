@@ -12,6 +12,7 @@
 #include "flang/Parser/parse-tree-visitor.h"
 #include "flang/Semantics/semantics.h"
 #include "flang/Semantics/tools.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/IntervalMap.h"
 #include "llvm/Support/CommandLine.h"
 
@@ -305,7 +306,10 @@ private:
         // Link to the entry's first executable statement.
         entryPointList[entryIndex].second->lexicalSuccessor = p;
     } else if (const auto *entryStmt = p->getIf<parser::EntryStmt>()) {
-      const auto *sym = std::get<Fortran::parser::Name>(entryStmt->t).symbol;
+      const auto *sym = std::get<parser::Name>(entryStmt->t).symbol;
+      if (sym->IsFuncResult())
+        // Switch to the function sym.
+        sym = sym->owner().parent().FindSymbol(sym->name());
       assert(sym->has<semantics::SubprogramDetails>() &&
              "entry must be a subprogram");
       entryPointList.push_back(std::pair{sym, p});
@@ -758,11 +762,11 @@ private:
     int entryCount = unit->entryPointList.size();
     if (entryCount == 1)
       return;
-    llvm::DenseMap<Fortran::semantics::Symbol *, int> dummyCountMap;
+    llvm::DenseMap<semantics::Symbol *, int> dummyCountMap;
     for (int entryIndex = 0; entryIndex < entryCount; ++entryIndex) {
       unit->setActiveEntry(entryIndex);
-      const auto &details = unit->getSubprogramSymbol()
-                                .get<Fortran::semantics::SubprogramDetails>();
+      const auto &details =
+          unit->getSubprogramSymbol().get<semantics::SubprogramDetails>();
       for (auto *arg : details.dummyArgs()) {
         if (!arg)
           continue; // alternate return specifier (no actual argument)
@@ -1008,6 +1012,8 @@ Fortran::lower::pft::Evaluation::getOwningProcedure() const {
 }
 
 namespace {
+/// Interval set to keep track of intervals, merging them when they overlap or
+/// abut one another. Used to refine ranges of offsets.
 struct IntervalSet : public llvm::IntervalMap<std::size_t, std::size_t, 16> {
   using IntervalMap::IntervalMap;
   using Allocator = IntervalMap::Allocator;
@@ -1030,6 +1036,28 @@ struct IntervalSet : public llvm::IntervalMap<std::size_t, std::size_t, 16> {
 };
 } // namespace
 
+// A variable with an offset relative to the subprogram stack but equivalence
+// aliasing a variable in a common will also be marked as contained in a common
+// block. We have to filter this out so that we can correctly map the offsets.
+bool Fortran::lower::declaredInCommonBlock(
+    const semantics::Symbol &sym) {
+  if (auto *common = semantics::FindCommonBlockContaining(sym)) {
+    auto &details = common->get<semantics::CommonBlockDetails>();
+    for (auto &s : details.objects())
+      if (&*s == &sym)
+        return true;
+  }
+  return false;
+}
+
+/// Is the symbol `sym` a global?
+static bool symbolIsGlobal(const semantics::Symbol &sym) {
+  if (const auto *details = sym.detailsIf<semantics::ObjectEntityDetails>())
+    if (details->init())
+      return true;
+  return semantics::IsSaved(sym) || lower::declaredInCommonBlock(sym);
+}
+
 namespace {
 /// This helper class is for sorting the symbols in the symbol table. We want
 /// the symbols in an order such that a symbol will be visited after those it
@@ -1040,29 +1068,74 @@ struct SymbolDependenceDepth {
       std::vector<std::vector<lower::pft::Variable>> &vars)
       : vars{vars} {}
 
+  const semantics::Symbol *setHasGlobalParticipant(
+      const std::vector<semantics::EquivalenceObject> &set,
+      const llvm::DenseSet<const semantics::Symbol *> &globals) {
+    for (const auto &eqv : set)
+      if (globals.find(&eqv.symbol) != globals.end())
+        return &eqv.symbol;
+    return nullptr;
+  }
+
+  std::pair<IntervalSet::iterator, std::size_t>
+  getIntervalForSet(IntervalSet &intervals,
+                    const std::vector<semantics::EquivalenceObject> &set,
+                    const llvm::DenseSet<const semantics::Symbol *> &globals) {
+    for (const auto &eqv : set)
+      if (globals.find(&eqv.symbol) == globals.end()) {
+        auto off = eqv.symbol.offset();
+        return {intervals.find(off), off};
+      }
+    return {intervals.end(), 0};
+  }
+
   // Analyze the equivalence sets. This analysis need not be performed when the
   // scope has no equivalence sets.
   void analyzeAliases(const semantics::Scope &scope) {
     IntervalSet::Allocator allocator;
     IntervalSet intervals(allocator);
+    llvm::DenseSet<const semantics::Symbol *> globals;
 
-    // Collect the offset ranges which have aliasing.
+    // 1. Collect the offset ranges which have aliasing.
     for (const auto &set : scope.equivalenceSets())
       for (const auto &eqv : set) {
         const auto &sym = eqv.symbol;
+        if (symbolIsGlobal(sym)) {
+          // This symbol's offset is into a COMMON block rather than the stack
+          // frame proxy, so do not add it to the interval map. Reprocess the
+          // sets in step 2.
+          globals.insert(&sym);
+          continue;
+        }
         aliasSyms.insert(&sym);
         intervals.merge(sym.offset(), sym.offset() + sym.size() - 1);
       }
 
-    // Create a primary store for each aliased interval.
-    adjustSize(1);
-    for (auto i = intervals.begin(), end = intervals.end(); i != end; ++i) {
-      vars[0].emplace_back(
-          lower::pft::Variable::StoreInterval{i.start(),
-                                              i.stop() - i.start() + 1},
-          /*isGlobal=*/false);
-      stores.emplace_back(i.start(), i.stop() + 1);
-    }
+    // 2. If we saw a global in an equivalence set, we want to map the
+    // corresponding interval to a global alias, possibly with an offset
+    // internal to that global. We assume that the front-end has already handled
+    // all error cases, such as two distinct common blocks being equivalenced.
+    if (!globals.empty())
+      for (const auto &set : scope.equivalenceSets())
+        if (const auto *gsym = setHasGlobalParticipant(set, globals)) {
+          auto [iter, off] = getIntervalForSet(intervals, set, globals);
+          if (iter != intervals.end()) {
+            // record the global that's aliased (?)
+            stores.emplace_back(
+                lower::pft::Variable::Interval{iter.start(),
+                                               iter.stop() - iter.start() + 1},
+                /*isGlobal=*/true, gsym, off);
+            // reset this interval and don't create an aggregate store on stack
+            iter.setValue(0);
+          }
+        }
+
+    // 3. Create a aggregate store for each aliased interval.
+    for (auto i = intervals.begin(), end = intervals.end(); i != end; ++i)
+      if (i.value())
+        stores.emplace_back(
+            lower::pft::Variable::Interval{i.start(), i.stop() - i.start() + 1},
+            /*isGlobal=*/false);
   }
 
   // Recursively visit each symbol to determine the height of its dependence on
@@ -1089,7 +1162,7 @@ struct SymbolDependenceDepth {
     const auto *symTy = sym.GetType();
     assert(symTy && "symbol must have a type");
 
-    // Make sure an aliasing variable appears after its primary storage.
+    // Make sure an aliasing variable appears after its aggregate storage.
     if (!aliasSyms.empty())
       if (aliasSyms.find(&sym) != aliasSyms.end())
         depth = std::max(1, depth);
@@ -1136,7 +1209,7 @@ struct SymbolDependenceDepth {
       vars[depth].back().setTarget();
 
     // If there are alias sets, then link the participating variables to their
-    // primary stores when constructing the new variable on the list.
+    // aggregate stores when constructing the new variable on the list.
     if (!aliasSyms.empty())
       if (aliasSyms.find(&sym) != aliasSyms.end()) {
         if (global)
@@ -1145,8 +1218,8 @@ struct SymbolDependenceDepth {
         // Fortran program.
         auto findStore = [&](std::size_t off) -> std::size_t {
           for (auto v : stores) {
-            auto bot = std::get<0>(v);
-            if (off >= bot && off < std::get<1>(v))
+            auto bot = std::get<0>(v.interval);
+            if (off >= bot && off < bot + std::get<1>(v.interval))
               return bot;
           }
           llvm_unreachable("the store must be present");
@@ -1156,7 +1229,19 @@ struct SymbolDependenceDepth {
     return depth;
   }
 
-  // Save the final list of symbols as a single vector and free the rest.
+  /// Process the stores built for overlapping nominal variables.
+  void prepareStores() {
+    for (auto st : stores) {
+      int depth = 0;
+      if (st.global)
+        depth = analyze(*st.obj);
+      adjustSize(depth + 1);
+      vars[depth].emplace_back(std::move(st));
+    }
+  }
+
+  /// Save the final list of variable allocations as a single vector and free
+  /// the rest.
   void finalize() {
     for (int i = 1, end = vars.size(); i < end; ++i)
       vars[0].insert(vars[0].end(), vars[i].begin(), vars[i].end());
@@ -1173,7 +1258,7 @@ private:
   llvm::SmallSet<const semantics::Symbol *, 32> seen;
   std::vector<std::vector<lower::pft::Variable>> &vars;
   llvm::SmallSet<const semantics::Symbol *, 32> aliasSyms;
-  std::vector<std::tuple<std::size_t, std::size_t>> stores;
+  std::vector<lower::pft::Variable::IntervalStore> stores;
 };
 } // namespace
 
@@ -1182,6 +1267,7 @@ void Fortran::lower::pft::FunctionLikeUnit::processSymbolTable(
   SymbolDependenceDepth sdd{varList};
   if (!scope.equivalenceSets().empty())
     sdd.analyzeAliases(scope);
+  sdd.prepareStores();
   for (const auto &iter : scope)
     sdd.analyze(iter.second.get());
   sdd.finalize();
@@ -1283,25 +1369,29 @@ void Fortran::lower::pft::Evaluation::dump() const {
 }
 
 void Fortran::lower::pft::Variable::dump() const {
-  if (auto *sym = std::get_if<const Fortran::semantics::Symbol *>(&u))
-    llvm::errs() << "symbol: " << (*sym)->name();
-  else if (auto *store = std::get_if<StoreInterval>(&u))
-    llvm::errs() << "interval[" << std::get<0>(*store) << ", "
-                 << std::get<1>(*store) << "]:";
-  else
+  if (auto *s = std::get_if<Nominal>(&var)) {
+    llvm::errs() << "symbol: " << s->symbol->name();
+    llvm::errs() << " (depth: " << s->depth << ')';
+    if (s->global)
+      llvm::errs() << ", global";
+    if (s->heapAlloc)
+      llvm::errs() << ", allocatable";
+    if (s->pointer)
+      llvm::errs() << ", pointer";
+    if (s->target)
+      llvm::errs() << ", target";
+    if (s->aliaser)
+      llvm::errs() << ", equivalence(" << s->aliasOffset << ')';
+  } else if (auto *s = std::get_if<IntervalStore>(&var)) {
+    llvm::errs() << "interval[" << std::get<0>(s->interval) << ", "
+                 << std::get<1>(s->interval) << "]:";
+    if (s->global)
+      llvm::errs() << ", global";
+    if (s->obj)
+      llvm::errs() << ", object:(" << *s->obj << "), offset: " << s->offset;
+  } else {
     llvm_unreachable("not a Variable");
-
-  llvm::errs() << " depth: " << depth;
-  if (global)
-    llvm::errs() << ", global";
-  if (heapAlloc)
-    llvm::errs() << ", allocatable";
-  if (pointer)
-    llvm::errs() << ", pointer";
-  if (target)
-    llvm::errs() << ", target";
-  if (aliasee)
-    llvm::errs() << ", equivalence(" << aliasOffset << ")";
+  }
   llvm::errs() << '\n';
 }
 
