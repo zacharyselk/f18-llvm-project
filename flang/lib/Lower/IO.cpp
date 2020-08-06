@@ -473,7 +473,7 @@ lowerStringLit(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
   auto *expr = Fortran::semantics::GetExpr(syntax);
   auto str = converter.genExprValue(expr, loc);
   Fortran::lower::CharacterExprHelper helper{builder, loc};
-  auto dataLen = helper.materializeCharacter(str);
+  auto dataLen = helper.materializeCharacterOrSequence(str);
   auto buff = builder.createConvert(loc, strTy, dataLen.first);
   auto len = builder.createConvert(loc, lenTy, dataLen.second);
   if (ty2) {
