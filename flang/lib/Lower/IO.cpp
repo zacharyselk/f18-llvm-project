@@ -320,6 +320,8 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
                           inIterWhileLoop);
     auto itemAddr =
         converter.genExprAddr(Fortran::semantics::GetExpr(pVar), loc);
+    if (auto box = dyn_cast<fir::EmboxCharOp>(itemAddr.getDefiningOp()))
+      itemAddr = box.memref();
     auto itemType = itemAddr.getType().cast<fir::ReferenceType>().getEleTy();
     auto inputFunc = getInputFunc(loc, builder, itemType);
     auto argType = inputFunc.getType().getInput(1);
