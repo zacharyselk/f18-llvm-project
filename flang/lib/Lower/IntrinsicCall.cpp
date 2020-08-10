@@ -1080,25 +1080,25 @@ mlir::Value IntrinsicLibrary::genIAnd(mlir::Type resultType,
 mlir::Value IntrinsicLibrary::genIchar(mlir::Type resultType,
                                        llvm::ArrayRef<mlir::Value> args) {
   // There can be an optional kind in second argument.
-  assert(args.size() >= 1);
+  assert(args.size() >= 1 && args.size() <= 2);
 
   auto arg = args[0];
   assert(Fortran::lower::CharacterExprHelper::isCharacter(arg.getType()) &&
          "Error: Unhandled type passed to ICHAR");
   Fortran::lower::CharacterExprHelper helper{builder, loc};
-  auto charType = fir::CharacterType::get(
-                                          builder.getContext(), helper.getCharacterKind(arg.getType()));
-
+  auto dataAndLen = helper.createUnboxChar(arg);
+  auto charType = helper.getCharacterType(arg.getType());
   mlir::Value charVal;
-  if (Fortran::lower::CharacterExprHelper::isCharacterLiteral(arg.getType())) {
-    auto zero = builder.createIntegerConstant(loc, builder.getI32Type(), 0);
-    charVal = builder.create<fir::ExtractValueOp>(loc, charType, arg, zero);
-  } else {
+  if (fir::isa_ref_type(dataAndLen.first.getType())) {
     auto refType = builder.getRefType(charType);
-    auto charRef = builder.createConvert(loc, refType, arg);
-    charVal = builder.create<fir::LoadOp>(loc, charType, charRef);
+    auto charAddr = builder.createConvert(loc, refType, dataAndLen.first);
+    charVal = builder.create<fir::LoadOp>(loc, charType, charAddr);
+  } else {
+    charVal = builder.create<fir::ExtractValueOp>(
+        loc, charType, dataAndLen.first,
+        llvm::ArrayRef<mlir::Value>{
+            builder.createIntegerConstant(loc, builder.getIntegerType(32), 0)});
   }
-
   return builder.createConvert(loc, resultType, charVal);
 }
 
