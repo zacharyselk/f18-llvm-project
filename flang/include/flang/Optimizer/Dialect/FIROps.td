@@ -2812,6 +2812,7 @@ def fir_ConvertOp : fir_OneResultOp<"convert", [NoSideEffect]> {
     static bool isFloatCompatible(mlir::Type ty);
     static bool isPointerCompatible(mlir::Type ty);
   }];
+  let hasCanonicalizer = 1;
 }
 
 def FortranTypeAttr : Attr<And<[CPred<"$_self.isa<TypeAttr>()">,
