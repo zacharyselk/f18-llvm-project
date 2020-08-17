@@ -36,7 +36,8 @@ namespace fir {
 ///   'c' : COMPLEX (encoding value)
 ///
 /// kind-value is either an unsigned integer (for 'i', 'l', and 'a') or one of
-/// 'Half', 'Float', 'Double', 'X86_FP80', or 'FP128' (for 'r' and 'c').
+/// 'Half', 'BFloat', 'Float', 'Double', 'X86_FP80', or 'FP128' (for 'r' and
+/// 'c').
 ///
 /// If LLVM adds support for new floating-point types, the final list should be
 /// extended.

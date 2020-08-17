@@ -35,7 +35,8 @@ struct commandLineStringTests : public testing::Test {
 public:
   void SetUp() {
     commandLineString = new KindMapping(
-        context, "i10:80,l3:24,a1:8,r54:Double,c20:X86_FP80,r11:PPC_FP128,r12:FP128,r13:X86_FP80,r14:Double,r15:Float,r16:Half");
+        context, "i10:80,l3:24,a1:8,r54:Double,c20:X86_FP80,r11:PPC_FP128,"
+        "r12:FP128,r13:X86_FP80,r14:Double,r15:Float,r16:Half,r23:BFloat");
     clStringConflict =
         new KindMapping(context, "i10:80,i10:40,r54:Double,r54:X86_FP80");
   }
@@ -63,12 +64,13 @@ TEST_F(DefaultStringTests, getLogicalBitsizeTest) {
   EXPECT_EQ(defaultString->getLogicalBitsize(10), 80u);
   // Unsigned values are expected
   std::string actual = std::to_string(defaultString->getLogicalBitsize(-10));
-  std::string expect("-80");
+  std::string expect = "-80";
   EXPECT_NE(actual, expect);
 }
 
 TEST_F(DefaultStringTests, getRealTypeIDTest) {
   EXPECT_EQ(defaultString->getRealTypeID(2), LLVMTypeID::HalfTyID);
+  EXPECT_EQ(defaultString->getRealTypeID(3), LLVMTypeID::BFloatTyID);
   EXPECT_EQ(defaultString->getRealTypeID(4), LLVMTypeID::FloatTyID);
   EXPECT_EQ(defaultString->getRealTypeID(8), LLVMTypeID::DoubleTyID);
   EXPECT_EQ(defaultString->getRealTypeID(10), LLVMTypeID::X86_FP80TyID);
@@ -80,6 +82,7 @@ TEST_F(DefaultStringTests, getRealTypeIDTest) {
 
 TEST_F(DefaultStringTests, getComplexTypeIDTest) {
   EXPECT_EQ(defaultString->getComplexTypeID(2), LLVMTypeID::HalfTyID);
+  EXPECT_EQ(defaultString->getComplexTypeID(3), LLVMTypeID::BFloatTyID);
   EXPECT_EQ(defaultString->getComplexTypeID(4), LLVMTypeID::FloatTyID);
   EXPECT_EQ(defaultString->getComplexTypeID(8), LLVMTypeID::DoubleTyID);
   EXPECT_EQ(defaultString->getComplexTypeID(10), LLVMTypeID::X86_FP80TyID);
@@ -91,6 +94,7 @@ TEST_F(DefaultStringTests, getComplexTypeIDTest) {
 
 TEST_F(DefaultStringTests, getFloatSemanticsTest) {
   EXPECT_EQ(&defaultString->getFloatSemantics(2), &llvm::APFloat::IEEEhalf());
+  EXPECT_EQ(&defaultString->getFloatSemantics(3), &llvm::APFloat::BFloat());
   EXPECT_EQ(&defaultString->getFloatSemantics(4), &llvm::APFloat::IEEEsingle());
   EXPECT_EQ(&defaultString->getFloatSemantics(8), &llvm::APFloat::IEEEdouble());
   EXPECT_EQ(&defaultString->getFloatSemantics(10),
@@ -123,6 +127,8 @@ TEST_F(commandLineStringTests, getIntegerBitsizeTest) {
       &llvm::APFloat::IEEEsingle());
   EXPECT_EQ(&commandLineString->getFloatSemantics(16),
       &llvm::APFloat::IEEEhalf());
+  EXPECT_EQ(&commandLineString->getFloatSemantics(23),
+      &llvm::APFloat::BFloat());
 
   // Converts to default case
   EXPECT_EQ(
