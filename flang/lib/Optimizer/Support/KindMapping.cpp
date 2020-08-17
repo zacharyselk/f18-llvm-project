@@ -32,12 +32,14 @@ static Bitsize defaultScalingKind(KindTy kind) {
 }
 
 /// Floating-point types default to the kind value being the size of the value
-/// in bytes. The default is to translate kinds of 2, 4, 8, 10, and 16 to a
+/// in bytes. The default is to translate kinds of 2, 3, 4, 8, 10, and 16 to a
 /// valid llvm::Type::TypeID value. Otherwise, the default is FloatTyID.
 static LLVMTypeID defaultRealKind(KindTy kind) {
   switch (kind) {
   case 2:
     return LLVMTypeID::HalfTyID;
+  case 3:
+    return LLVMTypeID::BFloatTyID;
   case 4:
     return LLVMTypeID::FloatTyID;
   case 8:
@@ -81,6 +83,8 @@ static const llvm::fltSemantics &getFloatSemanticsOfKind(KindTy kind,
   switch (doLookup<LLVMTypeID, KEY>(defaultRealKind, map, kind)) {
   case LLVMTypeID::HalfTyID:
     return llvm::APFloat::IEEEhalf();
+  case LLVMTypeID::BFloatTyID:
+    return llvm::APFloat::BFloat();
   case LLVMTypeID::FloatTyID:
     return llvm::APFloat::IEEEsingle();
   case LLVMTypeID::DoubleTyID:
@@ -146,6 +150,10 @@ static mlir::LogicalResult matchString(const char *&ptr,
 static MatchResult parseTypeID(LLVMTypeID &result, const char *&ptr) {
   if (mlir::succeeded(matchString(ptr, "Half"))) {
     result = LLVMTypeID::HalfTyID;
+    return mlir::success();
+  }
+  if (mlir::succeeded(matchString(ptr, "BFloat"))) {
+    result = LLVMTypeID::BFloatTyID;
     return mlir::success();
   }
   if (mlir::succeeded(matchString(ptr, "Float"))) {
