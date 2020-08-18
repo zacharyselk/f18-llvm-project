@@ -33,14 +33,16 @@ def fir_Type : Type<CPred<"fir::isa_fir_or_std_type($_self)">,
 // Fortran intrinsic types
 def fir_CharacterType : Type<CPred<"$_self.isa<fir::CharacterType>()">,
     "FIR character type">;
-def fir_ComplexType : Type<CPred<"$_self.isa<fir::CplxType>()">,
+def fir_ComplexType : Type<CPred<"$_self.isa<fir::ComplexType>()">,
     "FIR complex type">;
-def fir_IntegerType : Type<CPred<"$_self.isa<fir::IntType>()">,
+def fir_IntegerType : Type<CPred<"$_self.isa<fir::IntegerType>()">,
     "FIR integer type">;
 def fir_LogicalType : Type<CPred<"$_self.isa<fir::LogicalType>()">,
     "FIR logical type">;
 def fir_RealType : Type<CPred<"$_self.isa<fir::RealType>()">,
     "FIR real type">;
+def fir_VectorType : Type<CPred<"$_self.isa<fir::VectorType>()">,
+    "FIR vector type">;
 
 // Generalized FIR and standard dialect types representing intrinsic types
 def AnyIntegerLike : TypeConstraint<Or<[SignlessIntegerLike.predicate,
@@ -62,7 +64,7 @@ def fir_SequenceType : Type<CPred<"$_self.isa<fir::SequenceType>()">,
 // Composable types
 def AnyCompositeLike : TypeConstraint<Or<[fir_RecordType.predicate,
     fir_SequenceType.predicate, fir_ComplexType.predicate,
-    IsTupleTypePred]>, "any composite">;
+    fir_VectorType.predicate, IsTupleTypePred]>, "any composite">;
 
 // Reference to an entity type
 def fir_ReferenceType : Type<CPred<"$_self.isa<fir::ReferenceType>()">,
@@ -79,6 +81,10 @@ def fir_PointerType : Type<CPred<"$_self.isa<fir::PointerType>()">,
 // Reference types
 def AnyReferenceLike : TypeConstraint<Or<[fir_ReferenceType.predicate,
     fir_HeapType.predicate, fir_PointerType.predicate]>, "any reference">;
+
+// The legal types of global symbols
+def AnyAddressableLike : TypeConstraint<Or<[fir_ReferenceType.predicate,
+    FunctionType.predicate]>, "any addressable">;
 
 // A descriptor tuple (captures a reference to an entity and other information)
 def fir_BoxType : Type<CPred<"$_self.isa<fir::BoxType>()">, "box type">;
@@ -726,7 +732,7 @@ class fir_IntegralSwitchTerminatorOp<string mnemonic,
   let verifier = [{
     if (!(getSelector().getType().isa<mlir::IntegerType>() ||
           getSelector().getType().isa<mlir::IndexType>() ||
-          getSelector().getType().isa<fir::IntType>()))
+          getSelector().getType().isa<fir::IntegerType>()))
       return emitOpError("must be an integer");
     auto cases = getAttrOfType<mlir::ArrayAttr>(getCasesAttr()).getValue();
     auto count = getNumDest();
@@ -850,7 +856,7 @@ def fir_SelectCaseOp : fir_SwitchTerminatorOp<"select_case"> {
   let verifier = [{
     if (!(getSelector().getType().isa<mlir::IntegerType>() ||
           getSelector().getType().isa<mlir::IndexType>() ||
-          getSelector().getType().isa<fir::IntType>() ||
+          getSelector().getType().isa<fir::IntegerType>() ||
           getSelector().getType().isa<fir::LogicalType>() ||
           getSelector().getType().isa<fir::CharacterType>()))
       return emitOpError("must be an integer, character, or logical");
@@ -2352,6 +2358,8 @@ def fir_CallOp : fir_Op<"call", [CallOpInterface]> {
   let extraClassDeclaration = [{
     static constexpr StringRef calleeAttrName() { return "callee"; }
 
+    mlir::FunctionType getFunctionType();
+
     /// Get the argument operands to the called function.
     operand_range getArgOperands() {
       if (auto calling = getAttrOfType<SymbolRefAttr>(calleeAttrName()))
@@ -2413,7 +2421,6 @@ def fir_DispatchOp : fir_Op<"dispatch", []> {
         parser.resolveOperands(
             operands, calleeType.getInputs(), calleeLoc, result.operands))
       return mlir::failure();
-    result.addAttribute("fn_type", mlir::TypeAttr::get(calleeType));
     return mlir::success();
   }];
 
@@ -2425,10 +2432,8 @@ def fir_DispatchOp : fir_Op<"dispatch", []> {
       p.printOperands(args());
     }
     p << ')';
-    p.printOptionalAttrDict(getAttrs(), {"fn_type", "method"});
-    auto resTy{getResultTypes()};
-    llvm::SmallVector<mlir::Type, 8> argTy(getOperandTypes());
-    p << " : " << mlir::FunctionType::get(argTy, resTy, getContext());
+    p.printOptionalAttrDict(getAttrs(), {"method"});
+    p << " : " << getFunctionType();
   }];
 
   let extraClassDeclaration = [{
@@ -2679,7 +2684,7 @@ def fir_ConstcOp : fir_Op<"constc", [NoSideEffect]> {
   }];
 
   let verifier = [{
-    if (!getType().isa<fir::CplxType>())
+    if (!getType().isa<fir::ComplexType>())
       return emitOpError("must be a !fir.complex type");
     return mlir::success();
   }];
@@ -2750,7 +2755,8 @@ def fir_AddrOfOp : fir_OneResultOp<"address_of", [NoSideEffect]> {
 
   let description = [{
     Convert a symbol (a function or global reference) to an SSA-value to be
-    used in other Operations.
+    used in other Operations. References to Fortran symbols are distinguished
+    via this operation from other arbitrary constant values.
 
     ```mlir
       %p = fir.address_of(@symbol) : !fir.ref<f64>
@@ -2759,7 +2765,7 @@ def fir_AddrOfOp : fir_OneResultOp<"address_of", [NoSideEffect]> {
 
   let arguments = (ins SymbolRefAttr:$symbol);
 
-  let results = (outs fir_ReferenceType:$resTy);
+  let results = (outs AnyAddressableLike:$resTy);
 
   let assemblyFormat = "`(` $symbol `)` attr-dict `:` type($resTy)";
 }
@@ -2817,8 +2823,8 @@ def fir_ConvertOp : fir_OneResultOp<"convert", [NoSideEffect]> {
 
 def FortranTypeAttr : Attr<And<[CPred<"$_self.isa<TypeAttr>()">,
     Or<[CPred<"$_self.cast<TypeAttr>().getValue().isa<fir::CharacterType>()">,
-        CPred<"$_self.cast<TypeAttr>().getValue().isa<fir::CplxType>()">,
-        CPred<"$_self.cast<TypeAttr>().getValue().isa<fir::IntType>()">,
+        CPred<"$_self.cast<TypeAttr>().getValue().isa<fir::ComplexType>()">,
+        CPred<"$_self.cast<TypeAttr>().getValue().isa<fir::IntegerType>()">,
         CPred<"$_self.cast<TypeAttr>().getValue().isa<fir::LogicalType>()">,
         CPred<"$_self.cast<TypeAttr>().getValue().isa<fir::RealType>()">,
         CPred<"$_self.cast<TypeAttr>().getValue().isa<fir::RecordType>()">]>]>,
