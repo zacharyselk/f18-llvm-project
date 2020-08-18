@@ -439,7 +439,7 @@ private:
     // - or use evaluate/type.h
     if (auto r{t.dyn_cast<fir::RealType>()})
       return r.getFKind() * 4;
-    if (auto cplx{t.dyn_cast<fir::CplxType>()})
+    if (auto cplx{t.dyn_cast<fir::ComplexType>()})
       return cplx.getFKind() * 4;
     llvm_unreachable("not a floating-point type");
   }
@@ -459,8 +459,8 @@ private:
                  ? Conversion::Narrow
                  : Conversion::Extend;
     }
-    if (auto fromCplxTy{from.dyn_cast<fir::CplxType>()}) {
-      if (auto toCplxTy{to.dyn_cast<fir::CplxType>()}) {
+    if (auto fromCplxTy{from.dyn_cast<fir::ComplexType>()}) {
+      if (auto toCplxTy{to.dyn_cast<fir::ComplexType>()}) {
         return getFloatingPointWidth(fromCplxTy) >
                        getFloatingPointWidth(toCplxTy)
                    ? Conversion::Narrow
@@ -837,7 +837,7 @@ IntrinsicLibrary::outlineInWrapper(GeneratorType generator,
 
   auto funcType = getFunctionType(resultType, args, builder);
   auto wrapper = getWrapper(generator, name, funcType);
-  return builder.create<mlir::CallOp>(loc, wrapper, args).getResult(0);
+  return builder.create<fir::CallOp>(loc, wrapper, args).getResult(0);
 }
 
 fir::ExtendedValue
@@ -857,7 +857,7 @@ IntrinsicLibrary::outlineInWrapper(ExtendedGenerator generator,
   auto funcType = getFunctionType(resultType, mlirArgs, builder);
   auto wrapper = getWrapper(generator, name, funcType);
   auto mlirResult =
-      builder.create<mlir::CallOp>(loc, wrapper, mlirArgs).getResult(0);
+      builder.create<fir::CallOp>(loc, wrapper, mlirArgs).getResult(0);
   return toExtendedValue(mlirResult, builder, loc);
 }
 
@@ -884,7 +884,7 @@ IntrinsicLibrary::getRuntimeCallGenerator(llvm::StringRef name,
     for (const auto &pair : llvm::zip(actualFuncType.getInputs(), args))
       convertedArguments.push_back(
           builder.createConvert(loc, std::get<0>(pair), std::get<1>(pair)));
-    auto call = builder.create<mlir::CallOp>(loc, funcOp, convertedArguments);
+    auto call = builder.create<fir::CallOp>(loc, funcOp, convertedArguments);
     mlir::Type soughtType = soughtFuncType.getResult(0);
     return builder.createConvert(loc, soughtType, call.getResult(0));
   };

@@ -23,7 +23,7 @@ void fir::setTargetTriple(mlir::ModuleOp mod, llvm::Triple &triple) {
   mod.setAttr(tripleName, fir::OpaqueAttr::get(mod.getContext(), &triple));
 }
 
-llvm::Triple *getTargetTriple(mlir::ModuleOp mod) {
+llvm::Triple *fir::getTargetTriple(mlir::ModuleOp mod) {
   if (auto triple = mod.getAttrOfType<fir::OpaqueAttr>(tripleName))
     return static_cast<llvm::Triple *>(triple.getPointer());
   return nullptr;
@@ -35,7 +35,7 @@ void fir::setNameUniquer(mlir::ModuleOp mod, fir::NameUniquer &uniquer) {
   mod.setAttr(uniquerName, fir::OpaqueAttr::get(mod.getContext(), &uniquer));
 }
 
-fir::NameUniquer *getNameUniquer(mlir::ModuleOp mod) {
+fir::NameUniquer *fir::getNameUniquer(mlir::ModuleOp mod) {
   if (auto triple = mod.getAttrOfType<fir::OpaqueAttr>(uniquerName))
     return static_cast<fir::NameUniquer *>(triple.getPointer());
   return nullptr;
@@ -47,16 +47,19 @@ void fir::setKindMapping(mlir::ModuleOp mod, fir::KindMapping &kindMap) {
   mod.setAttr(kindMapName, fir::OpaqueAttr::get(mod.getContext(), &kindMap));
 }
 
-fir::KindMapping *getKindMapping(mlir::ModuleOp mod) {
+fir::KindMapping *fir::getKindMapping(mlir::ModuleOp mod) {
   if (auto triple = mod.getAttrOfType<fir::OpaqueAttr>(kindMapName))
     return static_cast<fir::KindMapping *>(triple.getPointer());
   return nullptr;
 }
 
 std::string fir::determineTargetTriple(llvm::StringRef triple) {
-  // Treat "native" and "" as stand-ins for the host machine.
-  if (triple.empty() || (triple == "native"))
-    return llvm::sys::getHostCPUName().str();
+  // Treat "" or "default" as stand-ins for the default machine.
+  if (triple.empty() || triple == "default")
+    return llvm::sys::getDefaultTargetTriple();
+  // Treat "native" as stand-in for the host machine.
+  if (triple == "native")
+    return llvm::sys::getProcessTriple();
   // TODO: normalize the triple?
   return triple.str();
 }

@@ -108,8 +108,8 @@ CharacterType parseCharacter(mlir::DialectAsmParser &parser) {
 }
 
 // `complex` `<` kind `>`
-CplxType parseComplex(mlir::DialectAsmParser &parser) {
-  return parseKindSingleton<CplxType>(parser);
+fir::ComplexType parseComplex(mlir::DialectAsmParser &parser) {
+  return parseKindSingleton<fir::ComplexType>(parser);
 }
 
 // `shape` `<` rank `>`
@@ -138,8 +138,8 @@ HeapType parseHeap(mlir::DialectAsmParser &parser, mlir::Location loc) {
 }
 
 // `int` `<` kind `>`
-IntType parseInteger(mlir::DialectAsmParser &parser) {
-  return parseKindSingleton<IntType>(parser);
+fir::IntegerType parseInteger(mlir::DialectAsmParser &parser) {
+  return parseKindSingleton<fir::IntegerType>(parser);
 }
 
 // `len`
@@ -173,6 +173,19 @@ TypeDescType parseTypeDesc(mlir::DialectAsmParser &parser, mlir::Location loc) {
   return parseTypeSingleton<TypeDescType>(parser, loc);
 }
 
+// `vector` `<` len `:` type `>`
+fir::VectorType parseVector(mlir::DialectAsmParser &parser,
+                            mlir::Location loc) {
+  int64_t len = 0;
+  mlir::Type eleTy;
+  if (parser.parseLess() || parser.parseInteger(len) || parser.parseColon() ||
+      parser.parseType(eleTy) || parser.parseGreater()) {
+    parser.emitError(parser.getNameLoc(), "invalid vector type");
+    return {};
+  }
+  return fir::VectorType::get(len, eleTy);
+}
+
 // `void`
 mlir::Type parseVoid(mlir::DialectAsmParser &parser) {
   return parser.getBuilder().getNoneType();
@@ -187,7 +200,7 @@ SequenceType parseSequence(mlir::DialectAsmParser &parser, mlir::Location) {
   }
   SequenceType::Shape shape;
   if (parser.parseOptionalStar()) {
-    if (parser.parseDimensionList(shape, true)) {
+    if (parser.parseDimensionList(shape, /*allowDynamic=*/true)) {
       parser.emitError(parser.getNameLoc(), "invalid shape");
       return {};
     }
@@ -212,7 +225,7 @@ SequenceType parseSequence(mlir::DialectAsmParser &parser, mlir::Location) {
 /// Is `ty` a standard or FIR integer type?
 static bool isaIntegerType(mlir::Type ty) {
   // TODO: why aren't we using isa_integer? investigatation required.
-  return ty.isa<mlir::IntegerType>() || ty.isa<fir::IntType>();
+  return ty.isa<mlir::IntegerType>() || ty.isa<fir::IntegerType>();
 }
 
 bool verifyRecordMemberType(mlir::Type ty) {
@@ -385,6 +398,8 @@ mlir::Type fir::parseFirType(FIROpsDialect *, mlir::DialectAsmParser &parser) {
     return parseDerived(parser, loc);
   if (typeNameLit == "void")
     return parseVoid(parser);
+  if (typeNameLit == "vector")
+    return parseVector(parser, loc);
 
   parser.emitError(parser.getNameLoc(), "unknown FIR type " + typeNameLit);
   return {};
@@ -405,14 +420,14 @@ struct CharacterTypeStorage : public mlir::TypeStorage {
   }
 
   bool operator==(const KeyTy &key) const {
-    return key == KeyTy{ getFKind(), getLen() };
+    return key == KeyTy{getFKind(), getLen()};
   }
 
   static CharacterTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
                                          const KeyTy &key) {
     auto *storage = allocator.allocate<CharacterTypeStorage>();
-    return new (storage) CharacterTypeStorage{ std::get<0>(key),
-                                               std::get<1>(key) };
+    return new (storage)
+        CharacterTypeStorage{std::get<0>(key), std::get<1>(key)};
   }
 
   KindTy getFKind() const { return kind; }
@@ -425,7 +440,7 @@ protected:
 private:
   CharacterTypeStorage() = delete;
   explicit CharacterTypeStorage(KindTy kind, CharacterType::LenType len)
-      : kind{ kind }, len{ len } {}
+      : kind{kind}, len{len} {}
 };
 
 struct ShapeTypeStorage : public mlir::TypeStorage {
@@ -438,7 +453,7 @@ struct ShapeTypeStorage : public mlir::TypeStorage {
   static ShapeTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
                                      unsigned rank) {
     auto *storage = allocator.allocate<ShapeTypeStorage>();
-    return new (storage) ShapeTypeStorage{ rank };
+    return new (storage) ShapeTypeStorage{rank};
   }
 
   unsigned getRank() const { return rank; }
@@ -448,7 +463,7 @@ protected:
 
 private:
   ShapeTypeStorage() = delete;
-  explicit ShapeTypeStorage(unsigned rank) : rank{ rank } {}
+  explicit ShapeTypeStorage(unsigned rank) : rank{rank} {}
 };
 struct ShapeShiftTypeStorage : public mlir::TypeStorage {
   using KeyTy = unsigned;
@@ -460,7 +475,7 @@ struct ShapeShiftTypeStorage : public mlir::TypeStorage {
   static ShapeShiftTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
                                           unsigned rank) {
     auto *storage = allocator.allocate<ShapeShiftTypeStorage>();
-    return new (storage) ShapeShiftTypeStorage{ rank };
+    return new (storage) ShapeShiftTypeStorage{rank};
   }
 
   unsigned getRank() const { return rank; }
@@ -470,7 +485,7 @@ protected:
 
 private:
   ShapeShiftTypeStorage() = delete;
-  explicit ShapeShiftTypeStorage(unsigned rank) : rank{ rank } {}
+  explicit ShapeShiftTypeStorage(unsigned rank) : rank{rank} {}
 };
 struct SliceTypeStorage : public mlir::TypeStorage {
   using KeyTy = unsigned;
@@ -482,7 +497,7 @@ struct SliceTypeStorage : public mlir::TypeStorage {
   static SliceTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
                                      unsigned rank) {
     auto *storage = allocator.allocate<SliceTypeStorage>();
-    return new (storage) SliceTypeStorage{ rank };
+    return new (storage) SliceTypeStorage{rank};
   }
 
   unsigned getRank() const { return rank; }
@@ -492,7 +507,7 @@ protected:
 
 private:
   SliceTypeStorage() = delete;
-  explicit SliceTypeStorage(unsigned rank) : rank{ rank } {}
+  explicit SliceTypeStorage(unsigned rank) : rank{rank} {}
 };
 
 /// The type of a derived type part reference
@@ -506,7 +521,7 @@ struct FieldTypeStorage : public mlir::TypeStorage {
   static FieldTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
                                      KindTy) {
     auto *storage = allocator.allocate<FieldTypeStorage>();
-    return new (storage) FieldTypeStorage{ 0 };
+    return new (storage) FieldTypeStorage{0};
   }
 
 private:
@@ -525,7 +540,7 @@ struct LenTypeStorage : public mlir::TypeStorage {
   static LenTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
                                    KindTy) {
     auto *storage = allocator.allocate<LenTypeStorage>();
-    return new (storage) LenTypeStorage{ 0 };
+    return new (storage) LenTypeStorage{0};
   }
 
 private:
@@ -544,7 +559,7 @@ struct LogicalTypeStorage : public mlir::TypeStorage {
   static LogicalTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
                                        KindTy kind) {
     auto *storage = allocator.allocate<LogicalTypeStorage>();
-    return new (storage) LogicalTypeStorage{ kind };
+    return new (storage) LogicalTypeStorage{kind};
   }
 
   KindTy getFKind() const { return kind; }
@@ -554,21 +569,21 @@ protected:
 
 private:
   LogicalTypeStorage() = delete;
-  explicit LogicalTypeStorage(KindTy kind) : kind{ kind } {}
+  explicit LogicalTypeStorage(KindTy kind) : kind{kind} {}
 };
 
 /// `INTEGER` storage
-struct IntTypeStorage : public mlir::TypeStorage {
+struct IntegerTypeStorage : public mlir::TypeStorage {
   using KeyTy = KindTy;
 
   static unsigned hashKey(const KeyTy &key) { return llvm::hash_combine(key); }
 
   bool operator==(const KeyTy &key) const { return key == getFKind(); }
 
-  static IntTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
-                                   KindTy kind) {
-    auto *storage = allocator.allocate<IntTypeStorage>();
-    return new (storage) IntTypeStorage{ kind };
+  static IntegerTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
+                                       KindTy kind) {
+    auto *storage = allocator.allocate<IntegerTypeStorage>();
+    return new (storage) IntegerTypeStorage{kind};
   }
 
   KindTy getFKind() const { return kind; }
@@ -577,22 +592,22 @@ protected:
   KindTy kind;
 
 private:
-  IntTypeStorage() = delete;
-  explicit IntTypeStorage(KindTy kind) : kind{ kind } {}
+  IntegerTypeStorage() = delete;
+  explicit IntegerTypeStorage(KindTy kind) : kind{kind} {}
 };
 
 /// `COMPLEX` storage
-struct CplxTypeStorage : public mlir::TypeStorage {
+struct ComplexTypeStorage : public mlir::TypeStorage {
   using KeyTy = KindTy;
 
   static unsigned hashKey(const KeyTy &key) { return llvm::hash_combine(key); }
 
   bool operator==(const KeyTy &key) const { return key == getFKind(); }
 
-  static CplxTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
-                                    KindTy kind) {
-    auto *storage = allocator.allocate<CplxTypeStorage>();
-    return new (storage) CplxTypeStorage{ kind };
+  static ComplexTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
+                                       KindTy kind) {
+    auto *storage = allocator.allocate<ComplexTypeStorage>();
+    return new (storage) ComplexTypeStorage{kind};
   }
 
   KindTy getFKind() const { return kind; }
@@ -601,8 +616,8 @@ protected:
   KindTy kind;
 
 private:
-  CplxTypeStorage() = delete;
-  explicit CplxTypeStorage(KindTy kind) : kind{ kind } {}
+  ComplexTypeStorage() = delete;
+  explicit ComplexTypeStorage(KindTy kind) : kind{kind} {}
 };
 
 /// `REAL` storage (for reals of unsupported sizes)
@@ -616,7 +631,7 @@ struct RealTypeStorage : public mlir::TypeStorage {
   static RealTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
                                     KindTy kind) {
     auto *storage = allocator.allocate<RealTypeStorage>();
-    return new (storage) RealTypeStorage{ kind };
+    return new (storage) RealTypeStorage{kind};
   }
 
   KindTy getFKind() const { return kind; }
@@ -626,7 +641,7 @@ protected:
 
 private:
   RealTypeStorage() = delete;
-  explicit RealTypeStorage(KindTy kind) : kind{ kind } {}
+  explicit RealTypeStorage(KindTy kind) : kind{kind} {}
 };
 
 /// Boxed object (a Fortran descriptor)
@@ -634,7 +649,7 @@ struct BoxTypeStorage : public mlir::TypeStorage {
   using KeyTy = std::tuple<mlir::Type, mlir::AffineMapAttr>;
 
   static unsigned hashKey(const KeyTy &key) {
-    auto hashVal{ llvm::hash_combine(std::get<mlir::Type>(key)) };
+    auto hashVal{llvm::hash_combine(std::get<mlir::Type>(key))};
     return llvm::hash_combine(
         hashVal, llvm::hash_combine(std::get<mlir::AffineMapAttr>(key)));
   }
@@ -647,8 +662,8 @@ struct BoxTypeStorage : public mlir::TypeStorage {
   static BoxTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
                                    const KeyTy &key) {
     auto *storage = allocator.allocate<BoxTypeStorage>();
-    return new (storage) BoxTypeStorage{ std::get<mlir::Type>(key),
-                                         std::get<mlir::AffineMapAttr>(key) };
+    return new (storage) BoxTypeStorage{std::get<mlir::Type>(key),
+                                        std::get<mlir::AffineMapAttr>(key)};
   }
 
   mlir::Type getElementType() const { return eleTy; }
@@ -661,7 +676,7 @@ protected:
 private:
   BoxTypeStorage() = delete;
   explicit BoxTypeStorage(mlir::Type eleTy, mlir::AffineMapAttr map)
-      : eleTy{ eleTy }, map{ map } {}
+      : eleTy{eleTy}, map{map} {}
 };
 
 /// Boxed CHARACTER object type
@@ -675,7 +690,7 @@ struct BoxCharTypeStorage : public mlir::TypeStorage {
   static BoxCharTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
                                        KindTy kind) {
     auto *storage = allocator.allocate<BoxCharTypeStorage>();
-    return new (storage) BoxCharTypeStorage{ kind };
+    return new (storage) BoxCharTypeStorage{kind};
   }
 
   KindTy getFKind() const { return kind; }
@@ -690,7 +705,7 @@ protected:
 
 private:
   BoxCharTypeStorage() = delete;
-  explicit BoxCharTypeStorage(KindTy kind) : kind{ kind } {}
+  explicit BoxCharTypeStorage(KindTy kind) : kind{kind} {}
 };
 
 /// Boxed PROCEDURE POINTER object type
@@ -705,7 +720,7 @@ struct BoxProcTypeStorage : public mlir::TypeStorage {
                                        mlir::Type eleTy) {
     assert(eleTy && "element type is null");
     auto *storage = allocator.allocate<BoxProcTypeStorage>();
-    return new (storage) BoxProcTypeStorage{ eleTy };
+    return new (storage) BoxProcTypeStorage{eleTy};
   }
 
   mlir::Type getElementType() const { return eleTy; }
@@ -715,7 +730,7 @@ protected:
 
 private:
   BoxProcTypeStorage() = delete;
-  explicit BoxProcTypeStorage(mlir::Type eleTy) : eleTy{ eleTy } {}
+  explicit BoxProcTypeStorage(mlir::Type eleTy) : eleTy{eleTy} {}
 };
 
 /// Pointer-like object storage
@@ -730,7 +745,7 @@ struct ReferenceTypeStorage : public mlir::TypeStorage {
                                          mlir::Type eleTy) {
     assert(eleTy && "element type is null");
     auto *storage = allocator.allocate<ReferenceTypeStorage>();
-    return new (storage) ReferenceTypeStorage{ eleTy };
+    return new (storage) ReferenceTypeStorage{eleTy};
   }
 
   mlir::Type getElementType() const { return eleTy; }
@@ -740,7 +755,7 @@ protected:
 
 private:
   ReferenceTypeStorage() = delete;
-  explicit ReferenceTypeStorage(mlir::Type eleTy) : eleTy{ eleTy } {}
+  explicit ReferenceTypeStorage(mlir::Type eleTy) : eleTy{eleTy} {}
 };
 
 /// Pointer object storage
@@ -755,7 +770,7 @@ struct PointerTypeStorage : public mlir::TypeStorage {
                                        mlir::Type eleTy) {
     assert(eleTy && "element type is null");
     auto *storage = allocator.allocate<PointerTypeStorage>();
-    return new (storage) PointerTypeStorage{ eleTy };
+    return new (storage) PointerTypeStorage{eleTy};
   }
 
   mlir::Type getElementType() const { return eleTy; }
@@ -765,7 +780,7 @@ protected:
 
 private:
   PointerTypeStorage() = delete;
-  explicit PointerTypeStorage(mlir::Type eleTy) : eleTy{ eleTy } {}
+  explicit PointerTypeStorage(mlir::Type eleTy) : eleTy{eleTy} {}
 };
 
 /// Heap memory reference object storage
@@ -780,7 +795,7 @@ struct HeapTypeStorage : public mlir::TypeStorage {
                                     mlir::Type eleTy) {
     assert(eleTy && "element type is null");
     auto *storage = allocator.allocate<HeapTypeStorage>();
-    return new (storage) HeapTypeStorage{ eleTy };
+    return new (storage) HeapTypeStorage{eleTy};
   }
 
   mlir::Type getElementType() const { return eleTy; }
@@ -790,7 +805,7 @@ protected:
 
 private:
   HeapTypeStorage() = delete;
-  explicit HeapTypeStorage(mlir::Type eleTy) : eleTy{ eleTy } {}
+  explicit HeapTypeStorage(mlir::Type eleTy) : eleTy{eleTy} {}
 };
 
 /// Sequence-like object storage
@@ -799,22 +814,21 @@ struct SequenceTypeStorage : public mlir::TypeStorage {
       std::tuple<SequenceType::Shape, mlir::Type, mlir::AffineMapAttr>;
 
   static unsigned hashKey(const KeyTy &key) {
-    auto shapeHash{ hash_value(std::get<SequenceType::Shape>(key)) };
+    auto shapeHash = hash_value(std::get<SequenceType::Shape>(key));
     shapeHash = llvm::hash_combine(shapeHash, std::get<mlir::Type>(key));
     return llvm::hash_combine(shapeHash, std::get<mlir::AffineMapAttr>(key));
   }
 
   bool operator==(const KeyTy &key) const {
-    return key == KeyTy{ getShape(), getElementType(), getLayoutMap() };
+    return key == KeyTy{getShape(), getElementType(), getLayoutMap()};
   }
 
   static SequenceTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
                                         const KeyTy &key) {
     auto *storage = allocator.allocate<SequenceTypeStorage>();
-    return new (
-        storage) SequenceTypeStorage{ std::get<SequenceType::Shape>(key),
-                                      std::get<mlir::Type>(key),
-                                      std::get<mlir::AffineMapAttr>(key) };
+    return new (storage) SequenceTypeStorage{
+        std::get<SequenceType::Shape>(key), std::get<mlir::Type>(key),
+        std::get<mlir::AffineMapAttr>(key)};
   }
 
   SequenceType::Shape getShape() const { return shape; }
@@ -830,7 +844,7 @@ private:
   SequenceTypeStorage() = delete;
   explicit SequenceTypeStorage(const SequenceType::Shape &shape,
                                mlir::Type eleTy, mlir::AffineMapAttr map)
-      : shape{ shape }, eleTy{ eleTy }, map{ map } {}
+      : shape{shape}, eleTy{eleTy}, map{map} {}
 };
 
 /// Derived type storage
@@ -846,7 +860,7 @@ struct RecordTypeStorage : public mlir::TypeStorage {
   static RecordTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
                                       const KeyTy &key) {
     auto *storage = allocator.allocate<RecordTypeStorage>();
-    return new (storage) RecordTypeStorage{ key };
+    return new (storage) RecordTypeStorage{key};
   }
 
   llvm::StringRef getName() const { return name; }
@@ -877,7 +891,7 @@ protected:
 private:
   RecordTypeStorage() = delete;
   explicit RecordTypeStorage(llvm::StringRef name)
-      : name{ name }, finalized{ false } {}
+      : name{name}, finalized{false} {}
 };
 
 /// Type descriptor type storage
@@ -892,7 +906,7 @@ struct TypeDescTypeStorage : public mlir::TypeStorage {
                                         mlir::Type ofTy) {
     assert(ofTy && "descriptor type is null");
     auto *storage = allocator.allocate<TypeDescTypeStorage>();
-    return new (storage) TypeDescTypeStorage{ ofTy };
+    return new (storage) TypeDescTypeStorage{ofTy};
   }
 
   // The type described by this type descriptor instance
@@ -903,12 +917,46 @@ protected:
 
 private:
   TypeDescTypeStorage() = delete;
-  explicit TypeDescTypeStorage(mlir::Type ofTy) : ofTy{ ofTy } {}
+  explicit TypeDescTypeStorage(mlir::Type ofTy) : ofTy{ofTy} {}
+};
+
+/// Vector type storage
+struct VectorTypeStorage : public mlir::TypeStorage {
+  using KeyTy = std::tuple<uint64_t, mlir::Type>;
+
+  static unsigned hashKey(const KeyTy &key) {
+    return llvm::hash_combine(std::get<uint64_t>(key),
+                              std::get<mlir::Type>(key));
+  }
+
+  bool operator==(const KeyTy &key) const {
+    return key == KeyTy{getLen(), getEleTy()};
+  }
+
+  static VectorTypeStorage *construct(mlir::TypeStorageAllocator &allocator,
+                                      const KeyTy &key) {
+    auto *storage = allocator.allocate<VectorTypeStorage>();
+    return new (storage)
+        VectorTypeStorage{std::get<uint64_t>(key), std::get<mlir::Type>(key)};
+  }
+
+  uint64_t getLen() const { return len; }
+  mlir::Type getEleTy() const { return eleTy; }
+
+protected:
+  uint64_t len;
+  mlir::Type eleTy;
+
+private:
+  VectorTypeStorage() = delete;
+  explicit VectorTypeStorage(uint64_t len, mlir::Type eleTy)
+      : len{len}, eleTy{eleTy} {}
 };
 
 } // namespace detail
 
-template <typename A, typename B> bool inbounds(A v, B lb, B ub) {
+template <typename A, typename B>
+bool inbounds(A v, B lb, B ub) {
   return v >= lb && v < ub;
 }
 
@@ -946,9 +994,8 @@ bool isa_aggregate(mlir::Type t) {
 
 mlir::Type dyn_cast_ptrEleTy(mlir::Type t) {
   return llvm::TypeSwitch<mlir::Type, mlir::Type>(t)
-      .Case<fir::ReferenceType, fir::PointerType, fir::HeapType>([](auto p) {
-         return p.getEleTy();
-       })
+      .Case<fir::ReferenceType, fir::PointerType, fir::HeapType>(
+          [](auto p) { return p.getEleTy(); })
       .Default([](mlir::Type) { return mlir::Type{}; });
 }
 
@@ -989,23 +1036,23 @@ KindTy fir::LogicalType::getFKind() const { return getImpl()->getFKind(); }
 
 // INTEGER
 
-IntType fir::IntType::get(mlir::MLIRContext *ctxt, KindTy kind) {
+fir::IntegerType fir::IntegerType::get(mlir::MLIRContext *ctxt, KindTy kind) {
   return Base::get(ctxt, kind);
 }
 
-KindTy fir::IntType::getFKind() const { return getImpl()->getFKind(); }
+KindTy fir::IntegerType::getFKind() const { return getImpl()->getFKind(); }
 
 // COMPLEX
 
-CplxType fir::CplxType::get(mlir::MLIRContext *ctxt, KindTy kind) {
+fir::ComplexType fir::ComplexType::get(mlir::MLIRContext *ctxt, KindTy kind) {
   return Base::get(ctxt, kind);
 }
 
-mlir::Type fir::CplxType::getElementType() const {
+mlir::Type fir::ComplexType::getElementType() const {
   return fir::RealType::get(getContext(), getFKind());
 }
 
-KindTy fir::CplxType::getFKind() const { return getImpl()->getFKind(); }
+KindTy fir::ComplexType::getFKind() const { return getImpl()->getFKind(); }
 
 // REAL
 
@@ -1084,8 +1131,8 @@ fir::ReferenceType::verifyConstructionInvariants(mlir::Location loc,
       eleTy.isa<SliceType>() || eleTy.isa<FieldType>() ||
       eleTy.isa<LenType>() || eleTy.isa<ReferenceType>() ||
       eleTy.isa<TypeDescType>())
-    return mlir::emitError(loc, "cannot build a reference to type: ") << eleTy
-                                                                      << '\n';
+    return mlir::emitError(loc, "cannot build a reference to type: ")
+           << eleTy << '\n';
   return mlir::success();
 }
 
@@ -1113,8 +1160,8 @@ mlir::LogicalResult
 fir::PointerType::verifyConstructionInvariants(mlir::Location loc,
                                                mlir::Type eleTy) {
   if (canBePointerOrHeapElementType(eleTy))
-    return mlir::emitError(loc, "cannot build a pointer to type: ") << eleTy
-                                                                    << '\n';
+    return mlir::emitError(loc, "cannot build a pointer to type: ")
+           << eleTy << '\n';
   return mlir::success();
 }
 
@@ -1180,7 +1227,7 @@ bool fir::SequenceType::hasConstantInterior() const {
   if (rows == dim)
     return true;
   auto shape = getShape();
-  for (unsigned i{ rows }, size{ dim }; i < size; ++i)
+  for (unsigned i{rows}, size{dim}; i < size; ++i)
     if (shape[i] != getUnknownExtent())
       return false;
   return true;
@@ -1195,7 +1242,8 @@ mlir::LogicalResult fir::SequenceType::verifyConstructionInvariants(
       eleTy.isa<ShapeShiftType>() || eleTy.isa<SliceType>() ||
       eleTy.isa<FieldType>() || eleTy.isa<LenType>() || eleTy.isa<HeapType>() ||
       eleTy.isa<PointerType>() || eleTy.isa<ReferenceType>() ||
-      eleTy.isa<TypeDescType>() || eleTy.isa<SequenceType>())
+      eleTy.isa<TypeDescType>() || eleTy.isa<fir::VectorType>() ||
+      eleTy.isa<SequenceType>())
     return mlir::emitError(loc, "cannot build an array of this element type: ")
            << eleTy << '\n';
   return mlir::success();
@@ -1288,9 +1336,9 @@ mlir::Type fir::RecordType::getType(llvm::StringRef ident) {
   return {};
 }
 
-/// Type descriptor type
-///
-/// This is the type of a type descriptor object (similar to a class instance)
+//===----------------------------------------------------------------------===//
+// Type descriptor type
+//===----------------------------------------------------------------------===//
 
 TypeDescType fir::TypeDescType::get(mlir::Type ofType) {
   assert(!ofType.isa<ReferenceType>());
@@ -1308,6 +1356,27 @@ fir::TypeDescType::verifyConstructionInvariants(mlir::Location loc,
       eleTy.isa<FieldType>() || eleTy.isa<LenType>() ||
       eleTy.isa<ReferenceType>() || eleTy.isa<TypeDescType>())
     return mlir::emitError(loc, "cannot build a type descriptor of type: ")
+           << eleTy << '\n';
+  return mlir::success();
+}
+
+//===----------------------------------------------------------------------===//
+// Vector type
+//===----------------------------------------------------------------------===//
+
+fir::VectorType fir::VectorType::get(uint64_t len, mlir::Type eleTy) {
+  return Base::get(eleTy.getContext(), len, eleTy);
+}
+
+mlir::Type fir::VectorType::getEleTy() const { return getImpl()->getEleTy(); }
+
+uint64_t fir::VectorType::getLen() const { return getImpl()->getLen(); }
+
+mlir::LogicalResult
+fir::VectorType::verifyConstructionInvariants(mlir::Location loc, uint64_t len,
+                                              mlir::Type eleTy) {
+  if (!(fir::isa_real(eleTy) || fir::isa_integer(eleTy)))
+    return mlir::emitError(loc, "cannot build a vector of type ")
            << eleTy << '\n';
   return mlir::success();
 }
@@ -1372,7 +1441,7 @@ void fir::printFirType(FIROpsDialect *, mlir::Type ty,
     os << '>';
     return;
   }
-  if (auto type = ty.dyn_cast<CplxType>()) {
+  if (auto type = ty.dyn_cast<fir::ComplexType>()) {
     // Fortran intrinsic type COMPLEX
     os << "complex<" << type.getFKind() << '>';
     return;
@@ -1427,7 +1496,7 @@ void fir::printFirType(FIROpsDialect *, mlir::Type ty,
     os << '>';
     return;
   }
-  if (auto type = ty.dyn_cast<fir::IntType>()) {
+  if (auto type = ty.dyn_cast<fir::IntegerType>()) {
     // Fortran intrinsic type INTEGER
     os << "int<" << type.getFKind() << '>';
     return;
@@ -1477,6 +1546,12 @@ void fir::printFirType(FIROpsDialect *, mlir::Type ty,
   if (auto type = ty.dyn_cast<TypeDescType>()) {
     os << "tdesc<";
     p.printType(type.getOfTy());
+    os << '>';
+    return;
+  }
+  if (auto type = ty.dyn_cast<fir::VectorType>()) {
+    os << "vector<" << type.getLen() << ':';
+    p.printType(type.getEleTy());
     os << '>';
     return;
   }

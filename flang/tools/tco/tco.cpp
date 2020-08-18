@@ -117,6 +117,7 @@ static int compileFIR(const mlir::PassPipelineCLParser &passPipeline) {
 
     // pm.addPass(fir::createMemToRegPass());
     pm.addPass(fir::createFirCodeGenRewritePass());
+    pm.addPass(fir::createFirTargetRewritePass());
     pm.addPass(fir::createFIRToLLVMPass(uniquer));
     pm.addPass(fir::createLLVMDialectToLLVMPass(out.os()));
   }

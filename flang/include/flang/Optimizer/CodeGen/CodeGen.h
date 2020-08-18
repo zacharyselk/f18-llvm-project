@@ -9,6 +9,7 @@
 #ifndef OPTIMIZER_CODEGEN_CODEGEN_H
 #define OPTIMIZER_CODEGEN_CODEGEN_H
 
+#include "mlir/IR/Module.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassRegistry.h"
 #include <memory>
@@ -20,6 +21,17 @@ struct NameUniquer;
 /// Prerequiste pass for code gen. Perform intermediate rewrites to perform
 /// the code gen (to LLVM-IR dialect) conversion.
 std::unique_ptr<mlir::Pass> createFirCodeGenRewritePass();
+
+/// FirTargetRewritePass options.
+struct TargetRewriteOptions {
+  bool noCharacterConversion{};
+  bool noComplexConversion{};
+};
+
+/// Prerequiste pass for code gen. Perform intermediate rewrites to tailor the
+/// IR for the chosen target.
+std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>> createFirTargetRewritePass(
+    const TargetRewriteOptions &options = TargetRewriteOptions());
 
 /// Convert FIR to the LLVM IR dialect
 std::unique_ptr<mlir::Pass> createFIRToLLVMPass(NameUniquer &uniquer);
