@@ -111,9 +111,6 @@ public:
 
   static CharacterType get(mlir::MLIRContext *ctxt, KindTy kind,
                            LenType len = 1);
-  static constexpr bool kindof(unsigned kind) {
-    return kind == TypeKind::FIR_CHARACTER;
-  }
   KindTy getFKind() const;
 
   /// CHARACTER is a singleton and has a LEN of 1.
@@ -223,7 +220,6 @@ class ShapeType : public mlir::Type::TypeBase<ShapeType, mlir::Type,
 public:
   using Base::Base;
   static ShapeType get(mlir::MLIRContext *ctx, unsigned rank);
-  static bool kindof(unsigned kind) { return kind == TypeKind::FIR_SHAPE; }
   unsigned getRank() const;
 };
 
@@ -237,7 +233,6 @@ class ShapeShiftType
 public:
   using Base::Base;
   static ShapeShiftType get(mlir::MLIRContext *ctx, unsigned rank);
-  static bool kindof(unsigned kind) { return kind == TypeKind::FIR_SHAPESHIFT; }
   unsigned getRank() const;
 };
 
@@ -249,7 +244,6 @@ class SliceType : public mlir::Type::TypeBase<SliceType, mlir::Type,
 public:
   using Base::Base;
   static SliceType get(mlir::MLIRContext *ctx, unsigned rank);
-  static bool kindof(unsigned kind) { return kind == TypeKind::FIR_SLICE; }
   unsigned getRank() const;
 };
 

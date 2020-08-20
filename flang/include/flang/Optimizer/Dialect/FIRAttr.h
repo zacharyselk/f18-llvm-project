@@ -143,8 +143,6 @@ public:
 
   static constexpr llvm::StringRef getAttrName() { return "opaque"; }
   static OpaqueAttr get(mlir::MLIRContext *ctxt, void *pointer);
-  static constexpr bool kindof(unsigned kind) { return kind == getId(); }
-  static constexpr unsigned getId() { return AttributeKind::FIR_OPAQUE_ATTR; }
 
   void *getPointer() const;
 };

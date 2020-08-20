@@ -154,7 +154,7 @@ llvm::APFloat fir::RealAttr::getValue() const { return getImpl()->getValue(); }
 //===----------------------------------------------------------------------===//
 
 OpaqueAttr fir::OpaqueAttr::get(mlir::MLIRContext *ctxt, void *key) {
-  return Base::get(ctxt, getId(), key);
+  return Base::get(ctxt, key);
 }
 
 void *fir::OpaqueAttr::getPointer() const { return getImpl()->getPointer(); }
