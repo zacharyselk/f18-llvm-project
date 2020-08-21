@@ -27,7 +27,7 @@ class ModuleOp;
 
 namespace fir {
 class KindMapping;
-class NameUniquer;
+struct NameUniquer;
 
 /// Set the target triple for the module.
 void setTargetTriple(mlir::ModuleOp mod, llvm::Triple &triple);
