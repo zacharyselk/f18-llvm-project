@@ -432,9 +432,10 @@ locationToFilename(Fortran::lower::AbstractConverter &converter,
                    mlir::Location loc, mlir::Type toType) {
   auto &builder = converter.getFirOpBuilder();
   if (auto flc = loc.dyn_cast<mlir::FileLineColLoc>()) {
-    auto fn = flc.getFilename();
+    // must be encoded as asciiz, C string
+    auto fn = flc.getFilename().str() + '\0';
     auto addr =
-        fir::getBase(createStringLiteral(loc, converter, fn.data(), fn.size()));
+        fir::getBase(createStringLiteral(loc, converter, fn, fn.size()));
     return builder.createConvert(loc, toType, addr);
   }
   mlir::Value null =
