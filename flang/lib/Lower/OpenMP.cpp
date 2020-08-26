@@ -87,6 +87,7 @@ genOMP(Fortran::lower::AbstractConverter &converter,
   if (parallelDirective.v == llvm::omp::OMPD_parallel) {
     auto &firOpBuilder = converter.getFirOpBuilder();
     auto currentLocation = converter.getCurrentLocation();
+    auto insertPt = firOpBuilder.saveInsertionPoint();
 
     // Clauses.
     // FIXME: Add support for other clauses.
