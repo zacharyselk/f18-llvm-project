@@ -9,14 +9,14 @@
 #ifndef OPTIMIZER_DIALECT_FIRDIALECT_H
 #define OPTIMIZER_DIALECT_FIRDIALECT_H
 
+#include "mlir/Conversion/Passes.h"
+#include "mlir/Dialect/Affine/Passes.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/InitAllDialects.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassRegistry.h"
-#include "mlir/Transforms/Passes.h"
 #include "mlir/Transforms/LocationSnapshot.h"
-#include "mlir/Dialect/Affine/Passes.h"
-#include "mlir/Conversion/Passes.h"
+#include "mlir/Transforms/Passes.h"
 
 namespace fir {
 
@@ -79,9 +79,7 @@ inline void registerGeneralPasses() {
   mlir::registerConvertAffineToStandardPass();
 }
 
-inline void registerFIRPasses() {
-  registerGeneralPasses();
-}
+inline void registerFIRPasses() { registerGeneralPasses(); }
 
 } // namespace fir
 
