@@ -28,6 +28,8 @@
 #include <string_view>
 #include <utility>
 
+#define DEBUG_TYPE "flang-lower-intrinsic"
+
 #define PGMATH_DECLARE
 #include "../runtime/pgmath.h.inc"
 
@@ -1072,7 +1074,6 @@ mlir::Value IntrinsicLibrary::genFloor(mlir::Type resultType,
 mlir::Value IntrinsicLibrary::genIAnd(mlir::Type resultType,
                                       llvm::ArrayRef<mlir::Value> args) {
   assert(args.size() == 2);
-
   return builder.create<mlir::AndOp>(loc, args[0], args[1]);
 }
 
@@ -1083,22 +1084,29 @@ mlir::Value IntrinsicLibrary::genIchar(mlir::Type resultType,
   assert(args.size() >= 1 && args.size() <= 2);
 
   auto arg = args[0];
-  assert(Fortran::lower::CharacterExprHelper::isCharacter(arg.getType()) &&
+  auto argTy = arg.getType();
+  assert(Fortran::lower::CharacterExprHelper::isCharacter(argTy) &&
          "Error: Unhandled type passed to ICHAR");
-  Fortran::lower::CharacterExprHelper helper{builder, loc};
-  auto dataAndLen = helper.createUnboxChar(arg);
-  auto charType = helper.getCharacterType(arg.getType());
   mlir::Value charVal;
-  if (fir::isa_ref_type(dataAndLen.first.getType())) {
-    auto refType = builder.getRefType(charType);
-    auto charAddr = builder.createConvert(loc, refType, dataAndLen.first);
-    charVal = builder.create<fir::LoadOp>(loc, charType, charAddr);
+  if (auto charTy = argTy.dyn_cast<fir::CharacterType>()) {
+    assert(charTy.singleton());
+    charVal = arg;
+  } else if (auto seqTy = argTy.dyn_cast<fir::SequenceType>()) {
+    auto zero =
+        builder.createIntegerConstant(loc, builder.getIntegerType(32), 0);
+    charVal = builder.create<fir::ExtractValueOp>(loc, seqTy.getEleTy(), arg,
+                                                  mlir::ValueRange{zero});
   } else {
-    charVal = builder.create<fir::ExtractValueOp>(
-        loc, charType, dataAndLen.first,
-        llvm::ArrayRef<mlir::Value>{
-            builder.createIntegerConstant(loc, builder.getIntegerType(32), 0)});
+    using H = Fortran::lower::CharacterExprHelper;
+    H helper{builder, loc};
+    auto dataAndLen = helper.createUnboxChar(arg);
+    // Strip away any sequence type residual.
+    auto toTy =
+        builder.getRefType(H::getCharacterType(dataAndLen.first.getType()));
+    auto cast = builder.createConvert(loc, toTy, dataAndLen.first);
+    charVal = builder.create<fir::LoadOp>(loc, cast);
   }
+  LLVM_DEBUG(llvm::errs() << "ichar(" << charVal << ")\n");
   return builder.createConvert(loc, resultType, charVal);
 }
 

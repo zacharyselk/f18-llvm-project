@@ -984,7 +984,8 @@ bool isa_box_type(mlir::Type t) {
 }
 
 bool isa_passbyref_type(mlir::Type t) {
-  return t.isa<ReferenceType>() || isa_box_type(t);
+  return t.isa<ReferenceType>() || isa_box_type(t) ||
+         t.isa<mlir::FunctionType>();
 }
 
 bool isa_aggregate(mlir::Type t) {
