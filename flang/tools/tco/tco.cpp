@@ -35,6 +35,7 @@
 
 using namespace llvm;
 
+// list of program return codes
 static cl::opt<std::string>
     inputFilename(cl::Positional, cl::desc("<input file>"), cl::init("-"));
 
@@ -57,30 +58,31 @@ static void printModuleBody(mlir::ModuleOp mod, raw_ostream &output) {
 }
 
 // compile a .fir file
-static int compileFIR(const mlir::PassPipelineCLParser &passPipeline) {
+static mlir::LogicalResult
+compileFIR(const mlir::PassPipelineCLParser &passPipeline) {
   // check that there is a file to load
   ErrorOr<std::unique_ptr<MemoryBuffer>> fileOrErr =
       MemoryBuffer::getFileOrSTDIN(inputFilename);
 
   if (std::error_code EC = fileOrErr.getError()) {
     errs() << "Could not open file: " << EC.message() << '\n';
-    return 1;
+    return mlir::failure();
   }
 
   // load the file into a module
   SourceMgr sourceMgr;
   sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), SMLoc());
   mlir::MLIRContext context;
-  fir::registerFIRDialects(context.getDialectRegistry());
+  fir::registerAndLoadDialects(context);
   auto owningRef = mlir::parseSourceFile(sourceMgr, &context);
 
   if (!owningRef) {
     errs() << "Error can't load file " << inputFilename << '\n';
-    return 2;
+    return mlir::failure();
   }
   if (mlir::failed(owningRef->verify())) {
     errs() << "Error verifying FIR module\n";
-    return 4;
+    return mlir::failure();
   }
 
   std::error_code ec;
@@ -89,11 +91,11 @@ static int compileFIR(const mlir::PassPipelineCLParser &passPipeline) {
   // run passes
   llvm::Triple triple(fir::determineTargetTriple(targetTriple));
   fir::NameUniquer uniquer;
-  fir::KindMapping kindMap{context.get()};
+  fir::KindMapping kindMap{&context};
   fir::setTargetTriple(*owningRef, triple);
   fir::setNameUniquer(*owningRef, uniquer);
   fir::setKindMapping(*owningRef, kindMap);
-  mlir::PassManager pm{context.get()};
+  mlir::PassManager pm{&context};
   mlir::applyPassManagerCLOptions(pm);
   if (emitFir) {
     // parse the input and pretty-print it back out
@@ -128,13 +130,13 @@ static int compileFIR(const mlir::PassPipelineCLParser &passPipeline) {
     if (emitFir || passPipeline.hasAnyOccurrences())
       printModuleBody(*owningRef, out.os());
     out.keep();
-    return 0;
+    return mlir::success();
   }
 
   // pass manager failed
   printModuleBody(*owningRef, errs());
   errs() << "\n\nFAILED: " << inputFilename << '\n';
-  return 8;
+  return mlir::failure();
 }
 
 int main(int argc, char **argv) {
@@ -148,5 +150,5 @@ int main(int argc, char **argv) {
   mlir::registerPassManagerCLOptions();
   mlir::PassPipelineCLParser passPipe("", "Compiler passes to run");
   cl::ParseCommandLineOptions(argc, argv, "Tilikum Crossing Optimizer\n");
-  return compileFIR(passPipe);
+  return mlir::failed(compileFIR(passPipe));
 }

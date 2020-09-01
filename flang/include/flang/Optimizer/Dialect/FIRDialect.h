@@ -5,6 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// Coding style: https://mlir.llvm.org/getting_started/DeveloperGuide/
+//
+//===----------------------------------------------------------------------===//
 
 #ifndef OPTIMIZER_DIALECT_FIRDIALECT_H
 #define OPTIMIZER_DIALECT_FIRDIALECT_H
@@ -37,18 +41,20 @@ public:
                       mlir::DialectAsmPrinter &p) const override;
 };
 
-/// Register the dialect with the provided registry.
-inline void registerFIRDialects(mlir::DialectRegistry &registry) {
+/// Register and load all the dialects used by flang.
+inline void registerAndLoadDialects(mlir::MLIRContext &ctx) {
+  auto registry = ctx.getDialectRegistry();
   // clang-format off
   registry.insert<mlir::AffineDialect,
+                  FIROpsDialect,
                   mlir::LLVM::LLVMDialect,
                   mlir::acc::OpenACCDialect,
                   mlir::omp::OpenMPDialect,
                   mlir::scf::SCFDialect,
                   mlir::StandardOpsDialect,
-                  mlir::vector::VectorDialect,
-                  FIROpsDialect>();
+                  mlir::vector::VectorDialect>();
   // clang-format on
+  registry.loadAll(&ctx);
 }
 
 /// Register the standard passes we use. This comes from registerAllPasses(),
