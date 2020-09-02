@@ -5,6 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// Coding style: https://mlir.llvm.org/getting_started/DeveloperGuide/
+//
+//===----------------------------------------------------------------------===//
 
 #include "flang/Lower/IO.h"
 #include "../../runtime/io-api.h"
@@ -17,6 +21,7 @@
 #include "flang/Lower/PFTBuilder.h"
 #include "flang/Lower/Runtime.h"
 #include "flang/Lower/Utils.h"
+#include "flang/Optimizer/Support/FIRContext.h"
 #include "flang/Parser/parse-tree.h"
 #include "flang/Semantics/tools.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
@@ -216,7 +221,7 @@ static mlir::FuncOp getOutputFunc(mlir::Location loc,
   if (auto refTy = type.dyn_cast<fir::ReferenceType>())
     if (refTy.getEleTy().isa<fir::SequenceType>())
       return getIORuntimeFunc<mkIOKey(OutputDescriptor)>(loc, builder);
-  // TODO: unaccounted for type to be handled
+  // Any unaccounted for types are to be handled here.
   mlir::emitError(loc, "output for entity type ") << type << " not implemented";
   return {};
 }
@@ -295,7 +300,7 @@ static mlir::FuncOp getInputFunc(mlir::Location loc,
     return getIORuntimeFunc<mkIOKey(InputAscii)>(loc, builder);
   if (type.isa<fir::SequenceType>())
     return getIORuntimeFunc<mkIOKey(InputDescriptor)>(loc, builder);
-  // TODO: unaccounted for type to be handled
+  // Any unaccounted for types are to be handled here.
   mlir::emitError(loc, "input for entity type ") << type << " not implemented";
   return {};
 }
@@ -890,27 +895,39 @@ constexpr bool isDataTransferInternal<Fortran::parser::PrintStmt>(
   return false;
 }
 
-static bool hasNonDefaultCharKind(const Fortran::parser::Variable &var) {
-  // TODO
-  return false;
+/// If the variable `var` is an array or of a KIND other than the default
+/// (normally 1), then a descriptor is required by the runtime IO API. This
+/// condition holds even in F77 sources.
+static llvm::Optional<mlir::Value> getVariableBufferRequiredDescriptor(
+    Fortran::lower::AbstractConverter &converter,
+    const Fortran::parser::Variable &var) {
+  auto varAddr = converter.genExprAddr(var.typedExpr->v.value());
+  auto defCharKind =
+      fir::getKindMapping(converter.getModuleOp())->defaultCharacterKind();
+  if (Fortran::lower::CharacterExprHelper::getCharacterOrSequenceKind(
+          varAddr.getType()) != defCharKind)
+    return varAddr;
+  if (Fortran::lower::CharacterExprHelper::isArray(varAddr.getType()))
+    return varAddr;
+  return llvm::None;
 }
 
 template <typename A>
-static bool isDataTransferInternalNotDefaultKind(const A &stmt) {
-  // same as isDataTransferInternal, but the KIND of the expression is not the
-  // default KIND.
+static llvm::Optional<mlir::Value> getIfDataTransferInternalRequiresDescriptor(
+    Fortran::lower::AbstractConverter &converter, const A &stmt) {
   if (stmt.iounit.has_value())
     if (auto *var = std::get_if<Fortran::parser::Variable>(&stmt.iounit->u))
-      return hasNonDefaultCharKind(*var);
+      return getVariableBufferRequiredDescriptor(converter, *var);
   if (auto *unit = getIOControl<Fortran::parser::IoUnit>(stmt))
     if (auto *var = std::get_if<Fortran::parser::Variable>(&unit->u))
-      return hasNonDefaultCharKind(*var);
-  return false;
+      return getVariableBufferRequiredDescriptor(converter, *var);
+  return llvm::None;
 }
 template <>
-constexpr bool isDataTransferInternalNotDefaultKind<Fortran::parser::PrintStmt>(
-    const Fortran::parser::PrintStmt &) {
-  return false;
+inline llvm::Optional<mlir::Value>
+getIfDataTransferInternalRequiresDescriptor<Fortran::parser::PrintStmt>(
+    Fortran::lower::AbstractConverter &, const Fortran::parser::PrintStmt &) {
+  return llvm::None;
 }
 
 template <typename A>
@@ -941,14 +958,17 @@ constexpr bool isDataTransferNamelist<Fortran::parser::PrintStmt>(
 }
 
 /// Lowers a format statment that uses a assigned varible label reference as
-/// a select operation to allow for run-time selection of the format statement
-// Possible TODO: Instead of inlining a selectOp every time there is a format
-// statement a function with the selectOpcould be generated to reduce code size
+/// a select operation to allow for run-time selection of the format statement.
 static std::tuple<mlir::Value, mlir::Value, mlir::Value>
 lowerReferenceAsStringSelect(
     Fortran::lower::AbstractConverter &converter, mlir::Location loc,
     const Fortran::evaluate::Expr<Fortran::evaluate::SomeType> &expr,
     mlir::Type strTy, mlir::Type lenTy) {
+  // Possible optimization TODO: Instead of inlining a selectOp every time there
+  // is a variable reference to a format statement, a function with the selectOp
+  // could be generated to reduce code size. It is not clear if such an
+  // optimization would be deployed very often or improve the object code
+  // beyond, say, what GVN/GCM might produce.
 
   // Create the requisite blocks to inline a selectOp
   auto &builder = converter.getFirOpBuilder();
@@ -1081,9 +1101,9 @@ getFormat<Fortran::parser::PrintStmt>(
                    strTy, lenTy);
 }
 
-/// Generate a reference to a buffer and the length of buffer.There are 3 cases
-/// An IoUnit can be variable, a ScalarIntExpr (i.e FileUnitNumber) or a *.  The
-/// first is handled here, the other 2 are somewhere else.
+/// Generate a reference to a buffer and the length of buffer. There are 3 cases
+/// An IoUnit can be variable, a ScalarIntExpr (i.e FileUnitNumber) or a *. Only
+/// the first case (a variable) is handled here.
 static std::tuple<mlir::Value, mlir::Value>
 genBuffer(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
           const Fortran::parser::IoUnit &iounit, mlir::Type strTy,
@@ -1114,10 +1134,12 @@ getBuffer(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
                    strTy, lenTy);
 }
 
-template <typename A>
-mlir::Value getDescriptor(Fortran::lower::AbstractConverter &converter,
-                          mlir::Location loc, const A &stmt,
-                          mlir::Type toType) {
+/// Create a boxed value to be passed to the runtime. `descRef` is the reference
+/// to an entity that is to be boxed.  The box will include a shape (or
+/// shape_shift) argument if the entity is an array.
+static mlir::Value getDescriptor(Fortran::lower::AbstractConverter &converter,
+                                 mlir::Location loc, mlir::Value descRef,
+                                 mlir::Type toType) {
   TODO();
 }
 
@@ -1354,7 +1376,8 @@ void genBeginCallArguments(llvm::SmallVector<mlir::Value, 8> &ioArgs,
                            mlir::Location loc, const A &stmt,
                            mlir::FunctionType ioFuncTy, bool isFormatted,
                            bool isList, bool isIntern, bool isOtherIntern,
-                           bool isAsynch, bool isNml) {
+                           bool isAsynch, bool isNml,
+                           const llvm::Optional<mlir::Value> &descRef) {
   auto &builder = converter.getFirOpBuilder();
   if constexpr (hasIOCtrl) {
     // READ/WRITE cases have a wide variety of argument permutations
@@ -1389,7 +1412,9 @@ void genBeginCallArguments(llvm::SmallVector<mlir::Value, 8> &ioArgs,
     assert(isIntern && "internal data transfer");
     if (isNml || isOtherIntern) {
       // descriptor, ...
-      ioArgs.push_back(getDescriptor(converter, loc, stmt,
+      assert(!isNml && "namelist is not implemented");
+      assert(descRef.hasValue() && "descriptor value required");
+      ioArgs.push_back(getDescriptor(converter, loc, *descRef,
                                      ioFuncTy.getInput(ioArgs.size())));
       if (isNml) {
         // namelist group, ...
@@ -1448,8 +1473,10 @@ genDataTransferStmt(Fortran::lower::AbstractConverter &converter,
   const bool isFormatted = isDataTransferFormatted(stmt);
   const bool isList = isFormatted ? isDataTransferList(stmt) : false;
   const bool isIntern = isDataTransferInternal(stmt);
-  const bool isOtherIntern =
-      isIntern ? isDataTransferInternalNotDefaultKind(stmt) : false;
+  llvm::Optional<mlir::Value> descRef =
+      isIntern ? getIfDataTransferInternalRequiresDescriptor(converter, stmt)
+               : llvm::None;
+  const bool isOtherIntern = descRef.hasValue();
   const bool isAsynch = isDataTransferAsynchronous(stmt);
   const bool isNml = isDataTransferNamelist(stmt);
 
@@ -1463,7 +1490,7 @@ genDataTransferStmt(Fortran::lower::AbstractConverter &converter,
   llvm::SmallVector<mlir::Value, 8> ioArgs;
   genBeginCallArguments<hasIOCtrl>(ioArgs, converter, loc, stmt, ioFuncTy,
                                    isFormatted, isList, isIntern, isOtherIntern,
-                                   isAsynch, isNml);
+                                   isAsynch, isNml, descRef);
   ioArgs.push_back(
       locationToFilename(converter, loc, ioFuncTy.getInput(ioArgs.size())));
   ioArgs.push_back(

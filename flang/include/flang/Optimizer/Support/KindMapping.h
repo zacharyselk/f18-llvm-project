@@ -5,6 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// Coding style: https://mlir.llvm.org/getting_started/DeveloperGuide/
+//
+//===----------------------------------------------------------------------===//
 
 #ifndef OPTIMIZER_SUPPORT_KINDMAPPING_H
 #define OPTIMIZER_SUPPORT_KINDMAPPING_H
@@ -48,8 +52,10 @@ public:
   using LLVMTypeID = llvm::Type::TypeID;
   using MatchResult = mlir::ParseResult;
 
-  explicit KindMapping(mlir::MLIRContext *context);
-  explicit KindMapping(mlir::MLIRContext *context, llvm::StringRef map);
+  explicit KindMapping(mlir::MLIRContext *context,
+                       llvm::ArrayRef<KindTy> defs = llvm::None);
+  explicit KindMapping(mlir::MLIRContext *context, llvm::StringRef map,
+                       llvm::ArrayRef<KindTy> defs = llvm::None);
 
   /// Get the size in bits of !fir.char<kind>
   Bitsize getCharacterBitsize(KindTy kind) const;
@@ -74,13 +80,26 @@ public:
   /// Get the float semantics of !fir.real<kind>
   const llvm::fltSemantics &getFloatSemantics(KindTy kind) const;
 
+  //===--------------------------------------------------------------------===//
+  // Default kinds of intrinsic types
+  //===--------------------------------------------------------------------===//
+
+  KindTy defaultCharacterKind() const;
+  KindTy defaultComplexKind() const;
+  KindTy defaultDoubleKind() const;
+  KindTy defaultIntegerKind() const;
+  KindTy defaultLogicalKind() const;
+  KindTy defaultRealKind() const;
+
 private:
   MatchResult badMapString(const llvm::Twine &ptr);
   MatchResult parse(llvm::StringRef kindMap);
+  mlir::LogicalResult setDefaultKinds(llvm::ArrayRef<KindTy> defs);
 
   mlir::MLIRContext *context;
   llvm::DenseMap<std::pair<char, KindTy>, Bitsize> intMap;
   llvm::DenseMap<std::pair<char, KindTy>, LLVMTypeID> floatMap;
+  llvm::DenseMap<char, KindTy> defaultMap;
 };
 
 } // namespace fir
