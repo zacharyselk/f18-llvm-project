@@ -1,5 +1,4 @@
-! RUN: bbc -fdebug-pre-fir-tree -fparse-only -fopenacc %s | FileCheck %s
-! XFAIL: *
+! RUN: bbc -I %moddir -pft-test -fopenacc -o %t %s | FileCheck %s
 
 ! Test structure of the Pre-FIR tree with OpenACC construct
 
