@@ -167,9 +167,11 @@ struct IntrinsicLibrary {
   mlir::Value outlineInWrapper(GeneratorType, llvm::StringRef name,
                                mlir::Type resultType,
                                llvm::ArrayRef<mlir::Value> args);
-  fir::ExtendedValue outlineInWrapper(ExtendedGenerator, llvm::StringRef name,
-                                      mlir::Type resultType,
-                                      llvm::ArrayRef<fir::ExtendedValue> args);
+  template <typename GeneratorType>
+  fir::ExtendedValue
+  outlineInExtendedWrapper(GeneratorType, llvm::StringRef name,
+                           llvm::Optional<mlir::Type> resultType,
+                           llvm::ArrayRef<fir::ExtendedValue> args);
 
   template <typename GeneratorType>
   mlir::FuncOp getWrapper(GeneratorType, llvm::StringRef name,
@@ -192,7 +194,6 @@ struct IntrinsicLibrary {
                               mlir::Type resultType,
                               llvm::ArrayRef<mlir::Value> args);
   mlir::Value invokeGenerator(SubroutineGenerator generator,
-                              mlir::Type resultType,
                               llvm::ArrayRef<mlir::Value> args);
 
   /// Get pointer to unrestricted intrinsic. Generate the related unrestricted
@@ -590,12 +591,16 @@ static mlir::FuncOp getRuntimeFunction(mlir::Location loc,
 
 /// Helpers to get function type from arguments and result type.
 static mlir::FunctionType
-getFunctionType(mlir::Type resultType, llvm::ArrayRef<mlir::Value> arguments,
+getFunctionType(llvm::Optional<mlir::Type> resultType,
+                llvm::ArrayRef<mlir::Value> arguments,
                 Fortran::lower::FirOpBuilder &builder) {
   llvm::SmallVector<mlir::Type, 2> argumentTypes;
   for (auto &arg : arguments)
     argumentTypes.push_back(arg.getType());
-  return mlir::FunctionType::get(argumentTypes, resultType,
+  llvm::SmallVector<mlir::Type, 1> resultTypes;
+  if (resultType)
+    resultTypes.push_back(*resultType);
+  return mlir::FunctionType::get(argumentTypes, resultTypes,
                                  builder.getModule().getContext());
 }
 
@@ -693,12 +698,12 @@ IntrinsicLibrary::genElementalCall<IntrinsicLibrary::ExtendedGenerator>(
       exit(1);
     }
   if (outline)
-    return outlineInWrapper(generator, name, resultType, args);
+    return outlineInExtendedWrapper(generator, name, resultType, args);
   return std::invoke(generator, *this, resultType, args);
 }
 
 static fir::ExtendedValue
-invokeHanlder(IntrinsicLibrary::ElementalGenerator generator,
+invokeHandler(IntrinsicLibrary::ElementalGenerator generator,
               const IntrinsicHandler &handler,
               llvm::Optional<mlir::Type> resultType,
               llvm::ArrayRef<fir::ExtendedValue> args, bool outline,
@@ -709,7 +714,7 @@ invokeHanlder(IntrinsicLibrary::ElementalGenerator generator,
 }
 
 static fir::ExtendedValue
-invokeHanlder(IntrinsicLibrary::ExtendedGenerator generator,
+invokeHandler(IntrinsicLibrary::ExtendedGenerator generator,
               const IntrinsicHandler &handler,
               llvm::Optional<mlir::Type> resultType,
               llvm::ArrayRef<fir::ExtendedValue> args, bool outline,
@@ -719,18 +724,19 @@ invokeHanlder(IntrinsicLibrary::ExtendedGenerator generator,
     return lib.genElementalCall(generator, handler.name, *resultType, args,
                                 outline);
   if (outline)
-    return lib.outlineInWrapper(generator, handler.name, *resultType, args);
+    return lib.outlineInExtendedWrapper(generator, handler.name, *resultType,
+                                        args);
   return std::invoke(generator, lib, *resultType, args);
 }
 static fir::ExtendedValue
-invokeHanlder(IntrinsicLibrary::SubroutineGenerator generator,
+invokeHandler(IntrinsicLibrary::SubroutineGenerator generator,
               const IntrinsicHandler &handler,
               llvm::Optional<mlir::Type> resultType,
               llvm::ArrayRef<fir::ExtendedValue> args, bool outline,
               IntrinsicLibrary &lib) {
-  // TODO
-  // if (outline)
-  //  return outlineInWrapper(generator, handler.name, *resultType, args);
+  if (outline)
+    return lib.outlineInExtendedWrapper(generator, handler.name, resultType,
+                                        args);
   std::invoke(generator, lib, args);
   return mlir::Value{};
 }
@@ -752,7 +758,7 @@ IntrinsicLibrary::genIntrinsicCall(llvm::StringRef name,
       bool outline = handler.outline || outlineAllIntrinsics;
       return std::visit(
           [&](auto &generator) -> fir::ExtendedValue {
-            return invokeHanlder(generator, handler, resultType, args, outline,
+            return invokeHandler(generator, handler, resultType, args, outline,
                                  *this);
           },
           handler.generator);
@@ -812,7 +818,6 @@ IntrinsicLibrary::invokeGenerator(ExtendedGenerator generator,
 
 mlir::Value
 IntrinsicLibrary::invokeGenerator(SubroutineGenerator generator,
-                                  mlir::Type resultType,
                                   llvm::ArrayRef<mlir::Value> args) {
   llvm::SmallVector<fir::ExtendedValue, 2> extendedArgs;
   for (auto arg : args)
@@ -856,12 +861,18 @@ mlir::FuncOp IntrinsicLibrary::getWrapper(GeneratorType generator,
     }
 
     IntrinsicLibrary localLib{*localBuilder, localLoc};
-    mlir::Type resultType;
-    if (funcType.getNumResults() == 1)
-      resultType = funcType.getResult(0);
-    auto result =
-        localLib.invokeGenerator(generator, resultType, localArguments);
-    localBuilder->create<mlir::ReturnOp>(localLoc, result);
+
+    if constexpr (std::is_same_v<GeneratorType, SubroutineGenerator>) {
+      localLib.invokeGenerator(generator, localArguments);
+      localBuilder->create<mlir::ReturnOp>(localLoc);
+    } else {
+      assert(funcType.getNumResults() == 1 &&
+             "expect one result for intrinsic function wrapper type");
+      auto resultType = funcType.getResult(0);
+      auto result =
+          localLib.invokeGenerator(generator, resultType, localArguments);
+      localBuilder->create<mlir::ReturnOp>(localLoc, result);
+    }
   } else {
     // Wrapper was already built, ensure it has the sought type
     assert(function.getType() == funcType &&
@@ -905,10 +916,11 @@ IntrinsicLibrary::outlineInWrapper(GeneratorType generator,
   return builder.create<fir::CallOp>(loc, wrapper, args).getResult(0);
 }
 
-fir::ExtendedValue
-IntrinsicLibrary::outlineInWrapper(ExtendedGenerator generator,
-                                   llvm::StringRef name, mlir::Type resultType,
-                                   llvm::ArrayRef<fir::ExtendedValue> args) {
+template <typename GeneratorType>
+fir::ExtendedValue IntrinsicLibrary::outlineInExtendedWrapper(
+    GeneratorType generator, llvm::StringRef name,
+    llvm::Optional<mlir::Type> resultType,
+    llvm::ArrayRef<fir::ExtendedValue> args) {
   if (hasAbsentOptional(args)) {
     // TODO
     mlir::emitError(loc, "todo: cannot outline call to intrinsic " +
@@ -921,9 +933,11 @@ IntrinsicLibrary::outlineInWrapper(ExtendedGenerator generator,
     mlirArgs.emplace_back(toValue(extendedVal, builder, loc));
   auto funcType = getFunctionType(resultType, mlirArgs, builder);
   auto wrapper = getWrapper(generator, name, funcType);
-  auto mlirResult =
-      builder.create<fir::CallOp>(loc, wrapper, mlirArgs).getResult(0);
-  return toExtendedValue(mlirResult, builder, loc);
+  auto call = builder.create<fir::CallOp>(loc, wrapper, mlirArgs);
+  if (resultType)
+    return toExtendedValue(call.getResult(0), builder, loc);
+  // Subroutine calls
+  return mlir::Value{};
 }
 
 IntrinsicLibrary::RuntimeCallGenerator
