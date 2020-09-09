@@ -15,6 +15,7 @@
 #include "flang/Lower/DoLoopHelper.h"
 #include "flang/Lower/IntrinsicCall.h"
 #include "llvm/Support/Debug.h"
+
 #define DEBUG_TYPE "flang-lower-character"
 
 //===----------------------------------------------------------------------===//
@@ -50,14 +51,15 @@ fir::CharacterType Fortran::lower::CharacterExprHelper::getCharacterType(
   return getCharacterType(box.getBuffer().getType());
 }
 
-static bool needToMaterialize(const fir::CharBoxValue &box) {
-  return box.getBuffer().getType().isa<fir::SequenceType>() ||
-         box.getBuffer().getType().isa<fir::CharacterType>();
+fir::CharacterType
+Fortran::lower::CharacterExprHelper::getCharacterType(mlir::Value str) {
+  return getCharacterType(str.getType());
 }
 
+/// Determine the static size of the character. Returns the computed size, not
+/// an IR Value.
 static std::optional<fir::SequenceType::Extent>
 getCompileTimeLength(const fir::CharBoxValue &box) {
-  // FIXME: should this just return box.getLen() ??
   auto type = box.getBuffer().getType();
   if (type.isa<fir::CharacterType>())
     return 1;
@@ -72,20 +74,53 @@ getCompileTimeLength(const fir::CharBoxValue &box) {
   return {};
 }
 
-fir::CharBoxValue Fortran::lower::CharacterExprHelper::materializeValue(
-    const fir::CharBoxValue &str) {
-  if (!needToMaterialize(str))
-    return str;
-  auto variable = builder.create<fir::AllocaOp>(loc, str.getBuffer().getType());
-  builder.create<fir::StoreOp>(loc, str.getBuffer(), variable);
-  LLVM_DEBUG(llvm::dbgs() << "materialized as local: " << str << " -> ("
-                          << variable << ", " << str.getLen() << ")\n");
-  return {variable, str.getLen()};
+/// Detect the precondition that the value `str` does not reside in memory. Such
+/// values will have a type `!fir.array<...x!fir.char<N>>` or `!fir.char<N>`.
+static bool needToMaterialize(mlir::Value str) {
+  return str.getType().isa<fir::SequenceType>() ||
+         str.getType().isa<fir::CharacterType>();
 }
 
+/// This is called only if `str` does not reside in memory. Such a bare string
+/// value will be converted into a memory-based temporary and an extended
+/// boxchar value returned.
+fir::CharBoxValue
+Fortran::lower::CharacterExprHelper::materializeValue(mlir::Value str) {
+  assert(needToMaterialize(str));
+  mlir::Type eleTy;
+  fir::SequenceType::Shape shape;
+  if (auto seqTy = str.getType().dyn_cast<fir::SequenceType>()) {
+    // (1) `str` is a sequence type
+    assert(seqTy.getDimension() == 1 && "character is not a scalar");
+    eleTy = seqTy.getEleTy();
+    auto lenVal = seqTy.getShape()[0];
+    assert(lenVal != fir::SequenceType::getUnknownExtent());
+    shape.push_back(lenVal);
+  } else {
+    eleTy = str.getType();
+    if (auto chTy = eleTy.dyn_cast<fir::CharacterType>()) {
+      shape.push_back(chTy.getLen());
+    } else {
+      LLVM_DEBUG(llvm::dbgs() << "cannot materialize: " << str << '\n');
+      llvm_unreachable("must be a !fir.char<N> type");
+    }
+  }
+  assert(eleTy && shape.size() == 1);
+  auto len =
+      builder.createIntegerConstant(loc, builder.getIndexType(), shape[0]);
+  auto charTy = fir::SequenceType::get(shape, eleTy);
+  auto temp = builder.create<fir::AllocaOp>(loc, charTy);
+  builder.create<fir::StoreOp>(loc, str, temp);
+  LLVM_DEBUG(llvm::dbgs() << "materialized as local: " << str << " -> (" << temp
+                          << ", " << len << ")\n");
+  return {temp, len};
+}
+
+/// Use toExtendedValue to convert `character` to an extended value. This
+/// assumes `character` is scalar and unwraps the extended value into a CharBox
+/// value. This should not be used if `character` is an array.
 fir::CharBoxValue
 Fortran::lower::CharacterExprHelper::toDataLengthPair(mlir::Value character) {
-  // TODO: get rid of toDataLengthPair when adding support for arrays
   auto *charBox = toExtendedValue(character).getCharBox();
   assert(charBox && "Array unsupported in character lowering helper");
   return *charBox;
@@ -96,15 +131,14 @@ Fortran::lower::CharacterExprHelper::toExtendedValue(mlir::Value character,
                                                      mlir::Value len) {
   auto lenType = getLengthType();
   auto type = character.getType();
-  auto base = character;
+  auto base = fir::isa_passbyref_type(type) ? character : mlir::Value{};
   auto resultLen = len;
   llvm::SmallVector<mlir::Value, 2> extents;
 
-  if (auto refType = type.dyn_cast<fir::ReferenceType>())
-    type = refType.getEleTy();
+  if (auto eleType = fir::dyn_cast_ptrEleTy(type))
+    type = eleType;
 
   if (auto arrayType = type.dyn_cast<fir::SequenceType>()) {
-    type = arrayType.getEleTy();
     auto shape = arrayType.getShape();
     auto cstLen = shape[0];
     if (!resultLen && cstLen != fir::SequenceType::getUnknownExtent())
@@ -140,6 +174,14 @@ Fortran::lower::CharacterExprHelper::toExtendedValue(mlir::Value character,
     llvm_unreachable("Cannot translate mlir::Value to character ExtendedValue");
   }
 
+  if (!base) {
+    if (auto load =
+            mlir::dyn_cast_or_null<fir::LoadOp>(character.getDefiningOp())) {
+      base = load.getOperand();
+    } else {
+      return materializeValue(fir::getBase(character));
+    }
+  }
   if (!resultLen)
     mlir::emitError(loc, "no dynamic length found for character");
   if (!extents.empty())
@@ -148,71 +190,92 @@ Fortran::lower::CharacterExprHelper::toExtendedValue(mlir::Value character,
 }
 
 /// Get canonical `!fir.ref<!fir.char<kind>>` type.
+mlir::Type
+Fortran::lower::CharacterExprHelper::getReferenceType(mlir::Value str) const {
+  return builder.getRefType(getCharacterType(str));
+}
+
 mlir::Type Fortran::lower::CharacterExprHelper::getReferenceType(
     const fir::CharBoxValue &box) const {
-  return builder.getRefType(getCharacterType(box));
+  return getReferenceType(box.getBuffer());
+}
+
+/// Get canonical `!fir.array<len x !fir.char<kind>>` type.
+mlir::Type
+Fortran::lower::CharacterExprHelper::getSeqTy(mlir::Value str) const {
+  if (auto ty = str.getType().dyn_cast<fir::SequenceType>())
+    return ty;
+  return builder.getRefType(builder.getVarLenSeqTy(getCharacterType(str)));
 }
 
 mlir::Type Fortran::lower::CharacterExprHelper::getSeqTy(
     const fir::CharBoxValue &box) const {
-  auto ty = box.getBuffer().getType();
-  if (ty.isa<fir::SequenceType>())
-    return ty;
-  return builder.getRefType(builder.getVarLenSeqTy(getCharacterType(box)));
+  return getSeqTy(box.getBuffer());
 }
 
 mlir::Value
 Fortran::lower::CharacterExprHelper::createEmbox(const fir::CharBoxValue &box) {
   // BoxChar require a reference.
-  auto str = box;
-  if (needToMaterialize(box))
-    str = materializeValue(box);
-  auto kind = getCharacterType(str).getFKind();
+  auto kind = getCharacterType(box).getFKind();
   auto boxCharType = fir::BoxCharType::get(builder.getContext(), kind);
-  auto refType = getReferenceType(str);
-  auto buff = builder.createConvert(loc, refType, str.getBuffer());
+  auto refType = getReferenceType(box);
+  auto buff = builder.createConvert(loc, refType, box.getBuffer());
   // Convert in case the provided length is not of the integer type that must
   // be used in boxchar.
   auto lenType = getLengthType();
-  auto len = builder.createConvert(loc, lenType, str.getLen());
+  auto len = builder.createConvert(loc, lenType, box.getLen());
   return builder.create<fir::EmboxCharOp>(loc, boxCharType, buff, len);
 }
 
-mlir::Value Fortran::lower::CharacterExprHelper::createLoadCharAt(
-    const fir::CharBoxValue &str, mlir::Value index) {
+/// Load a character out of `buff` from offset `index`.
+/// `buff` must be a reference to memory.
+mlir::Value
+Fortran::lower::CharacterExprHelper::createLoadCharAt(mlir::Value buff,
+                                                      mlir::Value index) {
   // In case this is addressing a length one character scalar simply return
   // the single character.
-  auto buff = str.getBuffer();
-  if (auto charTy = buff.getType().dyn_cast<fir::CharacterType>()) {
-    assert(charTy.getLen() == 1 && "string not handled");
-    return buff;
-  }
+  LLVM_DEBUG(llvm::dbgs() << "load a char: " << buff << " type: "
+                          << buff.getType() << " at: " << index << '\n');
   assert(fir::isa_ref_type(buff.getType()));
-  auto coor = builder.createConvert(loc, getSeqTy(str), buff);
-  auto addr = builder.create<fir::CoordinateOp>(loc, getReferenceType(str),
+  auto coor = builder.createConvert(loc, getSeqTy(buff), buff);
+  auto addr = builder.create<fir::CoordinateOp>(loc, getReferenceType(buff),
                                                 coor, index);
   return builder.create<fir::LoadOp>(loc, addr);
 }
 
-void Fortran::lower::CharacterExprHelper::createStoreCharAt(
-    const fir::CharBoxValue &str, mlir::Value index, mlir::Value c) {
-  assert(!needToMaterialize(str) && "not in memory");
-  auto buff = builder.createConvert(loc, getSeqTy(str), str.getBuffer());
+/// Store the character `c` to `str` at offset `index`.
+/// `str` must be a reference to memory.
+void Fortran::lower::CharacterExprHelper::createStoreCharAt(mlir::Value str,
+                                                            mlir::Value index,
+                                                            mlir::Value c) {
+  LLVM_DEBUG(llvm::dbgs() << "store the char: " << c << " into: " << str
+                          << " type: " << str.getType() << " at: " << index
+                          << '\n');
+  assert(fir::isa_ref_type(str.getType()));
+  auto buff = builder.createConvert(loc, getSeqTy(str), str);
   auto addr = builder.create<fir::CoordinateOp>(loc, getReferenceType(str),
                                                 buff, index);
   builder.create<fir::StoreOp>(loc, c, addr);
 }
 
+/// Unwrap the CharBox as needed to recover the pointer to the buffer.
+mlir::Value Fortran::lower::CharacterExprHelper::getCharBoxBuffer(
+    const fir::CharBoxValue &box) {
+  auto buff = box.getBuffer();
+  auto buffTy = buff.getType();
+  return buffTy.isa<fir::BoxCharType>() ? createUnboxChar(buff).first : buff;
+}
+
+/// Create a loop to copy `count` characters from `src` to `dest`.
 void Fortran::lower::CharacterExprHelper::createCopy(
     const fir::CharBoxValue &dest, const fir::CharBoxValue &src,
     mlir::Value count) {
-  auto from = src;
-  if (needToMaterialize(src))
-    from = materializeValue(src);
+  auto fromBuff = getCharBoxBuffer(src);
+  auto toBuff = getCharBoxBuffer(dest);
   Fortran::lower::DoLoopHelper{builder, loc}.createLoop(
       count, [&](Fortran::lower::FirOpBuilder &, mlir::Value index) {
-        auto charVal = createLoadCharAt(from, index);
-        createStoreCharAt(dest, index, charVal);
+        auto charVal = createLoadCharAt(fromBuff, index);
+        createStoreCharAt(toBuff, index, charVal);
       });
 }
 
@@ -221,9 +284,10 @@ void Fortran::lower::CharacterExprHelper::createPadding(
   auto blank = createBlankConstant(getCharacterType(str));
   // Always create the loop, if upper < lower, no iteration will be
   // executed.
+  auto toBuff = getCharBoxBuffer(str);
   Fortran::lower::DoLoopHelper{builder, loc}.createLoop(
       lower, upper, [&](Fortran::lower::FirOpBuilder &, mlir::Value index) {
-        createStoreCharAt(str, index, blank);
+        createStoreCharAt(toBuff, index, blank);
       });
 }
 
@@ -240,10 +304,7 @@ Fortran::lower::CharacterExprHelper::createTemp(mlir::Type type,
 void Fortran::lower::CharacterExprHelper::createLengthOneAssign(
     const fir::CharBoxValue &lhs, const fir::CharBoxValue &rhs) {
   auto addr = lhs.getBuffer();
-  auto val = rhs.getBuffer();
-  // If rhs value resides in memory, load it.
-  if (!needToMaterialize(rhs))
-    val = builder.create<fir::LoadOp>(loc, val);
+  mlir::Value val = builder.create<fir::LoadOp>(loc, rhs.getBuffer());
   auto valTy = val.getType();
   // Precondition is rhs is size 1, but it may be wrapped in a fir.array.
   if (auto seqTy = valTy.dyn_cast<fir::SequenceType>()) {
@@ -272,29 +333,23 @@ void Fortran::lower::CharacterExprHelper::createAssign(
 
   // Copy the minimum of the lhs and rhs lengths and pad the lhs remainder
   // if needed.
-  mlir::Value copyCount = lhs.getLen();
-  if (!compileTimeSameLength)
-    copyCount =
-        Fortran::lower::genMin(builder, loc, {lhs.getLen(), rhs.getLen()});
-
-  fir::CharBoxValue safeRhs = rhs;
-  if (needToMaterialize(rhs)) {
-    // TODO: revisit now that character constant handling changed.
-    // Need to materialize the constant to get its elements.
-    // (No equivalent of fir.coordinate_of for array value).
-    safeRhs = materializeValue(rhs);
-  } else {
-    // If rhs is in memory, always assumes rhs might overlap with lhs
-    // in a way that require a temp for the copy. That can be optimize later.
-    // Only create a temp of copyCount size because we do not need more from
-    // rhs.
-    auto temp = createTemp(getCharacterType(rhs), copyCount);
-    createCopy(temp, rhs, copyCount);
-    safeRhs = temp;
+  auto copyCount = lhs.getLen();
+  auto idxTy = builder.getIndexType();
+  if (!compileTimeSameLength) {
+    auto lhsLen = builder.createConvert(loc, idxTy, lhs.getLen());
+    auto rhsLen = builder.createConvert(loc, idxTy, rhs.getLen());
+    copyCount = Fortran::lower::genMin(builder, loc, {lhsLen, rhsLen});
   }
 
+  // If rhs is in memory, always assumes rhs might overlap with lhs
+  // in a way that require a temp for the copy. That can be optimize later.
+  // Only create a temp of copyCount size because we do not need more from
+  // rhs.
+  auto temp = createTemp(getCharacterType(rhs), copyCount);
+  createCopy(temp, rhs, copyCount);
+
   // Actual copy
-  createCopy(lhs, safeRhs, copyCount);
+  createCopy(lhs, temp, copyCount);
 
   // Pad if needed.
   if (!compileTimeSameLength) {
@@ -314,15 +369,14 @@ fir::CharBoxValue Fortran::lower::CharacterExprHelper::createConcatenate(
   auto upperBound = builder.create<mlir::SubIOp>(loc, len, one);
   auto lhsLen =
       builder.createConvert(loc, builder.getIndexType(), lhs.getLen());
-  auto from = rhs;
-  if (needToMaterialize(rhs))
-    from = materializeValue(rhs);
+  auto fromBuff = getCharBoxBuffer(rhs);
+  auto toBuff = getCharBoxBuffer(temp);
   Fortran::lower::DoLoopHelper{builder, loc}.createLoop(
       lhs.getLen(), upperBound, one,
       [&](Fortran::lower::FirOpBuilder &bldr, mlir::Value index) {
         auto rhsIndex = bldr.create<mlir::SubIOp>(loc, index, lhsLen);
-        auto charVal = createLoadCharAt(from, rhsIndex);
-        createStoreCharAt(temp, index, charVal);
+        auto charVal = createLoadCharAt(fromBuff, rhsIndex);
+        createStoreCharAt(toBuff, index, charVal);
       });
   return temp;
 }
@@ -330,10 +384,6 @@ fir::CharBoxValue Fortran::lower::CharacterExprHelper::createConcatenate(
 fir::CharBoxValue Fortran::lower::CharacterExprHelper::createSubstring(
     const fir::CharBoxValue &box, llvm::ArrayRef<mlir::Value> bounds) {
   // Constant need to be materialize in memory to use fir.coordinate_of.
-  auto str = box;
-  if (needToMaterialize(box))
-    str = materializeValue(box);
-
   auto nbounds = bounds.size();
   if (nbounds < 1 || nbounds > 2) {
     mlir::emitError(loc, "Incorrect number of bounds in substring");
@@ -350,15 +400,15 @@ fir::CharBoxValue Fortran::lower::CharacterExprHelper::createSubstring(
   auto idxType = builder.getIndexType();
   if (offset.getType() != idxType)
     offset = builder.createConvert(loc, idxType, offset);
-  auto buff = builder.createConvert(loc, getSeqTy(str), str.getBuffer());
+  auto buff = builder.createConvert(loc, getSeqTy(box), box.getBuffer());
   auto substringRef = builder.create<fir::CoordinateOp>(
-      loc, getReferenceType(str), buff, offset);
+      loc, getReferenceType(box), buff, offset);
 
   // Compute the length.
   mlir::Value substringLen;
   if (nbounds < 2) {
     substringLen =
-        builder.create<mlir::SubIOp>(loc, str.getLen(), castBounds[0]);
+        builder.create<mlir::SubIOp>(loc, box.getLen(), castBounds[0]);
   } else {
     substringLen =
         builder.create<mlir::SubIOp>(loc, castBounds[1], castBounds[0]);
@@ -393,7 +443,8 @@ mlir::Value Fortran::lower::CharacterExprHelper::createLenTrim(
   builder.setInsertionPointToStart(iterWhile.getBody());
   auto index = iterWhile.getInductionVar();
   // Look for first non-blank from the right of the character.
-  auto c = createLoadCharAt(str, index);
+  auto fromBuff = getCharBoxBuffer(str);
+  auto c = createLoadCharAt(fromBuff, index);
   c = builder.createConvert(loc, blank.getType(), c);
   auto isBlank =
       builder.create<mlir::CmpIOp>(loc, mlir::CmpIPredicate::eq, blank, c);
@@ -448,9 +499,13 @@ mlir::Value Fortran::lower::CharacterExprHelper::createSubstring(
   return createEmbox(createSubstring(toDataLengthPair(str), bounds));
 }
 
-void Fortran::lower::CharacterExprHelper::createAssign(mlir::Value lhs,
-                                                       mlir::Value rhs) {
-  createAssign(toDataLengthPair(lhs), toDataLengthPair(rhs));
+void Fortran::lower::CharacterExprHelper::createAssign(
+    mlir::Value lhs, const fir::ExtendedValue &rhs) {
+  auto lhsPair = toDataLengthPair(lhs);
+  if (auto *str = rhs.getBoxOf<fir::CharBoxValue>())
+    createAssign(lhsPair, *str);
+  else
+    createAssign(lhsPair, toDataLengthPair(fir::getBase(rhs)));
 }
 
 mlir::Value
@@ -492,10 +547,12 @@ Fortran::lower::CharacterExprHelper::createCharacterTemp(mlir::Type type,
 
 std::pair<mlir::Value, mlir::Value>
 Fortran::lower::CharacterExprHelper::materializeCharacter(mlir::Value str) {
-  auto box = toDataLengthPair(str);
-  if (needToMaterialize(box))
-    box = materializeValue(box);
-  return {box.getBuffer(), box.getLen()};
+  if (needToMaterialize(str)) {
+    auto box = materializeValue(str);
+    return {box.getBuffer(), box.getLen()};
+  }
+  auto pair = toDataLengthPair(str);
+  return {pair.getBuffer(), pair.getLen()};
 }
 
 std::pair<mlir::Value, mlir::Value>
