@@ -1199,7 +1199,7 @@ mlir::Value IntrinsicLibrary::genIchar(mlir::Type resultType,
     auto cast = builder.createConvert(loc, toTy, dataAndLen.first);
     charVal = builder.create<fir::LoadOp>(loc, cast);
   }
-  LLVM_DEBUG(llvm::errs() << "ichar(" << charVal << ")\n");
+  LLVM_DEBUG(llvm::dbgs() << "ichar(" << charVal << ")\n");
   return builder.createConvert(loc, resultType, charVal);
 }
 
