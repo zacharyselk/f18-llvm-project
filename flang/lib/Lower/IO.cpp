@@ -1021,18 +1021,12 @@ lowerReferenceAsStringSelect(
     builder.setInsertionPointToEnd(block);
   }
 
-  // Create the unit case which should result in an error
+  // Create the unit case which should result in an error.
   auto *unitBlock = block->splitBlock(builder.getInsertionPoint());
   builder.setInsertionPointToEnd(unitBlock);
-
-  // TODO: Replace with instructions to crash the program
-  auto emptyString = fir::getBase(createStringLiteral(loc, converter, "", 0));
-  auto emptyStringRef = builder.createConvert(loc, strTy, emptyString);
-  auto zero = builder.create<mlir::ConstantIntOp>(loc, 0, builder.getI64Type());
-  llvm::SmallVector<mlir::Value, 8> args;
-  args.push_back(emptyStringRef);
-  args.push_back(zero);
-  builder.create<mlir::BranchOp>(loc, endBlock, args);
+  
+  // Crash the program.
+  builder.create<fir::UnreachableOp>(loc);
 
   // Add unit case to the select statement
   blockList.push_back(unitBlock);
