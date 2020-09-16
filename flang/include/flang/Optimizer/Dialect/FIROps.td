@@ -2184,27 +2184,27 @@ def fir_IfOp : region_Op<"if", [NoRegionArguments]> {
   let results = (outs Variadic<AnyType>:$results);
 
   let regions = (region
-    SizedRegion<1>:$whereRegion,
-    AnyRegion:$otherRegion
+    SizedRegion<1>:$thenRegion,
+    AnyRegion:$elseRegion
   );
 
   let skipDefaultBuilders = 1;
   let builders = [
     OpBuilder<"OpBuilder &builder, OperationState &result, "
-              "Value cond, bool withOtherRegion">,
+              "Value cond, bool withElseRegion">,
     OpBuilder<"OpBuilder &builder, OperationState &result, "
-              "TypeRange resultTypes, Value cond, bool withOtherRegion">
+              "TypeRange resultTypes, Value cond, bool withElseRegion">
   ];
 
   let extraClassDeclaration = [{
     mlir::OpBuilder getWhereBodyBuilder() {
-      assert(!whereRegion().empty() && "Unexpected empty 'where' region.");
-      mlir::Block &body = whereRegion().front();
+      assert(!thenRegion().empty() && "Unexpected empty 'where' region.");
+      mlir::Block &body = thenRegion().front();
       return mlir::OpBuilder(&body, std::prev(body.end()));
     }
     mlir::OpBuilder getOtherBodyBuilder() {
-      assert(!otherRegion().empty() && "Unexpected empty 'other' region.");
-      mlir::Block &body = otherRegion().front();
+      assert(!elseRegion().empty() && "Unexpected empty 'other' region.");
+      mlir::Block &body = elseRegion().front();
       return mlir::OpBuilder(&body, std::prev(body.end()));
     }
   }];

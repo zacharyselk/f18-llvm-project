@@ -1402,7 +1402,7 @@ static mlir::ParseResult parseIfOp(OpAsmParser &parser,
 }
 
 static LogicalResult verify(fir::IfOp op) {
-  if (op.getNumResults() != 0 && op.otherRegion().empty())
+  if (op.getNumResults() != 0 && op.elseRegion().empty())
     return op.emitOpError("must have an else block if defining values");
 
   return mlir::success();
@@ -1415,11 +1415,11 @@ static void print(mlir::OpAsmPrinter &p, fir::IfOp op) {
     p << " -> (" << op.getResultTypes() << ')';
     printBlockTerminators = true;
   }
-  p.printRegion(op.whereRegion(), /*printEntryBlockArgs=*/false,
+  p.printRegion(op.thenRegion(), /*printEntryBlockArgs=*/false,
                 printBlockTerminators);
 
   // Print the 'else' regions if it exists and has a block.
-  auto &otherReg = op.otherRegion();
+  auto &otherReg = op.elseRegion();
   if (!otherReg.empty()) {
     p << " else";
     p.printRegion(otherReg, /*printEntryBlockArgs=*/false,

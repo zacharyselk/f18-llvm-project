@@ -99,8 +99,8 @@ genOMP(Fortran::lower::AbstractConverter &converter,
       if (const auto &numThreadsClause =
               std::get_if<Fortran::parser::OmpClause::NumThreads>(&clause.u)) {
         // OMPIRBuilder expects `NUM_THREAD` clause as a `Value`.
-        numThreads = converter.genExprValue(
-            *Fortran::semantics::GetExpr(numThreadsClause->v));
+        numThreads = fir::getBase(converter.genExprValue(
+            *Fortran::semantics::GetExpr(numThreadsClause->v)));
       }
     }
     llvm::ArrayRef<mlir::Type> argTy;
