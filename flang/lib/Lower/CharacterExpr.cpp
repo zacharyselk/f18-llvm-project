@@ -345,6 +345,9 @@ void Fortran::lower::CharacterExprHelper::createAssign(
   // in a way that require a temp for the copy. That can be optimize later.
   // Only create a temp of copyCount size because we do not need more from
   // rhs.
+  // TODO: It should be rare that the assignment is between overlapping
+  // substrings of the same variable. So this extra copy is pessimistic in the
+  // common case.
   auto temp = createTemp(getCharacterType(rhs), copyCount);
   createCopy(temp, rhs, copyCount);
 
@@ -500,12 +503,19 @@ mlir::Value Fortran::lower::CharacterExprHelper::createSubstring(
 }
 
 void Fortran::lower::CharacterExprHelper::createAssign(
-    mlir::Value lhs, const fir::ExtendedValue &rhs) {
-  auto lhsPair = toDataLengthPair(lhs);
-  if (auto *str = rhs.getBoxOf<fir::CharBoxValue>())
-    createAssign(lhsPair, *str);
-  else
-    createAssign(lhsPair, toDataLengthPair(fir::getBase(rhs)));
+    const fir::ExtendedValue &lhs, const fir::ExtendedValue &rhs) {
+  if (auto *str = rhs.getBoxOf<fir::CharBoxValue>()) {
+    if (auto *to = lhs.getBoxOf<fir::CharBoxValue>()) {
+      createAssign(*to, *str);
+    } else {
+      auto lhsPair = toDataLengthPair(fir::getBase(lhs));
+      createAssign(lhsPair, *str);
+    }
+  } else {
+    auto lhsPair = toDataLengthPair(fir::getBase(lhs));
+    auto rhsPair = toDataLengthPair(fir::getBase(rhs));
+    createAssign(lhsPair, rhsPair);
+  }
 }
 
 mlir::Value
