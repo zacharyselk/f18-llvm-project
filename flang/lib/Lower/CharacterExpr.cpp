@@ -272,6 +272,9 @@ void Fortran::lower::CharacterExprHelper::createCopy(
     mlir::Value count) {
   auto fromBuff = getCharBoxBuffer(src);
   auto toBuff = getCharBoxBuffer(dest);
+  LLVM_DEBUG(llvm::dbgs() << "create char copy from: "; src.dump();
+             llvm::dbgs() << " to: "; dest.dump();
+             llvm::dbgs() << " count: " << count << '\n');
   Fortran::lower::DoLoopHelper{builder, loc}.createLoop(
       count, [&](Fortran::lower::FirOpBuilder &, mlir::Value index) {
         auto charVal = createLoadCharAt(fromBuff, index);
