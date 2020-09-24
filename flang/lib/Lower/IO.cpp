@@ -25,6 +25,9 @@
 #include "flang/Parser/parse-tree.h"
 #include "flang/Semantics/tools.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "llvm/Support/Debug.h"
+
+#define DEBUG_TYPE "flang-lower-io"
 
 using namespace Fortran::runtime::io;
 
@@ -194,12 +197,15 @@ static void makeNextConditionalOn(Fortran::lower::FirOpBuilder &builder,
 template <typename D>
 static void genIoLoop(Fortran::lower::AbstractConverter &converter,
                       mlir::Value cookie, const D &ioImpliedDo,
-                      bool checkResult, mlir::Value &ok, bool inIterWhileLoop);
+                      bool isFormatted, bool checkResult, mlir::Value &ok,
+                      bool inIterWhileLoop);
 
 /// Get the OutputXyz routine to output a value of the given type.
 static mlir::FuncOp getOutputFunc(mlir::Location loc,
                                   Fortran::lower::FirOpBuilder &builder,
-                                  mlir::Type type) {
+                                  mlir::Type type, bool isFormatted) {
+  if (!isFormatted)
+    return getIORuntimeFunc<mkIOKey(OutputDescriptor)>(loc, builder);
   if (auto ty = type.dyn_cast<mlir::IntegerType>())
     return ty.getWidth() == 1
                ? getIORuntimeFunc<mkIOKey(OutputLogical)>(loc, builder)
@@ -226,18 +232,42 @@ static mlir::FuncOp getOutputFunc(mlir::Location loc,
   return {};
 }
 
+static mlir::Value genUnformattedBox(Fortran::lower::FirOpBuilder &builder,
+                                     mlir::Location loc,
+                                     const fir::ExtendedValue &itemBox,
+                                     mlir::Type itemTy) {
+  auto itemAddr = fir::getBase(itemBox);
+  auto boxTy = fir::BoxType::get(itemTy);
+  return itemBox.match(
+      [&](const fir::ArrayBoxValue &box) -> mlir::Value {
+        auto s = builder.createShape(loc, itemBox);
+        return builder.create<fir::EmboxOp>(loc, boxTy, itemAddr, s);
+      },
+      [&](const fir::CharArrayBoxValue &box) -> mlir::Value {
+        auto s = builder.createShape(loc, itemBox);
+        return builder.create<fir::EmboxOp>(loc, boxTy, itemAddr, s);
+      },
+      [&](const fir::BoxValue &box) -> mlir::Value {
+        auto s = builder.createShape(loc, itemBox);
+        return builder.create<fir::EmboxOp>(loc, boxTy, itemAddr, s);
+      },
+      [&](const auto &) -> mlir::Value {
+        return builder.create<fir::EmboxOp>(loc, boxTy, itemAddr);
+      });
+}
+
 /// Generate a sequence of output data transfer calls.
 static void
 genOutputItemList(Fortran::lower::AbstractConverter &converter,
                   mlir::Value cookie,
                   const std::list<Fortran::parser::OutputItem> &items,
-                  mlir::OpBuilder::InsertPoint &insertPt, bool checkResult,
-                  mlir::Value &ok, bool inIterWhileLoop) {
+                  mlir::OpBuilder::InsertPoint &insertPt, bool isFormatted,
+                  bool checkResult, mlir::Value &ok, bool inIterWhileLoop) {
   auto &builder = converter.getFirOpBuilder();
   for (auto &item : items) {
     if (const auto &impliedDo = std::get_if<1>(&item.u)) {
-      genIoLoop(converter, cookie, impliedDo->value(), checkResult, ok,
-                inIterWhileLoop);
+      genIoLoop(converter, cookie, impliedDo->value(), isFormatted, checkResult,
+                ok, inIterWhileLoop);
       continue;
     }
     auto &pExpr = std::get<Fortran::parser::Expr>(item.u);
@@ -248,11 +278,15 @@ genOutputItemList(Fortran::lower::AbstractConverter &converter,
         converter.genExprValue(Fortran::semantics::GetExpr(pExpr), loc);
     auto itemValue = fir::getBase(itemBox);
     auto itemTy = itemValue.getType();
-    auto outputFunc = getOutputFunc(loc, builder, itemTy);
+    auto outputFunc = getOutputFunc(loc, builder, itemTy, isFormatted);
     auto argType = outputFunc.getType().getInput(1);
     llvm::SmallVector<mlir::Value, 3> outputFuncArgs = {cookie};
     Fortran::lower::CharacterExprHelper helper{builder, loc};
-    if (helper.isCharacter(itemTy)) {
+    if (!isFormatted) {
+      auto exv = converter.genExprAddr(Fortran::semantics::GetExpr(pExpr), loc);
+      auto box = genUnformattedBox(builder, loc, exv, itemTy);
+      outputFuncArgs.push_back(builder.createConvert(loc, argType, box));
+    } else if (helper.isCharacter(itemTy)) {
       auto dataLen = helper.materializeCharacter(itemValue);
       outputFuncArgs.push_back(builder.createConvert(
           loc, outputFunc.getType().getInput(1), dataLen.first));
@@ -280,7 +314,9 @@ genOutputItemList(Fortran::lower::AbstractConverter &converter,
 /// Get the InputXyz routine to input a value of the given type.
 static mlir::FuncOp getInputFunc(mlir::Location loc,
                                  Fortran::lower::FirOpBuilder &builder,
-                                 mlir::Type type) {
+                                 mlir::Type type, bool isFormatted) {
+  if (!isFormatted)
+    return getIORuntimeFunc<mkIOKey(InputDescriptor)>(loc, builder);
   if (auto ty = type.dyn_cast<mlir::IntegerType>())
     return ty.getWidth() == 1
                ? getIORuntimeFunc<mkIOKey(InputLogical)>(loc, builder)
@@ -311,13 +347,13 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
                              mlir::Value cookie,
                              const std::list<Fortran::parser::InputItem> &items,
                              mlir::OpBuilder::InsertPoint &insertPt,
-                             bool checkResult, mlir::Value &ok,
-                             bool inIterWhileLoop) {
+                             bool isFormatted, bool checkResult,
+                             mlir::Value &ok, bool inIterWhileLoop) {
   auto &builder = converter.getFirOpBuilder();
   for (auto &item : items) {
     if (const auto &impliedDo = std::get_if<1>(&item.u)) {
-      genIoLoop(converter, cookie, impliedDo->value(), checkResult, ok,
-                inIterWhileLoop);
+      genIoLoop(converter, cookie, impliedDo->value(), isFormatted, checkResult,
+                ok, inIterWhileLoop);
       continue;
     }
     auto &pVar = std::get<Fortran::parser::Variable>(item.u);
@@ -333,10 +369,12 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
     if (!itemTy)
       mlir::emitError(loc, "internal: unhandled input item type ")
           << itemAddr.getType();
-    auto inputFunc = getInputFunc(loc, builder, itemTy);
+    auto inputFunc = getInputFunc(loc, builder, itemTy, isFormatted);
     auto argType = inputFunc.getType().getInput(1);
     auto originalItemAddr = itemAddr;
-    if (argType.isa<fir::BoxType>()) {
+    if (!isFormatted) {
+      itemAddr = genUnformattedBox(builder, loc, itemBox, itemTy);
+    } else if (argType.isa<fir::BoxType>()) {
       auto shape = builder.createShape(loc, itemBox);
       auto boxTy = fir::BoxType::get(itemTy);
       itemAddr = builder.create<fir::EmboxOp>(loc, boxTy, itemAddr, shape);
@@ -344,7 +382,9 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
     itemAddr = builder.createConvert(loc, argType, itemAddr);
     llvm::SmallVector<mlir::Value, 8> inputFuncArgs = {cookie, itemAddr};
     Fortran::lower::CharacterExprHelper helper{builder, loc};
-    if (helper.isCharacter(itemTy)) {
+    if (argType.isa<fir::BoxType>()) {
+      // do nothing
+    } else if (helper.isCharacter(itemTy)) {
       auto len = helper.materializeCharacter(originalItemAddr).second;
       inputFuncArgs.push_back(
           builder.createConvert(loc, inputFunc.getType().getInput(2), len));
@@ -362,7 +402,8 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
 template <typename D>
 static void genIoLoop(Fortran::lower::AbstractConverter &converter,
                       mlir::Value cookie, const D &ioImpliedDo,
-                      bool checkResult, mlir::Value &ok, bool inIterWhileLoop) {
+                      bool isFormatted, bool checkResult, mlir::Value &ok,
+                      bool inIterWhileLoop) {
   mlir::OpBuilder::InsertPoint insertPt;
   auto &builder = converter.getFirOpBuilder();
   auto loc = converter.getCurrentLocation();
@@ -385,11 +426,11 @@ static void genIoLoop(Fortran::lower::AbstractConverter &converter,
                        : builder.create<mlir::ConstantIndexOp>(loc, 1);
   auto genItemList = [&](const D &ioImpliedDo) {
     if constexpr (std::is_same_v<D, Fortran::parser::InputImpliedDo>)
-      genInputItemList(converter, cookie, itemList, insertPt, checkResult, ok,
-                       true);
+      genInputItemList(converter, cookie, itemList, insertPt, isFormatted,
+                       checkResult, ok, /*inIterWhile=*/true);
     else
-      genOutputItemList(converter, cookie, itemList, insertPt, checkResult, ok,
-                        true);
+      genOutputItemList(converter, cookie, itemList, insertPt, isFormatted,
+                        checkResult, ok, /*inIterWhile=*/true);
   };
   if (!checkResult) {
     // No I/O call result checks - the loop is a fir.do_loop op.
@@ -1530,14 +1571,16 @@ genDataTransferStmt(Fortran::lower::AbstractConverter &converter,
 
   // Generate data transfer list calls.
   if constexpr (isInput) // ReadStmt
-    genInputItemList(converter, cookie, stmt.items, insertPt,
-                     csi.hasTransferConditionSpec(), ok, false);
+    genInputItemList(converter, cookie, stmt.items, insertPt, isFormatted,
+                     csi.hasTransferConditionSpec(), ok, /*inIterWhile=*/false);
   else if constexpr (std::is_same_v<A, Fortran::parser::PrintStmt>)
     genOutputItemList(converter, cookie, std::get<1>(stmt.t), insertPt,
-                      csi.hasTransferConditionSpec(), ok, false);
+                      isFormatted, csi.hasTransferConditionSpec(), ok,
+                      /*inIterWhile=*/false);
   else // WriteStmt
-    genOutputItemList(converter, cookie, stmt.items, insertPt,
-                      csi.hasTransferConditionSpec(), ok, false);
+    genOutputItemList(converter, cookie, stmt.items, insertPt, isFormatted,
+                      csi.hasTransferConditionSpec(), ok,
+                      /*inIterWhile=*/false);
 
   // Generate end statement call/s.
   if (insertPt.isSet())
@@ -1570,12 +1613,12 @@ Fortran::lower::genReadStatement(Fortran::lower::AbstractConverter &converter,
 static std::pair<const Fortran::semantics::SomeExpr *, bool>
 getInquireFileExpr(const std::list<Fortran::parser::InquireSpec> *stmt) {
   if (!stmt)
-    return {nullptr, false};
+    return {nullptr, /*filename?=*/false};
   for (const auto &spec : *stmt) {
     if (auto *f = std::get_if<Fortran::parser::FileUnitNumber>(&spec.u))
-      return {Fortran::semantics::GetExpr(*f), false};
+      return {Fortran::semantics::GetExpr(*f), /*filename?=*/false};
     if (auto *f = std::get_if<Fortran::parser::FileNameExpr>(&spec.u))
-      return {Fortran::semantics::GetExpr(*f), true};
+      return {Fortran::semantics::GetExpr(*f), /*filename?=*/true};
   }
   // semantics should have already caught this condition
   llvm_unreachable("inquire spec must have a file");
