@@ -360,18 +360,19 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
     auto loc = converter.genLocation(pVar.GetSource());
     makeNextConditionalOn(builder, loc, insertPt, checkResult, ok,
                           inIterWhileLoop);
-    auto itemBox =
+    Fortran::lower::CharacterExprHelper charHelper{builder, loc};
+    auto unsafeItemBox =
         converter.genExprAddr(Fortran::semantics::GetExpr(pVar), loc);
+    auto itemBox = charHelper.cleanUpCharacterExtendedValue(unsafeItemBox);
     auto itemAddr = fir::getBase(itemBox);
-    if (auto box = dyn_cast<fir::EmboxCharOp>(itemAddr.getDefiningOp()))
-      itemAddr = box.memref();
     auto itemTy = fir::dyn_cast_ptrEleTy(itemAddr.getType());
-    if (!itemTy)
+    if (!itemTy) {
       mlir::emitError(loc, "internal: unhandled input item type ")
           << itemAddr.getType();
+      return;
+    }
     auto inputFunc = getInputFunc(loc, builder, itemTy, isFormatted);
     auto argType = inputFunc.getType().getInput(1);
-    auto originalItemAddr = itemAddr;
     if (!isFormatted) {
       itemAddr = genUnformattedBox(builder, loc, itemBox, itemTy);
     } else if (argType.isa<fir::BoxType>()) {
@@ -381,11 +382,10 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
     }
     itemAddr = builder.createConvert(loc, argType, itemAddr);
     llvm::SmallVector<mlir::Value, 8> inputFuncArgs = {cookie, itemAddr};
-    Fortran::lower::CharacterExprHelper helper{builder, loc};
     if (argType.isa<fir::BoxType>()) {
       // do nothing
-    } else if (helper.isCharacter(itemTy)) {
-      auto len = helper.materializeCharacter(originalItemAddr).second;
+    } else if (charHelper.isCharacter(itemTy)) {
+      auto len = fir::getLen(itemBox);
       inputFuncArgs.push_back(
           builder.createConvert(loc, inputFunc.getType().getInput(2), len));
     } else if (itemTy.isa<mlir::IntegerType>()) {
@@ -1161,7 +1161,7 @@ genBuffer(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
   // Helper to query [BUFFER, LEN].
   Fortran::lower::CharacterExprHelper helper(builder, loc);
   auto dataLen = helper.materializeCharacterOrSequence(
-      fir::getBase(converter.genExprValue(*e)));
+      fir::getBase(converter.genExprAddr(*e)));
   auto buff = builder.createConvert(loc, strTy, dataLen.first);
   auto len = builder.createConvert(loc, lenTy, dataLen.second);
   return {buff, len};
@@ -1650,7 +1650,7 @@ mlir::Value genInquireSpec<Fortran::parser::InquireSpec::CharVar>(
   auto specFuncTy = specFunc.getType();
   const auto *varExpr = Fortran::semantics::GetExpr(
       std::get<Fortran::parser::ScalarDefaultCharVariable>(var.t));
-  auto str = fir::getBase(converter.genExprValue(varExpr, loc));
+  auto str = fir::getBase(converter.genExprAddr(varExpr, loc));
   Fortran::lower::CharacterExprHelper helper(builder, loc);
   auto data = helper.materializeCharacter(str);
   llvm::SmallVector<mlir::Value, 8> args = {
