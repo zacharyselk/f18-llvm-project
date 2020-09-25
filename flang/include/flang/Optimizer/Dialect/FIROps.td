@@ -1972,7 +1972,7 @@ def fir_InsertOnRangeOp : fir_OneResultOp<"insert_on_range", [NoSideEffect]> {
   }];
 
   let arguments = (ins fir_SequenceType:$seq, AnyType:$val,
-                       Index:$start, Index:$end);
+                       Variadic<Index>:$coor);
   let results = (outs fir_SequenceType);
 
   let assemblyFormat = [{
