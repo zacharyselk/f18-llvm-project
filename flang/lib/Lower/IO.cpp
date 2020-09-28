@@ -284,7 +284,8 @@ genOutputItemList(Fortran::lower::AbstractConverter &converter,
     Fortran::lower::CharacterExprHelper helper{builder, loc};
     if (!isFormatted) {
       auto exv = converter.genExprAddr(Fortran::semantics::GetExpr(pExpr), loc);
-      auto box = genUnformattedBox(builder, loc, exv, itemTy);
+      auto ty = fir::dyn_cast_ptrEleTy(fir::getBase(exv).getType());
+      auto box = genUnformattedBox(builder, loc, exv, ty);
       outputFuncArgs.push_back(builder.createConvert(loc, argType, box));
     } else if (helper.isCharacter(itemTy)) {
       auto dataLen = helper.materializeCharacter(itemValue);
