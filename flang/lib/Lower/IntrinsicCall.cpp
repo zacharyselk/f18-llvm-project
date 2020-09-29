@@ -127,6 +127,7 @@ struct IntrinsicLibrary {
   mlir::Value genAint(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genAnint(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genCeiling(mlir::Type, llvm::ArrayRef<mlir::Value>);
+  fir::ExtendedValue genChar(mlir::Type, llvm::ArrayRef<fir::ExtendedValue>);
   mlir::Value genConjg(mlir::Type, llvm::ArrayRef<mlir::Value>);
   void genDateAndTime(llvm::ArrayRef<fir::ExtendedValue>);
   mlir::Value genDim(mlir::Type, llvm::ArrayRef<mlir::Value>);
@@ -222,12 +223,12 @@ struct IntrinsicHandler {
 using I = IntrinsicLibrary;
 static constexpr IntrinsicHandler handlers[]{
     {"abs", &I::genAbs},
-    {"achar", &I::genConversion},
+    {"achar", &I::genChar},
     {"aimag", &I::genAimag},
     {"aint", &I::genAint},
     {"anint", &I::genAnint},
     {"ceiling", &I::genCeiling},
-    {"char", &I::genConversion},
+    {"char", &I::genChar},
     {"conjg", &I::genConjg},
     {"date_and_time", &I::genDateAndTime},
     {"dim", &I::genDim},
@@ -616,7 +617,8 @@ fir::ExtendedValue toExtendedValue(mlir::Value val,
   llvm::SmallVector<mlir::Value, 2> extents;
 
   Fortran::lower::CharacterExprHelper charHelper{builder, loc};
-  if (charHelper.isCharacter(type))
+  // FIXME: we may want to allow non character scalar here.
+  if (charHelper.isCharacterScalar(type))
     return charHelper.toExtendedValue(val);
 
   if (auto refType = type.dyn_cast<fir::ReferenceType>())
@@ -1090,6 +1092,27 @@ mlir::Value IntrinsicLibrary::genCeiling(mlir::Type resultType,
   return builder.createConvert(loc, resultType, ceil);
 }
 
+fir::ExtendedValue
+IntrinsicLibrary::genChar(mlir::Type type,
+                          llvm::ArrayRef<fir::ExtendedValue> args) {
+  // Optional KIND argument.
+  assert(args.size() >= 1);
+  auto *arg = args[0].getUnboxed();
+  // expect argument to be a scalar integer
+  if (!arg)
+    mlir::emitError(loc, "CHAR intrinsic argument not unboxed");
+  Fortran::lower::CharacterExprHelper helper{builder, loc};
+  auto eleType = helper.getCharacterType(type);
+  auto cast = builder.createConvert(loc, eleType, *arg);
+  auto charType = fir::SequenceType::get({1}, eleType);
+  auto undef = builder.create<fir::UndefOp>(loc, charType);
+  auto zero = builder.createIntegerConstant(loc, builder.getIndexType(), 0);
+  auto val =
+      builder.create<fir::InsertValueOp>(loc, charType, undef, cast, zero);
+  auto len = builder.createIntegerConstant(loc, helper.getLengthType(), 1);
+  return fir::CharBoxValue{val, len};
+}
+
 // CONJG
 mlir::Value IntrinsicLibrary::genConjg(mlir::Type resultType,
                                        llvm::ArrayRef<mlir::Value> args) {
@@ -1178,7 +1201,7 @@ mlir::Value IntrinsicLibrary::genIchar(mlir::Type resultType,
 
   auto arg = args[0];
   auto argTy = arg.getType();
-  assert(Fortran::lower::CharacterExprHelper::isCharacter(argTy) &&
+  assert(Fortran::lower::CharacterExprHelper::isCharacterScalar(argTy) &&
          "Error: Unhandled type passed to ICHAR");
   mlir::Value charVal;
   if (auto charTy = argTy.dyn_cast<fir::CharacterType>()) {

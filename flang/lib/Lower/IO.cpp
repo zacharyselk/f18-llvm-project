@@ -20,6 +20,7 @@
 #include "flang/Lower/FIRBuilder.h"
 #include "flang/Lower/PFTBuilder.h"
 #include "flang/Lower/Runtime.h"
+#include "flang/Lower/Todo.h"
 #include "flang/Lower/Utils.h"
 #include "flang/Optimizer/Support/FIRContext.h"
 #include "flang/Parser/parse-tree.h"
@@ -144,15 +145,13 @@ static mlir::Value genEndIO(Fortran::lower::AbstractConverter &converter,
   auto &builder = converter.getFirOpBuilder();
   if (csi.ioMsgExpr) {
     auto getIoMsg = getIORuntimeFunc<mkIOKey(GetIoMsg)>(loc, builder);
-    auto ioMsgVar =
-        Fortran::lower::CharacterExprHelper{builder, loc}.createUnboxChar(
-            fir::getBase(converter.genExprAddr(csi.ioMsgExpr, loc)));
+    auto ioMsgVar = converter.genExprAddr(csi.ioMsgExpr, loc);
     llvm::SmallVector<mlir::Value, 3> args{
         cookie,
         builder.createConvert(loc, getIoMsg.getType().getInput(1),
-                              ioMsgVar.first),
+                              fir::getBase(ioMsgVar)),
         builder.createConvert(loc, getIoMsg.getType().getInput(2),
-                              ioMsgVar.second)};
+                              fir::getLen(ioMsgVar))};
     builder.create<fir::CallOp>(loc, getIoMsg, args);
   }
   auto endIoStatement = getIORuntimeFunc<mkIOKey(EndIoStatement)>(loc, builder);
@@ -222,11 +221,13 @@ static mlir::FuncOp getOutputFunc(mlir::Location loc,
     return getIORuntimeFunc<mkIOKey(OutputLogical)>(loc, builder);
   if (type.isa<fir::BoxType>())
     return getIORuntimeFunc<mkIOKey(OutputDescriptor)>(loc, builder);
-  if (Fortran::lower::CharacterExprHelper::isCharacter(type))
+  if (Fortran::lower::CharacterExprHelper::isCharacterScalar(type))
     return getIORuntimeFunc<mkIOKey(OutputAscii)>(loc, builder);
+  // Use descriptors for arrays
   if (auto refTy = type.dyn_cast<fir::ReferenceType>())
-    if (refTy.getEleTy().isa<fir::SequenceType>())
-      return getIORuntimeFunc<mkIOKey(OutputDescriptor)>(loc, builder);
+    type = refTy.getEleTy();
+  if (type.isa<fir::SequenceType>())
+    return getIORuntimeFunc<mkIOKey(OutputDescriptor)>(loc, builder);
   // Any unaccounted for types are to be handled here.
   mlir::emitError(loc, "output for entity type ") << type << " not implemented";
   return {};
@@ -274,38 +275,52 @@ genOutputItemList(Fortran::lower::AbstractConverter &converter,
     auto loc = converter.genLocation(pExpr.source);
     makeNextConditionalOn(builder, loc, insertPt, checkResult, ok,
                           inIterWhileLoop);
-    auto itemBox =
-        converter.genExprValue(Fortran::semantics::GetExpr(pExpr), loc);
-    auto itemValue = fir::getBase(itemBox);
-    auto itemTy = itemValue.getType();
+
+    const auto *expr = Fortran::semantics::GetExpr(pExpr);
+    if (!expr) {
+      mlir::emitError(loc,
+                      "Lowering internal error: could not get evaluate::Expr");
+      break;
+    }
+    auto itemTy = converter.genType(*expr);
     auto outputFunc = getOutputFunc(loc, builder, itemTy, isFormatted);
     auto argType = outputFunc.getType().getInput(1);
     llvm::SmallVector<mlir::Value, 3> outputFuncArgs = {cookie};
     Fortran::lower::CharacterExprHelper helper{builder, loc};
     if (!isFormatted) {
-      auto exv = converter.genExprAddr(Fortran::semantics::GetExpr(pExpr), loc);
+      auto exv = converter.genExprAddr(expr, loc);
       auto ty = fir::dyn_cast_ptrEleTy(fir::getBase(exv).getType());
       auto box = genUnformattedBox(builder, loc, exv, ty);
       outputFuncArgs.push_back(builder.createConvert(loc, argType, box));
-    } else if (helper.isCharacter(itemTy)) {
-      auto dataLen = helper.materializeCharacter(itemValue);
+    } else if (helper.isCharacterScalar(itemTy)) {
+      auto exv = converter.genExprAddr(expr, loc);
+      // scalar allocatable/pointer may also get here, not clear if
+      // genExprAddr will lower them as CharBoxValue or BoxValue.
+      if (!exv.getCharBox())
+        llvm::report_fatal_error(
+            "internal IO lowering: scalar character not in CharBox");
       outputFuncArgs.push_back(builder.createConvert(
-          loc, outputFunc.getType().getInput(1), dataLen.first));
+          loc, outputFunc.getType().getInput(1), fir::getBase(exv)));
       outputFuncArgs.push_back(builder.createConvert(
-          loc, outputFunc.getType().getInput(2), dataLen.second));
-    } else if (fir::isa_complex(itemTy)) {
-      auto parts = Fortran::lower::ComplexExprHelper{builder, loc}.extractParts(
-          itemValue);
-      outputFuncArgs.push_back(parts.first);
-      outputFuncArgs.push_back(parts.second);
+          loc, outputFunc.getType().getInput(2), fir::getLen(exv)));
     } else {
-      if (argType.isa<fir::BoxType>()) {
-        mlir::Value shape = builder.createShape(loc, itemBox);
-        itemValue = builder.create<fir::EmboxOp>(loc, fir::BoxType::get(itemTy),
-                                                 itemValue, shape);
+      auto itemBox = converter.genExprValue(expr, loc);
+      auto itemValue = fir::getBase(itemBox);
+      if (fir::isa_complex(itemTy)) {
+        auto parts =
+            Fortran::lower::ComplexExprHelper{builder, loc}.extractParts(
+                itemValue);
+        outputFuncArgs.push_back(parts.first);
+        outputFuncArgs.push_back(parts.second);
+      } else {
+        if (argType.isa<fir::BoxType>()) {
+          mlir::Value shape = builder.createShape(loc, itemBox);
+          itemValue = builder.create<fir::EmboxOp>(
+              loc, fir::BoxType::get(itemTy), itemValue, shape);
+        }
+        itemValue = builder.createConvert(loc, argType, itemValue);
+        outputFuncArgs.push_back(itemValue);
       }
-      itemValue = builder.createConvert(loc, argType, itemValue);
-      outputFuncArgs.push_back(itemValue);
     }
     ok = builder.create<fir::CallOp>(loc, outputFunc, outputFuncArgs)
              .getResult(0);
@@ -334,7 +349,7 @@ static mlir::FuncOp getInputFunc(mlir::Location loc,
     return getIORuntimeFunc<mkIOKey(InputLogical)>(loc, builder);
   if (type.isa<fir::BoxType>())
     return getIORuntimeFunc<mkIOKey(InputDescriptor)>(loc, builder);
-  if (Fortran::lower::CharacterExprHelper::isCharacter(type))
+  if (Fortran::lower::CharacterExprHelper::isCharacterScalar(type))
     return getIORuntimeFunc<mkIOKey(InputAscii)>(loc, builder);
   if (type.isa<fir::SequenceType>())
     return getIORuntimeFunc<mkIOKey(InputDescriptor)>(loc, builder);
@@ -362,9 +377,8 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
     makeNextConditionalOn(builder, loc, insertPt, checkResult, ok,
                           inIterWhileLoop);
     Fortran::lower::CharacterExprHelper charHelper{builder, loc};
-    auto unsafeItemBox =
+    auto itemBox =
         converter.genExprAddr(Fortran::semantics::GetExpr(pVar), loc);
-    auto itemBox = charHelper.cleanUpCharacterExtendedValue(unsafeItemBox);
     auto itemAddr = fir::getBase(itemBox);
     auto itemTy = fir::dyn_cast_ptrEleTy(itemAddr.getType());
     if (!itemTy) {
@@ -385,7 +399,7 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
     llvm::SmallVector<mlir::Value, 8> inputFuncArgs = {cookie, itemAddr};
     if (argType.isa<fir::BoxType>()) {
       // do nothing
-    } else if (charHelper.isCharacter(itemTy)) {
+    } else if (charHelper.isCharacterScalar(itemTy)) {
       auto len = fir::getLen(itemBox);
       inputFuncArgs.push_back(
           builder.createConvert(loc, inputFunc.getType().getInput(2), len));
@@ -525,6 +539,39 @@ static mlir::Value getDefaultScratchLen(Fortran::lower::FirOpBuilder &builder,
                                           builder.getIntegerAttr(toType, 0));
 }
 
+/// Generate a reference to a buffer and the length of buffer given
+/// a character expression. Array expression will be cast to scalar
+/// character as long as they are contiguous.
+static std::tuple<mlir::Value, mlir::Value>
+genBuffer(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
+          const Fortran::semantics::SomeExpr &expr, mlir::Type strTy,
+          mlir::Type lenTy) {
+  auto &builder = converter.getFirOpBuilder();
+  auto exprAddr = converter.genExprAddr(expr);
+  Fortran::lower::CharacterExprHelper helper(builder, loc);
+  using ValuePair = std::pair<mlir::Value, mlir::Value>;
+  auto [buff, len] = exprAddr.match(
+      [&](const fir::CharBoxValue &x) -> ValuePair {
+        return {x.getBuffer(), x.getLen()};
+      },
+      [&](const fir::CharArrayBoxValue &x) -> ValuePair {
+        auto scalar = helper.toScalarCharacter(x);
+        return {scalar.getBuffer(), scalar.getLen()};
+      },
+      [&](const fir::BoxValue &) -> ValuePair {
+        // May need to copy before after IO to handle contiguous
+        // aspect. Not sure descriptor can get here though.
+        TODO("character descriptor to contiguous buffer");
+      },
+      [&](const auto &) -> ValuePair {
+        llvm::report_fatal_error(
+            "lowering internal error: IO buffer is not a character");
+      });
+  buff = builder.createConvert(loc, strTy, buff);
+  len = builder.createConvert(loc, lenTy, len);
+  return {buff, len};
+}
+
 /// Lower a string literal. Many arguments to the runtime are conveyed as
 /// Fortran CHARACTER literals.
 template <typename A>
@@ -534,18 +581,16 @@ lowerStringLit(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
                mlir::Type ty2 = {}) {
   auto &builder = converter.getFirOpBuilder();
   auto *expr = Fortran::semantics::GetExpr(syntax);
-  auto str = fir::getBase(converter.genExprValue(expr, loc));
-  Fortran::lower::CharacterExprHelper helper{builder, loc};
-  auto dataLen = helper.materializeCharacterOrSequence(str);
-  auto buff = builder.createConvert(loc, strTy, dataLen.first);
-  auto len = builder.createConvert(loc, lenTy, dataLen.second);
+  if (!expr)
+    mlir::emitError(loc, "internal: null semantic expr in IO lowering");
+  auto [buff, len] = genBuffer(converter, loc, *expr, strTy, lenTy);
+  mlir::Value kind;
   if (ty2) {
-    auto kindVal = helper.getCharacterKind(str.getType());
-    auto kind = builder.create<mlir::ConstantOp>(
+    auto kindVal = expr->GetType().value().kind();
+    kind = builder.create<mlir::ConstantOp>(
         loc, builder.getIntegerAttr(ty2, kindVal));
-    return {buff, len, kind};
   }
-  return {buff, len, mlir::Value{}};
+  return {buff, len, kind};
 }
 
 /// Pass the body of the FORMAT statement in as if it were a CHARACTER literal
@@ -1153,37 +1198,19 @@ getFormat<Fortran::parser::PrintStmt>(
                    strTy, lenTy);
 }
 
-/// Generate a reference to a buffer and the length of buffer. There are 3 cases
-/// An IoUnit can be variable, a ScalarIntExpr (i.e FileUnitNumber) or a *. Only
-/// the first case (a variable) is handled here.
-static std::tuple<mlir::Value, mlir::Value>
-genBuffer(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
-          const Fortran::parser::IoUnit &iounit, mlir::Type strTy,
-          mlir::Type lenTy) {
-  // Variable
-  auto *var = std::get_if<Fortran::parser::Variable>(&iounit.u);
-  assert(var && "Has to be a variable");
-  auto e = Fortran::semantics::GetExpr(*var);
-  auto &builder = converter.getFirOpBuilder();
-  assert(Fortran::semantics::ExprHasTypeCategory(
-      *e, Fortran::common::TypeCategory::Character));
-  // Helper to query [BUFFER, LEN].
-  Fortran::lower::CharacterExprHelper helper(builder, loc);
-  auto dataLen = helper.materializeCharacterOrSequence(
-      fir::getBase(converter.genExprAddr(*e)));
-  auto buff = builder.createConvert(loc, strTy, dataLen.first);
-  auto len = builder.createConvert(loc, lenTy, dataLen.second);
-  return {buff, len};
-}
-
+/// There are 3 cases An IoUnit can be variable, a ScalarIntExpr (i.e
+/// FileUnitNumber) or a *. Only the first case (a variable) is handled here.
 template <typename A>
 std::tuple<mlir::Value, mlir::Value>
 getBuffer(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
           const A &stmt, mlir::Type strTy, mlir::Type lenTy) {
-  if (stmt.iounit)
-    return genBuffer(converter, loc, *stmt.iounit, strTy, lenTy);
-  return genBuffer(converter, loc, *getIOControl<Fortran::parser::IoUnit>(stmt),
-                   strTy, lenTy);
+  const Fortran::parser::IoUnit *iounit =
+      stmt.iounit ? &*stmt.iounit : getIOControl<Fortran::parser::IoUnit>(stmt);
+  if (iounit)
+    if (auto *var = std::get_if<Fortran::parser::Variable>(&iounit->u))
+      if (auto *expr = Fortran::semantics::GetExpr(*var))
+        return genBuffer(converter, loc, *expr, strTy, lenTy);
+  llvm::report_fatal_error("failed to get IoUnit expr in lowering");
 }
 
 /// Create a boxed value to be passed to the runtime. `descRef` is the reference
@@ -1659,9 +1686,7 @@ mlir::Value genInquireSpec<Fortran::parser::InquireSpec::CharVar>(
   auto specFuncTy = specFunc.getType();
   const auto *varExpr = Fortran::semantics::GetExpr(
       std::get<Fortran::parser::ScalarDefaultCharVariable>(var.t));
-  auto str = fir::getBase(converter.genExprAddr(varExpr, loc));
-  Fortran::lower::CharacterExprHelper helper(builder, loc);
-  auto data = helper.materializeCharacter(str);
+  auto str = converter.genExprAddr(varExpr, loc);
   llvm::SmallVector<mlir::Value, 8> args = {
       builder.createConvert(loc, specFuncTy.getInput(0), cookie),
       builder.createIntegerConstant(
@@ -1670,8 +1695,8 @@ mlir::Value genInquireSpec<Fortran::parser::InquireSpec::CharVar>(
               Fortran::parser::InquireSpec::CharVar::EnumToString(
                   std::get<Fortran::parser::InquireSpec::CharVar::Kind>(var.t))
                   .c_str())),
-      builder.createConvert(loc, specFuncTy.getInput(2), data.first),
-      builder.createConvert(loc, specFuncTy.getInput(3), data.second)};
+      builder.createConvert(loc, specFuncTy.getInput(2), fir::getBase(str)),
+      builder.createConvert(loc, specFuncTy.getInput(3), fir::getLen(str))};
   return builder.create<fir::CallOp>(loc, specFunc, args).getResult(0);
 }
 /// Specialization for INTEGER.
@@ -1815,13 +1840,10 @@ mlir::Value Fortran::lower::genInquireStatement(
     // Filename call.
     beginFunc = getIORuntimeFunc<mkIOKey(BeginInquireFile)>(loc, builder);
     mlir::FunctionType beginFuncTy = beginFunc.getType();
-    auto file = fir::getBase(converter.genExprValue(exprPair.first, loc));
-    // Helper to query [BUFFER, LEN].
-    Fortran::lower::CharacterExprHelper helper(builder, loc);
-    auto dataLen = helper.materializeCharacter(file);
+    auto file = converter.genExprAddr(exprPair.first, loc);
     beginArgs = {
-        builder.createConvert(loc, beginFuncTy.getInput(0), dataLen.first),
-        builder.createConvert(loc, beginFuncTy.getInput(1), dataLen.second),
+        builder.createConvert(loc, beginFuncTy.getInput(0), fir::getBase(file)),
+        builder.createConvert(loc, beginFuncTy.getInput(1), fir::getLen(file)),
         locationToFilename(converter, loc, beginFuncTy.getInput(2)),
         locationToLineNo(builder, loc, beginFuncTy.getInput(3))};
   } else {
