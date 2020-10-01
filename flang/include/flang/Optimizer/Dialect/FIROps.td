@@ -112,13 +112,6 @@ def AnyShapeLike : TypeConstraint<Or<[fir_ShapeType.predicate,
     fir_ShapeShiftType.predicate]>, "any legal shape type">;
 def AnyShapeType : Type<AnyShapeLike.predicate, "any legal shape type">;
 def fir_SliceType : Type<CPred<"$_self.isa<fir::SliceType>()">, "slice type">;
-def AffineMapAttr : Attr<
-    CPred<"$_self.isa<mlir::AffineMapAttr>()">, "AffineMap attribute"> {
-  let storageType = "mlir::AffineMapAttr";
-  let returnType = "mlir::AffineMap";
-  let valueType = Index;
-  let constBuilderCall = "mlir::AffineMapAttr::get($0)";
-}
 
 // A type descriptor's type
 def fir_TypeDescType : Type<CPred<"$_self.isa<fir::TypeDescType>()">,
