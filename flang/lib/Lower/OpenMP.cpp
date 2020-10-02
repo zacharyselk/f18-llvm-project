@@ -47,6 +47,18 @@ static void genObjectList(const Fortran::parser::OmpObjectList &objectList,
   }
 }
 
+template <typename Op>
+static void createBodyOfOp(Op &op, Fortran::lower::FirOpBuilder &firOpBuilder,
+                           mlir::Location &loc) {
+  firOpBuilder.createBlock(&op.getRegion());
+  auto &block = op.getRegion().back();
+  firOpBuilder.setInsertionPointToStart(&block);
+  // Ensure the block is well-formed.
+  firOpBuilder.create<mlir::omp::TerminatorOp>(loc);
+  // Reset the insertion point to the start of the first block.
+  firOpBuilder.setInsertionPointToStart(&block);
+}
+
 static void genOMP(Fortran::lower::AbstractConverter &converter,
                    Fortran::lower::pft::Evaluation &eval,
                    const Fortran::parser::OpenMPSimpleStandaloneConstruct
@@ -106,13 +118,15 @@ static void
 genOMP(Fortran::lower::AbstractConverter &converter,
        Fortran::lower::pft::Evaluation &eval,
        const Fortran::parser::OpenMPBlockConstruct &blockConstruct) {
-  const auto &blockDirective =
+  const auto &beginBlockDirective =
       std::get<Fortran::parser::OmpBeginBlockDirective>(blockConstruct.t);
-  const auto &parallelDirective =
-      std::get<Fortran::parser::OmpBlockDirective>(blockDirective.t);
-  if (parallelDirective.v == llvm::omp::OMPD_parallel) {
-    auto &firOpBuilder = converter.getFirOpBuilder();
-    auto currentLocation = converter.getCurrentLocation();
+  const auto &blockDirective =
+      std::get<Fortran::parser::OmpBlockDirective>(beginBlockDirective.t);
+
+  auto &firOpBuilder = converter.getFirOpBuilder();
+  auto currentLocation = converter.getCurrentLocation();
+  llvm::ArrayRef<mlir::Type> argTy;
+  if (blockDirective.v == llvm::omp::OMPD_parallel) {
 
     mlir::Value ifClauseOperand, numThreadsClauseOperand;
     SmallVector<Value, 4> privateClauseOperands, firstprivateClauseOperands,
@@ -120,7 +134,7 @@ genOMP(Fortran::lower::AbstractConverter &converter,
     Attribute defaultClauseOperand, procBindClauseOperand;
 
     const auto &parallelOpClauseList =
-        std::get<Fortran::parser::OmpClauseList>(blockDirective.t);
+        std::get<Fortran::parser::OmpClauseList>(beginBlockDirective.t);
     for (const auto &clause : parallelOpClauseList.v) {
       if (const auto &ifClause =
               std::get_if<Fortran::parser::OmpIfClause>(&clause.u)) {
@@ -164,7 +178,6 @@ genOMP(Fortran::lower::AbstractConverter &converter,
         TODO(" proc_bind clause for omp parallel");
       }
     }
-    llvm::ArrayRef<mlir::Type> argTy;
     // Create and insert the operation.
     auto parallelOp = firOpBuilder.create<mlir::omp::ParallelOp>(
         currentLocation, argTy, Value(), numThreads,
