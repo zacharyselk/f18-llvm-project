@@ -70,13 +70,13 @@ static void genOMP(Fortran::lower::AbstractConverter &converter,
         converter.getCurrentLocation());
     break;
   case llvm::omp::Directive::OMPD_target_enter_data:
-    TODO();
+    TODO("");
   case llvm::omp::Directive::OMPD_target_exit_data:
-    TODO();
+    TODO("");
   case llvm::omp::Directive::OMPD_target_update:
-    TODO();
+    TODO("");
   case llvm::omp::Directive::OMPD_ordered:
-    TODO();
+    TODO("");
   }
 }
 
@@ -91,13 +91,13 @@ genOMP(Fortran::lower::AbstractConverter &converter,
             genOMP(converter, eval, simpleStandaloneConstruct);
           },
           [&](const Fortran::parser::OpenMPFlushConstruct &flushConstruct) {
-            TODO();
+            TODO("");
           },
           [&](const Fortran::parser::OpenMPCancelConstruct &cancelConstruct) {
-            TODO();
+            TODO("");
           },
           [&](const Fortran::parser::OpenMPCancellationPointConstruct
-                  &cancellationPointConstruct) { TODO(); },
+                  &cancellationPointConstruct) { TODO(""); },
       },
       standaloneConstruct.u);
 }
@@ -194,18 +194,18 @@ void Fortran::lower::genOpenMPConstruct(
             genOMP(converter, eval, standaloneConstruct);
           },
           [&](const Fortran::parser::OpenMPSectionsConstruct
-                  &sectionsConstruct) { TODO(); },
+                  &sectionsConstruct) { TODO(""); },
           [&](const Fortran::parser::OpenMPLoopConstruct &loopConstruct) {
-            TODO();
+            TODO("");
           },
           [&](const Fortran::parser::OpenMPBlockConstruct &blockConstruct) {
             genOMP(converter, eval, blockConstruct);
           },
           [&](const Fortran::parser::OpenMPAtomicConstruct &atomicConstruct) {
-            TODO();
+            TODO("");
           },
           [&](const Fortran::parser::OpenMPCriticalConstruct
-                  &criticalConstruct) { TODO(); },
+                  &criticalConstruct) { TODO(""); },
       },
       ompConstruct.u);
 }
@@ -213,5 +213,5 @@ void Fortran::lower::genOpenMPConstruct(
 void Fortran::lower::genOpenMPEndLoop(
     Fortran::lower::AbstractConverter &, Fortran::lower::pft::Evaluation &,
     const Fortran::parser::OmpEndLoopDirective &) {
-  TODO();
+  TODO("");
 }
