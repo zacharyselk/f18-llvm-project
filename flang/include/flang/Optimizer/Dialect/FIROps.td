@@ -1091,7 +1091,14 @@ def fir_EmboxOp : fir_Op<"embox", [NoSideEffect, AttrSizedOperandSegments]> {
           return emitOpError("number of LEN params does not correspond"
                              " to the !fir.type type");
       } else {
-        return emitOpError("LEN parameters require !fir.type type");
+        if (auto strTy = eleTy.dyn_cast<fir::SequenceType>()) {
+          if (!strTy.getEleTy().isa<fir::CharacterType>())
+            return emitOpError("LEN parameters require CHARACTER type");
+          if (strTy.getShape()[0] != fir::SequenceType::getUnknownExtent())
+            return emitOpError("CHARACTER already has static LEN");
+        } else {
+          return emitOpError("LEN parameters require !fir.type type");
+        }
       }
       for (auto lp : lenParams())
         if (!fir::isa_integer(lp.getType()))
@@ -3219,6 +3226,7 @@ def fir_XEmboxOp : fir_Op<"ext_embox", []> {
     static constexpr llvm::StringRef shapeAttrName() { return "shape"; }
     static constexpr llvm::StringRef shiftAttrName() { return "shift"; }
     static constexpr llvm::StringRef sliceAttrName() { return "slice"; }
+    std::size_t lenParamOffset();
     mlir::Operation::operand_range lenParamOperands();
     mlir::Operation::operand_range shapeOperands();
     mlir::Operation::operand_range shiftOperands();
