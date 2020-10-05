@@ -951,7 +951,7 @@ static constexpr llvm::StringRef getTargetOffsetAttr() {
 template <typename A, typename... AdditionalArgs>
 static A getSubOperands(unsigned pos, A allArgs,
                         mlir::DenseIntElementsAttr ranges,
-                        AdditionalArgs &&...additionalArgs) {
+                        AdditionalArgs &&... additionalArgs) {
   unsigned start = 0;
   for (unsigned i = 0; i < pos; ++i)
     start += (*(ranges.begin() + i)).getZExtValue();
@@ -1535,10 +1535,14 @@ mlir::Operation::operand_range fir::XEmboxOp::sliceOperands() {
   return {first, first + size};
 }
 
+std::size_t fir::XEmboxOp::lenParamOffset() {
+  return getAttrOfType<mlir::IntegerAttr>(shapeAttrName()).getInt() +
+         getAttrOfType<mlir::IntegerAttr>(shiftAttrName()).getInt() +
+         getAttrOfType<mlir::IntegerAttr>(sliceAttrName()).getInt();
+}
+
 mlir::Operation::operand_range fir::XEmboxOp::lenParamOperands() {
-  auto off = getAttrOfType<mlir::IntegerAttr>(shapeAttrName()).getInt() +
-             getAttrOfType<mlir::IntegerAttr>(shiftAttrName()).getInt() +
-             getAttrOfType<mlir::IntegerAttr>(sliceAttrName()).getInt();
+  auto off = lenParamOffset();
   auto first = std::next(getOperation()->operand_begin() + off);
   return {first, getOperation()->operand_end()};
 }
