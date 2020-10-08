@@ -103,7 +103,17 @@ genOMP(Fortran::lower::AbstractConverter &converter,
             genOMP(converter, eval, simpleStandaloneConstruct);
           },
           [&](const Fortran::parser::OpenMPFlushConstruct &flushConstruct) {
-            TODO("");
+            SmallVector<Value, 4> operandRange;
+            if (auto &ompObjectList =
+                    std::get<std::optional<Fortran::parser::OmpObjectList>>(
+                        flushConstruct.t))
+              genObjectList(*ompObjectList, converter, operandRange);
+            if (auto &flushMemoryClause = std::get<
+                    std::optional<Fortran::parser::OmpFlushMemoryClause>>(
+                    flushConstruct.t))
+              TODO("Handle OmpFlushMemoryClause");
+            converter.getFirOpBuilder().create<mlir::omp::FlushOp>(
+                converter.getCurrentLocation(), operandRange);
           },
           [&](const Fortran::parser::OpenMPCancelConstruct &cancelConstruct) {
             TODO("");
