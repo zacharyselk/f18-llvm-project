@@ -504,8 +504,9 @@ mlir::Value Fortran::lower::CharacterExprHelper::createLenTrim(
   auto blank = createBlankConstantCode(getCharacterType(str));
   mlir::Value lastChar = builder.create<mlir::SubIOp>(loc, len, one);
 
-  auto iterWhile = builder.create<fir::IterWhileOp>(
-      loc, lastChar, zero, minusOne, trueVal, lastChar);
+  auto iterWhile =
+      builder.create<fir::IterWhileOp>(loc, lastChar, zero, minusOne, trueVal,
+                                       /*returnFinalCount=*/false, lastChar);
   auto insPt = builder.saveInsertionPoint();
   builder.setInsertionPointToStart(iterWhile.getBody());
   auto index = iterWhile.getInductionVar();

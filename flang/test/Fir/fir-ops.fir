@@ -1,7 +1,6 @@
 // Test the FIR operations
 
 // RUN: tco -emit-fir %s | tco -emit-fir | FileCheck %s
-// UNSUPPORTED: !fir
 
 // CHECK-LABEL: func private @it1() -> !fir.int<4>
 // CHECK: func private @box1() -> !fir.boxchar<2>
@@ -592,7 +591,7 @@ func @early_exit(%ok : i1, %k : i32) -> i1 {
   %c1 = constant 1 : index
   %c100 = constant 100 : index
 
-// CHECK: [[VAL_190:%.*]], [[VAL_191:%.*]] = fir.iterate_while ([[VAL_192:%.*]] = [[VAL_188]] to [[VAL_189]] step [[VAL_188]]) and ([[VAL_193:%.*]] = [[VAL_186]]) iter_args([[VAL_194:%.*]] = [[VAL_187]]) -> (i32) {
+// CHECK: %[[VAL_190:.*]]:2 = fir.iterate_while ([[VAL_192:%.*]] = [[VAL_188]] to [[VAL_189]] step [[VAL_188]]) and ([[VAL_193:%.*]] = [[VAL_186]]) iter_args([[VAL_194:%.*]] = [[VAL_187]]) -> (i32) {
 // CHECK: [[VAL_195:%.*]] = call @earlyexit2([[VAL_194]]) : (i32) -> i1
 // CHECK: fir.result [[VAL_195]], [[VAL_194]] : i1, i32
 // CHECK: }
@@ -600,7 +599,7 @@ func @early_exit(%ok : i1, %k : i32) -> i1 {
     %stop = call @earlyexit2(%v) : (i32) -> i1
     fir.result %stop, %v : i1, i32
   }
-// CHECK: return [[VAL_190]] : i1
+// CHECK: return %[[VAL_190]]#0 : i1
 // CHECK: }
   return %newOk#0 : i1
 }
