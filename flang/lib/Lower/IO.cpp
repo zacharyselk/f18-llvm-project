@@ -450,7 +450,8 @@ static void genIoLoop(Fortran::lower::AbstractConverter &converter,
   if (!checkResult) {
     // No I/O call result checks - the loop is a fir.do_loop op.
     auto doLoopOp = builder.create<fir::DoLoopOp>(
-        loc, lowerValue, upperValue, stepValue, /*unordered*/ false,
+        loc, lowerValue, upperValue, stepValue, /*unordered=*/false,
+        /*returnFinalCount=*/false,
         ArrayRef<mlir::Value>{lowerValue}); // initial loop result value
     builder.setInsertionPointToStart(doLoopOp.getBody());
     auto lcv = builder.createConvert(loc, converter.genType(loopSym),
@@ -471,7 +472,7 @@ static void genIoLoop(Fortran::lower::AbstractConverter &converter,
   // Check I/O call results - the loop is a fir.iterate_while op.
   if (!ok)
     ok = builder.createIntegerConstant(loc, builder.getI1Type(), 1);
-  fir::IterWhileOp iterWhileOp = builder.create<fir::IterWhileOp>(
+  auto iterWhileOp = builder.create<fir::IterWhileOp>(
       loc, lowerValue, upperValue, stepValue, ok);
   builder.setInsertionPointToStart(iterWhileOp.getBody());
   auto lcv = builder.createConvert(loc, converter.genType(loopSym),
