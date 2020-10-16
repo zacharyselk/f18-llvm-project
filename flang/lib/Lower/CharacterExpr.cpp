@@ -14,6 +14,7 @@
 #include "flang/Lower/ConvertType.h"
 #include "flang/Lower/DoLoopHelper.h"
 #include "flang/Lower/IntrinsicCall.h"
+#include "flang/Lower/Todo.h"
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "flang-lower-character"
@@ -228,10 +229,13 @@ mlir::Type Fortran::lower::CharacterExprHelper::getSeqTy(
 
 mlir::Value
 Fortran::lower::CharacterExprHelper::createEmbox(const fir::CharBoxValue &box) {
-  // BoxChar require a reference.
-  auto kind = getCharacterType(box).getFKind();
-  auto boxCharType = fir::BoxCharType::get(builder.getContext(), kind);
-  auto refType = getReferenceType(box);
+  // BoxChar require a reference. Base CharBoxValue of CharArrayBoxValue
+  // are ok here (do not require a scalar type)
+  auto charTy = recoverCharacterType<false /* checkForScalar */>(
+      box.getBuffer().getType());
+  auto boxCharType =
+      fir::BoxCharType::get(builder.getContext(), charTy.getFKind());
+  auto refType = fir::ReferenceType::get(charTy);
   auto buff = builder.createConvert(loc, refType, box.getBuffer());
   // Convert in case the provided length is not of the integer type that must
   // be used in boxchar.
@@ -242,6 +246,9 @@ Fortran::lower::CharacterExprHelper::createEmbox(const fir::CharBoxValue &box) {
 
 fir::CharBoxValue Fortran::lower::CharacterExprHelper::toScalarCharacter(
     const fir::CharArrayBoxValue &box) {
+  if (box.getBuffer().getType().isa<fir::PointerType>())
+    TODO("concatenating non contiguous character array into a scalar");
+
   // TODO: add a fast path multiplying new length at compile time if the info is
   // in the array type.
   auto lenType = getLengthType();
@@ -263,7 +270,10 @@ fir::CharBoxValue Fortran::lower::CharacterExprHelper::toScalarCharacter(
 
 mlir::Value Fortran::lower::CharacterExprHelper::createEmbox(
     const fir::CharArrayBoxValue &box) {
-  return createEmbox(toScalarCharacter(box));
+  // Use same embox as for scalar. It's losing the actual data size information
+  // (We do not multiply the length by the array size), but that is what Fortran
+  // call interfaces using boxchar expect.
+  return createEmbox(static_cast<const fir::CharBoxValue &>(box));
 }
 
 /// Load a character out of `buff` from offset `index`.
