@@ -1668,6 +1668,10 @@ def fir_ArrayLoadOp : fir_Op<"array_load", [AttrSizedOperandSegments]> {
 
     return mlir::success();
   }];
+
+  let extraClassDeclaration = [{
+    std::vector<mlir::Value> getExtents();
+  }];
 }
 
 def fir_ArrayFetchOp : fir_Op<"array_fetch", [NoSideEffect]> {
@@ -2136,6 +2140,12 @@ def fir_ShapeOp : fir_Op<"shape", [NoSideEffect]> {
       return emitOpError("shape type rank mismatch");
     return mlir::success();
   }];
+
+  let extraClassDeclaration = [{
+    std::vector<mlir::Value> getExtents() {
+      return {extents().begin(), extents().end()};
+    }
+  }];
 }
 
 def fir_ShapeShiftOp : fir_Op<"shape_shift", [NoSideEffect]> {
@@ -2180,10 +2190,12 @@ def fir_ShapeShiftOp : fir_Op<"shape_shift", [NoSideEffect]> {
 
   let extraClassDeclaration = [{
     // Logically unzip the extents from the origin values.
-    void getExtents(llvm::SmallVectorImpl<mlir::Value> &result) {
+    std::vector<mlir::Value> getExtents() {
+      std::vector<mlir::Value> result;
       for (auto i : llvm::enumerate(pairs()))
         if (i.index() & 1)
           result.push_back(i.value());
+      return result;
     }
   }];
 }

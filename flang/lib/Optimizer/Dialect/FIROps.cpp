@@ -124,6 +124,21 @@ mlir::Type fir::AllocMemOp::wrapResultType(mlir::Type intype) {
 }
 
 //===----------------------------------------------------------------------===//
+// ArrayLoadOp
+//===----------------------------------------------------------------------===//
+
+std::vector<mlir::Value> fir::ArrayLoadOp::getExtents() {
+  std::vector<mlir::Value> result;
+  if (auto sh = shape())
+    if (auto *op = sh.getDefiningOp()) {
+      if (auto shOp = dyn_cast<fir::ShapeOp>(op))
+        return shOp.getExtents();
+      return cast<fir::ShapeShiftOp>(op).getExtents();
+    }
+  return result;
+}
+
+//===----------------------------------------------------------------------===//
 // BoxAddrOp
 //===----------------------------------------------------------------------===//
 
@@ -1076,8 +1091,8 @@ fir::DoLoopOp::moveOutOfLoop(llvm::ArrayRef<mlir::Operation *> ops) {
   return success();
 }
 
-/// Translate a value passed as an iter_arg to the corresponding block argument
-/// in the body of the loop.
+/// Translate a value passed as an iter_arg to the corresponding block
+/// argument in the body of the loop.
 mlir::BlockArgument fir::DoLoopOp::iterArgToBlockArg(mlir::Value iterArg) {
   for (auto i : llvm::enumerate(initArgs()))
     if (iterArg == i.value())
@@ -1085,8 +1100,8 @@ mlir::BlockArgument fir::DoLoopOp::iterArgToBlockArg(mlir::Value iterArg) {
   return {};
 }
 
-/// Translate the result vector (by index number) to the corresponding value to
-/// the `fir.result` Op.
+/// Translate the result vector (by index number) to the corresponding value
+/// to the `fir.result` Op.
 void fir::DoLoopOp::resultToSourceOps(
     llvm::SmallVectorImpl<mlir::Value> &results, unsigned resultNum) {
   auto oper = finalValue() ? resultNum : resultNum + 1;
@@ -1145,7 +1160,7 @@ static constexpr llvm::StringRef getTargetOffsetAttr() {
 template <typename A, typename... AdditionalArgs>
 static A getSubOperands(unsigned pos, A allArgs,
                         mlir::DenseIntElementsAttr ranges,
-                        AdditionalArgs &&...additionalArgs) {
+                        AdditionalArgs &&... additionalArgs) {
   unsigned start = 0;
   for (unsigned i = 0; i < pos; ++i)
     start += (*(ranges.begin() + i)).getZExtValue();
