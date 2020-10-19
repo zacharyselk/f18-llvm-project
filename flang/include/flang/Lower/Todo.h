@@ -38,11 +38,14 @@
 #define TODOQUOTE(X) #X
 
 // In a developer build, print a message and give a backtrace.
-#define TODO(ToDoMsg)                                                          \
+#undef TODODEFN
+#define TODODEFN(ToDoMsg, ToDoFile, ToDoLine)                                  \
   do {                                                                         \
     llvm::report_fatal_error(                                                  \
-        __FILE__ ":" TODOQUOTE(__LINE__) ": not yet implemented " ToDoMsg);    \
+        ToDoFile ":" TODOQUOTE(ToDoLine) ": not yet implemented " ToDoMsg);    \
   } while (false)
+
+#define TODO(ToDoMsg) TODODEFN(ToDoMsg, __FILE__, __LINE__)
 
 #endif
 
