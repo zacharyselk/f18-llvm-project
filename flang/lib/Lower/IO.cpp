@@ -233,30 +233,6 @@ static mlir::FuncOp getOutputFunc(mlir::Location loc,
   return {};
 }
 
-static mlir::Value genUnformattedBox(Fortran::lower::FirOpBuilder &builder,
-                                     mlir::Location loc,
-                                     const fir::ExtendedValue &itemBox,
-                                     mlir::Type itemTy) {
-  auto itemAddr = fir::getBase(itemBox);
-  auto boxTy = fir::BoxType::get(itemTy);
-  return itemBox.match(
-      [&](const fir::ArrayBoxValue &box) -> mlir::Value {
-        auto s = builder.createShape(loc, itemBox);
-        return builder.create<fir::EmboxOp>(loc, boxTy, itemAddr, s);
-      },
-      [&](const fir::CharArrayBoxValue &box) -> mlir::Value {
-        auto s = builder.createShape(loc, itemBox);
-        return builder.create<fir::EmboxOp>(loc, boxTy, itemAddr, s);
-      },
-      [&](const fir::BoxValue &box) -> mlir::Value {
-        auto s = builder.createShape(loc, itemBox);
-        return builder.create<fir::EmboxOp>(loc, boxTy, itemAddr, s);
-      },
-      [&](const auto &) -> mlir::Value {
-        return builder.create<fir::EmboxOp>(loc, boxTy, itemAddr);
-      });
-}
-
 /// Generate a sequence of output data transfer calls.
 static void
 genOutputItemList(Fortran::lower::AbstractConverter &converter,
@@ -285,12 +261,13 @@ genOutputItemList(Fortran::lower::AbstractConverter &converter,
     auto itemTy = converter.genType(*expr);
     auto outputFunc = getOutputFunc(loc, builder, itemTy, isFormatted);
     auto argType = outputFunc.getType().getInput(1);
+    assert((isFormatted || argType.isa<fir::BoxType>()) &&
+           "expect descriptor for unformatted IO runtime");
     llvm::SmallVector<mlir::Value, 3> outputFuncArgs = {cookie};
     Fortran::lower::CharacterExprHelper helper{builder, loc};
-    if (!isFormatted) {
+    if (argType.isa<fir::BoxType>()) {
       auto exv = converter.genExprAddr(expr, loc);
-      auto ty = fir::dyn_cast_ptrEleTy(fir::getBase(exv).getType());
-      auto box = genUnformattedBox(builder, loc, exv, ty);
+      auto box = builder.createBox(loc, exv);
       outputFuncArgs.push_back(builder.createConvert(loc, argType, box));
     } else if (helper.isCharacterScalar(itemTy)) {
       auto exv = converter.genExprAddr(expr, loc);
@@ -313,11 +290,6 @@ genOutputItemList(Fortran::lower::AbstractConverter &converter,
         outputFuncArgs.push_back(parts.first);
         outputFuncArgs.push_back(parts.second);
       } else {
-        if (argType.isa<fir::BoxType>()) {
-          mlir::Value shape = builder.createShape(loc, itemBox);
-          itemValue = builder.create<fir::EmboxOp>(
-              loc, fir::BoxType::get(itemTy), itemValue, shape);
-        }
         itemValue = builder.createConvert(loc, argType, itemValue);
         outputFuncArgs.push_back(itemValue);
       }
@@ -388,13 +360,8 @@ static void genInputItemList(Fortran::lower::AbstractConverter &converter,
     }
     auto inputFunc = getInputFunc(loc, builder, itemTy, isFormatted);
     auto argType = inputFunc.getType().getInput(1);
-    if (!isFormatted) {
-      itemAddr = genUnformattedBox(builder, loc, itemBox, itemTy);
-    } else if (argType.isa<fir::BoxType>()) {
-      auto shape = builder.createShape(loc, itemBox);
-      auto boxTy = fir::BoxType::get(itemTy);
-      itemAddr = builder.create<fir::EmboxOp>(loc, boxTy, itemAddr, shape);
-    }
+    if (argType.isa<fir::BoxType>())
+      itemAddr = builder.createBox(loc, itemBox);
     itemAddr = builder.createConvert(loc, argType, itemAddr);
     llvm::SmallVector<mlir::Value, 8> inputFuncArgs = {cookie, itemAddr};
     if (argType.isa<fir::BoxType>()) {
@@ -1214,30 +1181,6 @@ getBuffer(Fortran::lower::AbstractConverter &converter, mlir::Location loc,
   llvm::report_fatal_error("failed to get IoUnit expr in lowering");
 }
 
-/// Create a boxed value to be passed to the runtime. `descRef` is the reference
-/// to an entity that is to be boxed. Array entities are boxed with a shape.
-static mlir::Value getDescriptor(Fortran::lower::AbstractConverter &converter,
-                                 mlir::Location loc,
-                                 const fir::ExtendedValue &descRef,
-                                 mlir::Type toType) {
-  auto &builder = converter.getFirOpBuilder();
-  mlir::Value embox;
-  auto addr = fir::getBase(descRef);
-  auto eleTy = fir::dyn_cast_ptrEleTy(addr.getType());
-  if (!eleTy)
-    mlir::emitError(loc, "internal: expected a memory reference type ")
-        << addr.getType();
-  auto boxTy = fir::BoxType::get(eleTy);
-  mlir::Value shape;
-  if (descRef.match([](const fir::ArrayBoxValue &) { return true; },
-                    [](const fir::CharArrayBoxValue &) { return true; },
-                    [](const fir::BoxValue &) { return true; },
-                    [](const auto &) { return false; }))
-    shape = builder.createShape(loc, descRef);
-  embox = builder.create<fir::EmboxOp>(loc, boxTy, addr, shape);
-  return builder.createConvert(loc, toType, embox);
-}
-
 static mlir::Value genIOUnit(Fortran::lower::AbstractConverter &converter,
                              mlir::Location loc,
                              const Fortran::parser::IoUnit &iounit,
@@ -1510,8 +1453,9 @@ void genBeginCallArguments(llvm::SmallVector<mlir::Value, 8> &ioArgs,
       // descriptor, ...
       assert(!isNml && "namelist is not implemented");
       assert(descRef.hasValue() && "descriptor value required");
-      ioArgs.push_back(getDescriptor(converter, loc, *descRef,
-                                     ioFuncTy.getInput(ioArgs.size())));
+      auto desc = builder.createBox(loc, *descRef);
+      ioArgs.push_back(
+          builder.createConvert(loc, ioFuncTy.getInput(ioArgs.size()), desc));
       if (isNml) {
         // namelist group, ...
         llvm_unreachable("not implemented");

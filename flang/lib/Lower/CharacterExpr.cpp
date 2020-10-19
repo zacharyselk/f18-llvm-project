@@ -77,7 +77,7 @@ getCompileTimeLength(const fir::CharBoxValue &box) {
 
 /// Detect the precondition that the value `str` does not reside in memory. Such
 /// values will have a type `!fir.array<...x!fir.char<N>>` or `!fir.char<N>`.
-static bool needToMaterialize(mlir::Value str) {
+LLVM_ATTRIBUTE_UNUSED static bool needToMaterialize(mlir::Value str) {
   return str.getType().isa<fir::SequenceType>() ||
          str.getType().isa<fir::CharacterType>();
 }
@@ -623,6 +623,23 @@ bool Fortran::lower::CharacterExprHelper::isArray(mlir::Type type) {
     auto charTy = seqTy.getEleTy().dyn_cast<fir::CharacterType>();
     assert(charTy);
     return (!charTy.singleton()) || (seqTy.getDimension() > 1);
+  }
+  return false;
+}
+
+bool Fortran::lower::CharacterExprHelper::hasConstantLengthInType(
+    const fir::ExtendedValue &exv) {
+  auto type = fir::getBase(exv).getType();
+  if (auto boxTy = type.dyn_cast<fir::BoxType>())
+    type = boxTy.getEleTy();
+  if (auto eleTy = fir::dyn_cast_ptrEleTy(type))
+    type = eleTy;
+  if (auto seqTy = type.dyn_cast<fir::SequenceType>()) {
+    assert(seqTy.getEleTy().isa<fir::CharacterType>() &&
+           "entity is not a character");
+    assert(seqTy.getShape().size() > 0 && "character has empty shape");
+    auto lenVal = seqTy.getShape()[0];
+    return lenVal != fir::SequenceType::getUnknownExtent();
   }
   return false;
 }
