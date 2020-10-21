@@ -2104,11 +2104,10 @@ def fir_DoLoopOp : region_Op<"do_loop",
     Index:$upperBound,
     Index:$step,
     Variadic<AnyType>:$initArgs,
-    OptionalAttr<UnitAttr>:$unordered
+    OptionalAttr<UnitAttr>:$unordered,
+    OptionalAttr<UnitAttr>:$finalValue
   );
-  let results = (outs
-    Variadic<AnyType>:$results
-  );
+  let results = (outs Variadic<AnyType>:$results);
   let regions = (region SizedRegion<1>:$region);
 
   let skipDefaultBuilders = 1;
@@ -2116,12 +2115,15 @@ def fir_DoLoopOp : region_Op<"do_loop",
     OpBuilder<"mlir::OpBuilder &builder, OperationState &result,"
               "mlir::Value lowerBound, mlir::Value upperBound,"
               "mlir::Value step, bool unordered = false,"
-              "ValueRange iterArgs = llvm::None,"
+              "bool finalCountValue = false, ValueRange iterArgs = llvm::None,"
               "ArrayRef<NamedAttribute> attributes = {}">
   ];
 
   let extraClassDeclaration = [{
     static constexpr llvm::StringRef unorderedAttrName() { return "unordered"; }
+    static constexpr llvm::StringRef finalValueAttrName() {
+      return "finalValue";
+    }
 
     mlir::Value getInductionVar() { return getBody()->getArgument(0); }
     mlir::OpBuilder getBodyBuilder() {
@@ -2214,12 +2216,30 @@ def fir_IterWhileOp : region_Op<"iterate_while",
     [DeclareOpInterfaceMethods<LoopLikeOpInterface>]> {
   let summary = "DO loop with early exit condition";
   let description = [{
-    This construct is useful for lowering implied-DO loops. It is very similar
-    to `fir::DoLoopOp` with the addition that it requires a single loop-carried
-    bool value that signals an early exit condition to the operation. A `true`
-    disposition means the next loop iteration should proceed. A `false`
-    indicates that the `fir.iterate_while` operation should terminate and
-    return its iteration arguments.
+    This single-entry, single-exit looping construct is useful for lowering
+    counted loops that can exit early such as, for instance, implied-DO loops.
+    It is very similar to `fir::DoLoopOp` with the addition that it requires
+    a single loop-carried bool value that signals an early exit condition to
+    the operation. A `true` disposition means the next loop iteration should
+    proceed. A `false` indicates that the `fir.iterate_while` operation should
+    terminate and return its iteration arguments. This is a degenerate counted
+    loop in that the loop is not guaranteed to execute all iterations.
+
+    An example iterate_while that returns the counter value, the early
+    termination condition, and an extra loop-carried value is shown here. This
+    loop counts from %lo to %up (inclusive), stepping by %c1, so long as the
+    early exit (%ok) is true. The iter_args %sh value is also carried by the
+    loop. The result triple is the values of %i=phi(%lo,%i+%c1),
+    %ok=phi(%okIn,%okNew), and %sh=phi(%shIn,%shNew) from the last executed
+    iteration.
+    
+    ```mlir
+      %v:3 = fir.iterate_while (%i = %lo to %up step %c1) and (%ok = %okIn) iter_args(%sh = %shIn) -> (index, i1, i16) {
+        %shNew = fir.call @bar(%sh) : (i16) -> i16
+        %okNew = fir.call @foo(%sh) : (i16) -> i1
+        fir.result %i, %okNew, %shNew : index, i1, i16
+      }
+    ```
   }];
 
   let arguments = (ins
@@ -2227,12 +2247,10 @@ def fir_IterWhileOp : region_Op<"iterate_while",
     Index:$upperBound,
     Index:$step,
     I1:$iterateIn,
-    Variadic<AnyType>:$initArgs
+    Variadic<AnyType>:$initArgs,
+    OptionalAttr<UnitAttr>:$finalValue
   );
-  let results = (outs
-    I1:$iterateResult,
-    Variadic<AnyType>:$results
-  );
+  let results = (outs Variadic<AnyType>:$results);
   let regions = (region SizedRegion<1>:$region);
 
   let skipDefaultBuilders = 1;
@@ -2240,11 +2258,14 @@ def fir_IterWhileOp : region_Op<"iterate_while",
     OpBuilder<"mlir::OpBuilder &builder, OperationState &result,"
               "mlir::Value lowerBound, mlir::Value upperBound,"
 	      "mlir::Value step, mlir::Value iterate,"
-              "ValueRange iterArgs = llvm::None,"
+              "bool finalCountValue = false, ValueRange iterArgs = llvm::None,"
               "ArrayRef<NamedAttribute> attributes = {}">
   ];
 
   let extraClassDeclaration = [{
+    static constexpr llvm::StringRef finalValueAttrName() {
+      return "finalValue";
+    }
     mlir::Block *getBody() { return &region().front(); }
     mlir::Value getIterateVar() { return getBody()->getArgument(1); }
     mlir::Value getInductionVar() { return getBody()->getArgument(0); }
