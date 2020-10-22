@@ -117,16 +117,6 @@ Fortran::lower::CharacterExprHelper::materializeValue(mlir::Value str) {
   return {temp, len};
 }
 
-/// Use toExtendedValue to convert `character` to an extended value. This
-/// assumes `character` is scalar and unwraps the extended value into a CharBox
-/// value. This should not be used if `character` is an array.
-fir::CharBoxValue
-Fortran::lower::CharacterExprHelper::toDataLengthPair(mlir::Value character) {
-  auto *charBox = toExtendedValue(character).getCharBox();
-  assert(charBox && "Array unsupported in character lowering helper");
-  return *charBox;
-}
-
 fir::ExtendedValue
 Fortran::lower::CharacterExprHelper::toExtendedValue(mlir::Value character,
                                                      mlir::Value len) {
@@ -558,20 +548,12 @@ void Fortran::lower::CharacterExprHelper::createAssign(
   if (auto *str = rhs.getBoxOf<fir::CharBoxValue>()) {
     if (auto *to = lhs.getBoxOf<fir::CharBoxValue>()) {
       createAssign(*to, *str);
-    } else {
-      auto lhsPair = toDataLengthPair(fir::getBase(lhs));
-      createAssign(lhsPair, *str);
+      return;
     }
-  } else {
-    auto lhsPair = toDataLengthPair(fir::getBase(lhs));
-    auto rhsPair = toDataLengthPair(fir::getBase(rhs));
-    createAssign(lhsPair, rhsPair);
   }
-}
-
-mlir::Value
-Fortran::lower::CharacterExprHelper::createLenTrim(mlir::Value str) {
-  return createLenTrim(toDataLengthPair(str));
+  TODO("character array assignment");
+  // Note that it is not sure the array aspect should be handled
+  // by this utility.
 }
 
 mlir::Value
@@ -582,8 +564,15 @@ Fortran::lower::CharacterExprHelper::createEmboxChar(mlir::Value addr,
 
 std::pair<mlir::Value, mlir::Value>
 Fortran::lower::CharacterExprHelper::createUnboxChar(mlir::Value boxChar) {
-  auto box = toDataLengthPair(boxChar);
-  return {box.getBuffer(), box.getLen()};
+  using T = std::pair<mlir::Value, mlir::Value>;
+  return toExtendedValue(boxChar).match(
+      [](const fir::CharBoxValue &b) -> T {
+        return {b.getBuffer(), b.getLen()};
+      },
+      [](const fir::CharArrayBoxValue &b) -> T {
+        return {b.getBuffer(), b.getLen()};
+      },
+      [](const auto &) -> T { llvm::report_fatal_error("not a character"); });
 }
 
 bool Fortran::lower::CharacterExprHelper::isCharacterLiteral(mlir::Type type) {

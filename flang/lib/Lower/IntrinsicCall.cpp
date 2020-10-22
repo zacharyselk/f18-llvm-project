@@ -22,6 +22,7 @@
 #include "flang/Lower/FIRBuilder.h"
 #include "flang/Lower/Mangler.h"
 #include "flang/Lower/Runtime.h"
+#include "flang/Lower/Todo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <algorithm>
@@ -962,7 +963,7 @@ IntrinsicLibrary::getRuntimeCallGenerator(llvm::StringRef name,
              Fortran::lower::FirOpBuilder &builder, mlir::Location loc,
              llvm::ArrayRef<mlir::Value> args) {
     llvm::SmallVector<mlir::Value, 2> convertedArguments;
-    for (auto [fst,snd] : llvm::zip(actualFuncType.getInputs(), args))
+    for (auto [fst, snd] : llvm::zip(actualFuncType.getInputs(), args))
       convertedArguments.push_back(builder.createConvert(loc, fst, snd));
     auto call = builder.create<fir::CallOp>(loc, funcOp, convertedArguments);
     mlir::Type soughtType = soughtFuncType.getResult(0);
@@ -1268,7 +1269,10 @@ IntrinsicLibrary::genLenTrim(mlir::Type resultType,
   // Optional KIND argument reflected in result type.
   assert(args.size() >= 1);
   Fortran::lower::CharacterExprHelper helper{builder, loc};
-  auto len = helper.createLenTrim(fir::getBase(args[0]));
+  auto *charBox = args[0].getCharBox();
+  if (!charBox)
+    TODO("character array len_trim");
+  auto len = helper.createLenTrim(*charBox);
   return builder.createConvert(loc, resultType, len);
 }
 
