@@ -365,7 +365,7 @@ bool fir::ConvertOp::isFloatCompatible(mlir::Type ty) {
 bool fir::ConvertOp::isPointerCompatible(mlir::Type ty) {
   return ty.isa<fir::ReferenceType>() || ty.isa<fir::PointerType>() ||
          ty.isa<fir::HeapType>() || ty.isa<mlir::MemRefType>() ||
-         ty.isa<fir::TypeDescType>();
+         ty.isa<mlir::FunctionType>() || ty.isa<fir::TypeDescType>();
 }
 
 //===----------------------------------------------------------------------===//
