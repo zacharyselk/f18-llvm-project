@@ -153,7 +153,8 @@ Fortran::lower::CharacterExprHelper::toExtendedValue(mlir::Value character,
     if (!resultLen)
       resultLen = builder.createIntegerConstant(loc, lenType, 1);
   } else if (auto boxCharType = type.dyn_cast<fir::BoxCharType>()) {
-    auto refType = builder.getRefType(boxCharType.getEleTy());
+    auto refType =
+        builder.getRefType(builder.getVarLenSeqTy(boxCharType.getEleTy()));
     // If the embox is accessible, use its operand to avoid filling
     // the generated fir with embox/unbox.
     mlir::Value boxCharLen;
@@ -166,7 +167,7 @@ Fortran::lower::CharacterExprHelper::toExtendedValue(mlir::Value character,
     if (!boxCharLen) {
       auto unboxed =
           builder.create<fir::UnboxCharOp>(loc, refType, lenType, character);
-      base = unboxed.getResult(0);
+      base = builder.createConvert(loc, refType, unboxed.getResult(0));
       boxCharLen = unboxed.getResult(1);
     }
     if (!resultLen) {
@@ -187,7 +188,7 @@ Fortran::lower::CharacterExprHelper::toExtendedValue(mlir::Value character,
     }
   }
   if (!resultLen)
-    mlir::emitError(loc, "no dynamic length found for character");
+    llvm::report_fatal_error("no dynamic length found for character");
   if (!extents.empty())
     return fir::CharArrayBoxValue{base, resultLen, extents};
   return fir::CharBoxValue{base, resultLen};
@@ -342,6 +343,8 @@ void Fortran::lower::CharacterExprHelper::createPadding(
 fir::CharBoxValue
 Fortran::lower::CharacterExprHelper::createCharacterTemp(mlir::Type type,
                                                          mlir::Value len) {
+  if (auto seqTy = type.dyn_cast<fir::SequenceType>())
+    type = seqTy.getEleTy();
   assert(type.isa<fir::CharacterType>() && "expected fir character type");
   auto typeLen = fir::SequenceType::getUnknownExtent();
   // If len is a constant, reflect the length in the type.
@@ -520,6 +523,8 @@ mlir::Value Fortran::lower::CharacterExprHelper::createLenTrim(
 fir::CharBoxValue
 Fortran::lower::CharacterExprHelper::createCharacterTemp(mlir::Type type,
                                                          int len) {
+  if (auto seqTy = type.dyn_cast<fir::SequenceType>())
+    type = seqTy.getEleTy();
   assert(type.isa<fir::CharacterType>() && "expected fir character type");
   assert(len >= 0 && "expected positive length");
   fir::SequenceType::Shape shape{len};

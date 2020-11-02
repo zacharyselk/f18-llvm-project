@@ -137,7 +137,7 @@ struct IntrinsicLibrary {
   mlir::Value genExtremum(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genFloor(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genIAnd(mlir::Type, llvm::ArrayRef<mlir::Value>);
-  mlir::Value genIchar(mlir::Type, llvm::ArrayRef<mlir::Value>);
+  fir::ExtendedValue genIchar(mlir::Type, llvm::ArrayRef<fir::ExtendedValue>);
   mlir::Value genIEOr(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genIOr(mlir::Type, llvm::ArrayRef<mlir::Value>);
   fir::ExtendedValue genLen(mlir::Type, llvm::ArrayRef<fir::ExtendedValue>);
@@ -1194,32 +1194,34 @@ mlir::Value IntrinsicLibrary::genIAnd(mlir::Type resultType,
 }
 
 // ICHAR
-mlir::Value IntrinsicLibrary::genIchar(mlir::Type resultType,
-                                       llvm::ArrayRef<mlir::Value> args) {
+fir::ExtendedValue
+IntrinsicLibrary::genIchar(mlir::Type resultType,
+                           llvm::ArrayRef<fir::ExtendedValue> args) {
   // There can be an optional kind in second argument.
   assert(args.size() == 2);
+  auto charBox = args[0].getCharBox();
+  if (!charBox)
+    llvm::report_fatal_error("expected character scalar");
 
-  auto arg = args[0];
-  auto argTy = arg.getType();
-  assert(Fortran::lower::CharacterExprHelper::isCharacterScalar(argTy) &&
-         "Error: Unhandled type passed to ICHAR");
+  auto buffer = charBox->getBuffer();
+  auto bufferTy = buffer.getType();
   mlir::Value charVal;
-  if (auto charTy = argTy.dyn_cast<fir::CharacterType>()) {
+  if (auto charTy = bufferTy.dyn_cast<fir::CharacterType>()) {
     assert(charTy.singleton());
-    charVal = arg;
-  } else if (auto seqTy = argTy.dyn_cast<fir::SequenceType>()) {
+    charVal = buffer;
+  } else if (auto seqTy = bufferTy.dyn_cast<fir::SequenceType>()) {
     auto zero =
         builder.createIntegerConstant(loc, builder.getIntegerType(32), 0);
-    charVal = builder.create<fir::ExtractValueOp>(loc, seqTy.getEleTy(), arg,
+    charVal = builder.create<fir::ExtractValueOp>(loc, seqTy.getEleTy(), buffer,
                                                   mlir::ValueRange{zero});
   } else {
-    using H = Fortran::lower::CharacterExprHelper;
-    H helper{builder, loc};
-    auto dataAndLen = helper.createUnboxChar(arg);
-    // Strip away any sequence type residual.
-    auto toTy =
-        builder.getRefType(H::getCharacterType(dataAndLen.first.getType()));
-    auto cast = builder.createConvert(loc, toTy, dataAndLen.first);
+    // Character is in memory, cast to fir.ref<char> and load.
+    auto ty = fir::dyn_cast_ptrEleTy(bufferTy);
+    if (!ty)
+      llvm::report_fatal_error("expected memory type");
+    auto toTy = builder.getRefType(
+        Fortran::lower::CharacterExprHelper::getCharacterType(ty));
+    auto cast = builder.createConvert(loc, toTy, buffer);
     charVal = builder.create<fir::LoadOp>(loc, cast);
   }
   LLVM_DEBUG(llvm::dbgs() << "ichar(" << charVal << ")\n");
