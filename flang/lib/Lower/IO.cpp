@@ -482,25 +482,7 @@ static mlir::Value
 locationToFilename(Fortran::lower::AbstractConverter &converter,
                    mlir::Location loc, mlir::Type toType) {
   auto &builder = converter.getFirOpBuilder();
-  if (auto flc = loc.dyn_cast<mlir::FileLineColLoc>()) {
-    // must be encoded as asciiz, C string
-    auto fn = flc.getFilename().str() + '\0';
-    auto addr =
-        fir::getBase(createStringLiteral(loc, converter, fn, fn.size()));
-    return builder.createConvert(loc, toType, addr);
-  }
-  mlir::Value null =
-      builder.create<mlir::ConstantOp>(loc, builder.getI64IntegerAttr(0));
-  return builder.createConvert(loc, toType, null);
-}
-
-static mlir::Value locationToLineNo(Fortran::lower::FirOpBuilder &builder,
-                                    mlir::Location loc, mlir::Type toType) {
-  if (auto flc = loc.dyn_cast<mlir::FileLineColLoc>())
-    return builder.create<mlir::ConstantOp>(
-        loc, builder.getIntegerAttr(toType, flc.getLine()));
-  return builder.create<mlir::ConstantOp>(loc,
-                                          builder.getIntegerAttr(toType, 0));
+  return builder.createConvert(loc, toType, converter.locationToFilename(loc));
 }
 
 static mlir::Value getDefaultScratch(Fortran::lower::FirOpBuilder &builder,
@@ -1231,7 +1213,7 @@ static mlir::Value genBasicIOStmt(Fortran::lower::AbstractConverter &converter,
       getExpr<Fortran::parser::FileUnitNumber>(stmt), loc));
   auto un = builder.createConvert(loc, beginFuncTy.getInput(0), unit);
   auto file = locationToFilename(converter, loc, beginFuncTy.getInput(1));
-  auto line = locationToLineNo(builder, loc, beginFuncTy.getInput(2));
+  auto line = converter.locationToLineNo(loc, beginFuncTy.getInput(2));
   llvm::SmallVector<mlir::Value, 4> args{un, file, line};
   auto cookie = builder.create<fir::CallOp>(loc, beginFunc, args).getResult(0);
   ConditionSpecInfo csi;
@@ -1285,7 +1267,7 @@ Fortran::lower::genOpenStatement(Fortran::lower::AbstractConverter &converter,
     beginArgs.push_back(
         locationToFilename(converter, loc, beginFuncTy.getInput(1)));
     beginArgs.push_back(
-        locationToLineNo(builder, loc, beginFuncTy.getInput(2)));
+        converter.locationToLineNo(loc, beginFuncTy.getInput(2)));
   } else {
     assert(hasMem<Fortran::parser::ConnectSpec::Newunit>(stmt));
     beginFunc = getIORuntimeFunc<mkIOKey(BeginOpenNewUnit)>(loc, builder);
@@ -1293,7 +1275,7 @@ Fortran::lower::genOpenStatement(Fortran::lower::AbstractConverter &converter,
     beginArgs.push_back(
         locationToFilename(converter, loc, beginFuncTy.getInput(0)));
     beginArgs.push_back(
-        locationToLineNo(builder, loc, beginFuncTy.getInput(1)));
+        converter.locationToLineNo(loc, beginFuncTy.getInput(1)));
   }
   auto cookie =
       builder.create<fir::CallOp>(loc, beginFunc, beginArgs).getResult(0);
@@ -1546,7 +1528,7 @@ genDataTransferStmt(Fortran::lower::AbstractConverter &converter,
   ioArgs.push_back(
       locationToFilename(converter, loc, ioFuncTy.getInput(ioArgs.size())));
   ioArgs.push_back(
-      locationToLineNo(builder, loc, ioFuncTy.getInput(ioArgs.size())));
+      converter.locationToLineNo(loc, ioFuncTy.getInput(ioArgs.size())));
 
   // Arguments are done; call the BeginXyz function.
   mlir::Value cookie =
@@ -1792,7 +1774,7 @@ mlir::Value Fortran::lower::genInquireStatement(
                      loc, beginFuncTy.getInput(0),
                      fir::getBase(converter.genExprValue(exprPair.first, loc))),
                  locationToFilename(converter, loc, beginFuncTy.getInput(1)),
-                 locationToLineNo(builder, loc, beginFuncTy.getInput(2))};
+                 converter.locationToLineNo(loc, beginFuncTy.getInput(2))};
   } else if (inquireFileName()) {
     // Filename call.
     beginFunc = getIORuntimeFunc<mkIOKey(BeginInquireFile)>(loc, builder);
@@ -1802,7 +1784,7 @@ mlir::Value Fortran::lower::genInquireStatement(
         builder.createConvert(loc, beginFuncTy.getInput(0), fir::getBase(file)),
         builder.createConvert(loc, beginFuncTy.getInput(1), fir::getLen(file)),
         locationToFilename(converter, loc, beginFuncTy.getInput(2)),
-        locationToLineNo(builder, loc, beginFuncTy.getInput(3))};
+        converter.locationToLineNo(loc, beginFuncTy.getInput(3))};
   } else {
     // INQUIRE IOLENGTH call.
     const auto *ioLength =
@@ -1811,7 +1793,7 @@ mlir::Value Fortran::lower::genInquireStatement(
     beginFunc = getIORuntimeFunc<mkIOKey(BeginInquireIoLength)>(loc, builder);
     mlir::FunctionType beginFuncTy = beginFunc.getType();
     beginArgs = {locationToFilename(converter, loc, beginFuncTy.getInput(0)),
-                 locationToLineNo(builder, loc, beginFuncTy.getInput(1))};
+                 converter.locationToLineNo(loc, beginFuncTy.getInput(1))};
     // The IOLENGTH call is irregular enough to generate immediately here.
     mlir::Value cookie =
         builder.create<fir::CallOp>(loc, beginFunc, beginArgs).getResult(0);
