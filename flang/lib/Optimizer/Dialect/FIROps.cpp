@@ -561,6 +561,70 @@ mlir::ParseResult fir::GlobalOp::verifyValidLinkage(StringRef linkage) {
 }
 
 //===----------------------------------------------------------------------===//
+// InsertValueOp
+//===----------------------------------------------------------------------===//
+
+static bool checkIsIntegerConstant(mlir::Value v, int64_t conVal) {
+  if (auto c = dyn_cast_or_null<mlir::ConstantOp>(v.getDefiningOp())) {
+    auto attr = c.getValue();
+    if (auto iattr = attr.dyn_cast<mlir::IntegerAttr>())
+      return iattr.getInt() == conVal;
+  }
+  return false;
+}
+static bool isZero(mlir::Value v) { return checkIsIntegerConstant(v, 0); }
+static bool isOne(mlir::Value v) { return checkIsIntegerConstant(v, 1); }
+
+// These patterns are written by hand because the tablegen pattern language
+// isn't adequate here.
+template <typename FltOp, typename CpxOp>
+struct UndoComplexPattern : public mlir::RewritePattern {
+  UndoComplexPattern(mlir::MLIRContext *ctx)
+      : mlir::RewritePattern("fir.insert_value", {}, 2, ctx) {}
+
+  mlir::LogicalResult
+  matchAndRewrite(mlir::Operation *op,
+                  mlir::PatternRewriter &rewriter) const override {
+    auto insval = dyn_cast_or_null<fir::InsertValueOp>(op);
+    if (!insval || !insval.getType().isa<fir::ComplexType>())
+      return mlir::failure();
+    auto insval2 =
+        dyn_cast_or_null<fir::InsertValueOp>(insval.adt().getDefiningOp());
+    if (!insval2 || !isa<fir::UndefOp>(insval2.adt().getDefiningOp()))
+      return mlir::failure();
+    auto binf = dyn_cast_or_null<FltOp>(insval.val().getDefiningOp());
+    auto binf2 = dyn_cast_or_null<FltOp>(insval2.val().getDefiningOp());
+    if (!binf || !binf2 || insval.coor().size() != 1 ||
+        !isOne(insval.coor()[0]) || insval2.coor().size() != 1 ||
+        !isZero(insval2.coor()[0]))
+      return mlir::failure();
+    auto eai =
+        dyn_cast_or_null<fir::ExtractValueOp>(binf.lhs().getDefiningOp());
+    auto ebi =
+        dyn_cast_or_null<fir::ExtractValueOp>(binf.rhs().getDefiningOp());
+    auto ear =
+        dyn_cast_or_null<fir::ExtractValueOp>(binf2.lhs().getDefiningOp());
+    auto ebr =
+        dyn_cast_or_null<fir::ExtractValueOp>(binf2.rhs().getDefiningOp());
+    if (!eai || !ebi || !ear || !ebr || ear.adt() != eai.adt() ||
+        ebr.adt() != ebi.adt() || eai.coor().size() != 1 ||
+        !isOne(eai.coor()[0]) || ebi.coor().size() != 1 ||
+        !isOne(ebi.coor()[0]) || ear.coor().size() != 1 ||
+        !isZero(ear.coor()[0]) || ebr.coor().size() != 1 ||
+        !isZero(ebr.coor()[0]))
+      return mlir::failure();
+    rewriter.replaceOpWithNewOp<CpxOp>(op, ear.adt(), ebr.adt());
+    return mlir::success();
+  }
+};
+
+void fir::InsertValueOp::getCanonicalizationPatterns(
+    mlir::OwningRewritePatternList &results, mlir::MLIRContext *context) {
+  results.insert<UndoComplexPattern<fir::AddfOp, fir::AddcOp>,
+                 UndoComplexPattern<fir::SubfOp, fir::SubcOp>>(context);
+}
+
+//===----------------------------------------------------------------------===//
 // IterWhileOp
 //===----------------------------------------------------------------------===//
 
@@ -1033,7 +1097,7 @@ static constexpr llvm::StringRef getTargetOffsetAttr() {
 template <typename A, typename... AdditionalArgs>
 static A getSubOperands(unsigned pos, A allArgs,
                         mlir::DenseIntElementsAttr ranges,
-                        AdditionalArgs &&... additionalArgs) {
+                        AdditionalArgs &&...additionalArgs) {
   unsigned start = 0;
   for (unsigned i = 0; i < pos; ++i)
     start += (*(ranges.begin() + i)).getZExtValue();
