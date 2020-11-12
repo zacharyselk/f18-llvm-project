@@ -462,6 +462,11 @@ inline bool isa_char_string(mlir::Type t) {
   return false;
 }
 
+/// Is `t` a box type for which it is not possible to deduce the box size.
+/// It is not possible to deduce the size of a box that describes an entity
+/// of unknown rank or type.
+bool isa_unknown_size_box(mlir::Type t);
+
 } // namespace fir
 
 #endif // OPTIMIZER_DIALECT_FIRTYPE_H

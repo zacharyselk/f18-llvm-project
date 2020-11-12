@@ -1557,3 +1557,17 @@ void fir::printFirType(FIROpsDialect *, mlir::Type ty,
     return;
   }
 }
+
+bool fir::isa_unknown_size_box(mlir::Type t) {
+  if (auto boxTy = t.dyn_cast<fir::BoxType>()) {
+    auto eleTy = boxTy.getEleTy();
+    if (auto actualEleTy = fir::dyn_cast_ptrEleTy(eleTy))
+      eleTy = actualEleTy;
+    if (eleTy.isa<mlir::NoneType>())
+      return true;
+    if (auto seqTy = eleTy.dyn_cast<fir::SequenceType>())
+      if (seqTy.hasUnknownShape())
+        return true;
+  }
+  return false;
+}
