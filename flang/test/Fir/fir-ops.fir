@@ -571,12 +571,12 @@ func @arith_complex(%a : !fir.complex<16>, %b : !fir.complex<16>) -> !fir.comple
   return %5 : !fir.complex<16>
 }
 
-// CHECK-LABEL: func @character_literal() -> !fir.array<13x!fir.char<1>> {
-func @character_literal() -> !fir.array<13 x !fir.char<1>> {
-// CHECK: [[VAL_185:%.*]] = fir.string_lit "Hello, World!"(13) : !fir.char<1>
+// CHECK-LABEL: func @character_literal() -> !fir.char<1,13> {
+func @character_literal() -> !fir.char<1,13> {
+// CHECK: [[VAL_185:%.*]] = fir.string_lit "Hello, World!"(13) : !fir.char<1,13>
   %0 = fir.string_lit "Hello, World!"(13) : !fir.char<1>
-// CHECK: return [[VAL_185]] : !fir.array<13x!fir.char<1>>
-  return %0 : !fir.array<13 x !fir.char<1>>
+// CHECK: return [[VAL_185]] : !fir.char<1,13>
+  return %0 : !fir.char<1,13>
 // CHECK: }
 }
 

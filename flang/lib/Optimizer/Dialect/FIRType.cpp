@@ -85,7 +85,7 @@ BoxProcType parseBoxProc(mlir::DialectAsmParser &parser, mlir::Location loc) {
   return parseTypeSingleton<BoxProcType>(parser, loc);
 }
 
-// `char` `<` kind `>`
+// `char` `<` kind [`,` `len`] `>`
 CharacterType parseCharacter(mlir::DialectAsmParser &parser) {
   int kind = 0;
   if (parser.parseLess() || parser.parseInteger(kind)) {
@@ -93,15 +93,14 @@ CharacterType parseCharacter(mlir::DialectAsmParser &parser) {
     return {};
   }
   CharacterType::LenType len = 1;
-  if (mlir::succeeded(parser.parseOptionalComma()))
-    if (parser.parseInteger(len)) {
-      if (mlir::succeeded(parser.parseOptionalQuestion())) {
-        len = fir::CharacterType::unknownLen();
-      } else {
-        parser.emitError(parser.getCurrentLocation(), "len value expected");
-        return {};
-      }
+  if (mlir::succeeded(parser.parseOptionalComma())) {
+    if (mlir::succeeded(parser.parseOptionalQuestion())) {
+      len = fir::CharacterType::unknownLen();
+    } else if (!mlir::succeeded(parser.parseInteger(len))) {
+      parser.emitError(parser.getCurrentLocation(), "len value expected");
+      return {};
     }
+  }
   if (parser.parseGreater())
     return {};
   return CharacterType::get(parser.getBuilder().getContext(), kind, len);
@@ -695,9 +694,9 @@ struct BoxCharTypeStorage : public mlir::TypeStorage {
 
   KindTy getFKind() const { return kind; }
 
-  // a !fir.boxchar<k> always wraps a !fir.char<k>
+  // a !fir.boxchar<k> always wraps a !fir.char<k, ?>
   CharacterType getElementType(mlir::MLIRContext *ctxt) const {
-    return CharacterType::get(ctxt, getFKind());
+    return CharacterType::getUnknownLen(ctxt, getFKind());
   }
 
 protected:

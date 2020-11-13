@@ -110,8 +110,15 @@ public:
   using Base::Base;
   using LenType = std::int64_t;
 
-  static CharacterType get(mlir::MLIRContext *ctxt, KindTy kind,
-                           LenType len = 1);
+  static CharacterType get(mlir::MLIRContext *ctxt, KindTy kind, LenType len);
+  /// Return unknown length CHARACTER type.
+  static CharacterType getUnknownLen(mlir::MLIRContext *ctxt, KindTy kind) {
+    return get(ctxt, kind, unknownLen());
+  }
+  /// Return length 1 CHARACTER type.
+  static CharacterType getSingleton(mlir::MLIRContext *ctxt, KindTy kind) {
+    return get(ctxt, kind, singleton());
+  }
   KindTy getFKind() const;
 
   /// CHARACTER is a singleton and has a LEN of 1.

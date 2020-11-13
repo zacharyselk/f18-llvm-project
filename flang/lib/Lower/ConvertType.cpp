@@ -76,10 +76,12 @@ static mlir::Type genLogicalType(mlir::MLIRContext *context, int KIND) {
   return {};
 }
 
-static mlir::Type genCharacterType(mlir::MLIRContext *context, int KIND) {
+static mlir::Type genCharacterType(
+    mlir::MLIRContext *context, int KIND,
+    Fortran::lower::LenParameterTy len = fir::CharacterType::unknownLen()) {
   if (Fortran::evaluate::IsValidKindOfIntrinsicType(
           Fortran::common::TypeCategory::Character, KIND))
-    return fir::CharacterType::get(context, KIND);
+    return fir::CharacterType::get(context, KIND, len);
   return {};
 }
 
@@ -90,8 +92,10 @@ static mlir::Type genComplexType(mlir::MLIRContext *context, int KIND) {
   return {};
 }
 
-static mlir::Type genFIRType(mlir::MLIRContext *context,
-                             Fortran::common::TypeCategory tc, int kind) {
+static mlir::Type
+genFIRType(mlir::MLIRContext *context, Fortran::common::TypeCategory tc,
+           int kind,
+           llvm::ArrayRef<Fortran::lower::LenParameterTy> lenParameters) {
   switch (tc) {
   case Fortran::common::TypeCategory::Real:
     return genRealType(context, kind);
@@ -102,7 +106,10 @@ static mlir::Type genFIRType(mlir::MLIRContext *context,
   case Fortran::common::TypeCategory::Logical:
     return genLogicalType(context, kind);
   case Fortran::common::TypeCategory::Character:
-    return genCharacterType(context, kind);
+    if (!lenParameters.empty())
+      return genCharacterType(context, kind, lenParameters[0]);
+    else
+      return genCharacterType(context, kind);
   default:
     break;
   }
@@ -139,10 +146,10 @@ struct TypeBuilder {
       TODO("Assumed rank expression type lowering");
 
     // LOGICAL, INTEGER, REAL, COMPLEX, CHARACTER
-    auto baseType = genFIRType(context, category, dynamicType->kind());
+    llvm::SmallVector<Fortran::lower::LenParameterTy, 2> params;
+    translateLenParameters(params, category, expr);
+    auto baseType = genFIRType(context, category, dynamicType->kind(), params);
     fir::SequenceType::Shape shape;
-    if (category == Fortran::common::TypeCategory::Character)
-      shape.push_back(getCharacterLength(expr));
     translateShape(shape, std::move(*shapeExpr));
     if (!shape.empty())
       return fir::SequenceType::get(shape, baseType);
@@ -199,7 +206,9 @@ struct TypeBuilder {
     if (auto *type{symbol.GetType()}) {
       if (auto *tySpec{type->AsIntrinsic()}) {
         int kind = toInt64(Fortran::common::Clone(tySpec->kind())).value();
-        ty = genFIRType(context, tySpec->category(), kind);
+        llvm::SmallVector<Fortran::lower::LenParameterTy, 2> params;
+        translateLenParameters(params, tySpec->category(), symbol);
+        ty = genFIRType(context, tySpec->category(), kind, params);
       } else if (auto *tySpec = type->AsDerived()) {
         std::vector<std::pair<std::string, mlir::Type>> ps;
         std::vector<std::pair<std::string, mlir::Type>> cs;
@@ -225,16 +234,7 @@ struct TypeBuilder {
       if (!shapeExpr)
         TODO("assumed rank symbol type lowering");
       fir::SequenceType::Shape shape;
-      if (symbol.GetType()->category() ==
-          Fortran::semantics::DeclTypeSpec::Character)
-        shape.push_back(getCharacterLength(symbol));
       translateShape(shape, std::move(*shapeExpr));
-      ty = fir::SequenceType::get(shape, ty);
-    }
-
-    if (ty.isa<fir::CharacterType>()) {
-      auto charLen = getCharacterLength(symbol);
-      fir::SequenceType::Shape shape = {charLen};
       ty = fir::SequenceType::get(shape, ty);
     }
 
@@ -260,7 +260,18 @@ struct TypeBuilder {
       return *len;
     return fir::SequenceType::getUnknownExtent();
   }
-  fir::SequenceType::Extent
+
+  template <typename T>
+  void translateLenParameters(
+      llvm::SmallVectorImpl<Fortran::lower::LenParameterTy> &params,
+      Fortran::common::TypeCategory category, const T &exprOrSym) {
+    if (category == Fortran::common::TypeCategory::Character)
+      params.push_back(getCharacterLength(exprOrSym));
+    else if (category == Fortran::common::TypeCategory::Derived)
+      TODO("lowering derived type length parameters");
+    return;
+  }
+  Fortran::lower::LenParameterTy
   getCharacterLength(const Fortran::semantics::Symbol &symbol) {
     auto *type = symbol.GetType();
     if (!type ||
@@ -279,7 +290,7 @@ struct TypeBuilder {
     }
     llvm_unreachable("unknown character kind");
   }
-  fir::SequenceType::Extent
+  Fortran::lower::LenParameterTy
   getCharacterLength(const Fortran::lower::SomeExpr &expr) {
     // Do not use dynamic type length here. We would miss constant
     // lengths opportunities because dynamic type only has the length
@@ -303,8 +314,9 @@ struct TypeBuilder {
 
 mlir::Type Fortran::lower::getFIRType(mlir::MLIRContext *context,
                                       Fortran::common::TypeCategory tc,
-                                      int kind) {
-  return genFIRType(context, tc, kind);
+                                      int kind,
+                                      llvm::ArrayRef<LenParameterTy> params) {
+  return genFIRType(context, tc, kind, params);
 }
 
 mlir::Type Fortran::lower::translateSomeExprToFIRType(

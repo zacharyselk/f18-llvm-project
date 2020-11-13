@@ -23,28 +23,28 @@
 // CharacterExprHelper implementation
 //===----------------------------------------------------------------------===//
 
-template <bool checkForScalar>
+/// Unwrap base fir.char<kind,len> type.
 static fir::CharacterType recoverCharacterType(mlir::Type type) {
   if (auto boxType = type.dyn_cast<fir::BoxCharType>())
     return boxType.getEleTy();
-  if (auto refType = type.dyn_cast<fir::ReferenceType>())
-    type = refType.getEleTy();
-  if (auto seqType = type.dyn_cast<fir::SequenceType>()) {
-    // In a context where `type` may be a sequence, we want to opt out of this
-    // assertion by setting `checkForScalar` to `false`.
-    assert((!checkForScalar || seqType.getShape().size() == 1) &&
-           "rank must be 1 for a scalar CHARACTER");
-    type = seqType.getEleTy();
+  while (true) {
+    if (auto pointedType = fir::dyn_cast_ptrEleTy(type))
+      type = pointedType;
+    else if (auto boxTy = type.dyn_cast<fir::BoxType>())
+      type = boxTy.getEleTy();
+    else
+      break;
   }
-  if (auto charType = type.dyn_cast<fir::CharacterType>())
-    return charType;
-  llvm_unreachable("Invalid character value type");
+  if (auto seqType = type.dyn_cast<fir::SequenceType>())
+    type = seqType.getEleTy();
+  return type.cast<fir::CharacterType>();
 }
 
 /// Get fir.char<kind> type with the same kind as inside str.
 fir::CharacterType
 Fortran::lower::CharacterExprHelper::getCharacterType(mlir::Type type) {
-  return recoverCharacterType<true>(type);
+  assert(isCharacterScalar(type) && "expected scalar character");
+  return recoverCharacterType(type);
 }
 
 fir::CharacterType Fortran::lower::CharacterExprHelper::getCharacterType(
@@ -59,20 +59,12 @@ Fortran::lower::CharacterExprHelper::getCharacterType(mlir::Value str) {
 
 /// Determine the static size of the character. Returns the computed size, not
 /// an IR Value.
-static std::optional<fir::SequenceType::Extent>
+static std::optional<fir::CharacterType::LenType>
 getCompileTimeLength(const fir::CharBoxValue &box) {
-  auto type = box.getBuffer().getType();
-  if (type.isa<fir::CharacterType>())
-    return 1;
-  if (auto refType = type.dyn_cast<fir::ReferenceType>())
-    type = refType.getEleTy();
-  if (auto seqType = type.dyn_cast<fir::SequenceType>()) {
-    auto shape = seqType.getShape();
-    assert(shape.size() == 1 && "only scalar character supported");
-    if (shape[0] != fir::SequenceType::getUnknownExtent())
-      return shape[0];
-  }
-  return {};
+  auto len = recoverCharacterType(box.getBuffer().getType()).getLen();
+  if (len == fir::CharacterType::unknownLen())
+    return {};
+  return len;
 }
 
 /// Detect the precondition that the value `str` does not reside in memory. Such
@@ -82,34 +74,30 @@ LLVM_ATTRIBUTE_UNUSED static bool needToMaterialize(mlir::Value str) {
          str.getType().isa<fir::CharacterType>();
 }
 
+/// Unwrap integer constant from mlir::Value.
+static llvm::Optional<std::int64_t> getIntIfConstant(mlir::Value value) {
+  if (auto definingOp = value.getDefiningOp())
+    if (auto cst = mlir::dyn_cast<mlir::ConstantOp>(definingOp))
+      if (auto intAttr = cst.getValue().dyn_cast<mlir::IntegerAttr>())
+        return intAttr.getInt();
+  return {};
+}
+
 /// This is called only if `str` does not reside in memory. Such a bare string
 /// value will be converted into a memory-based temporary and an extended
 /// boxchar value returned.
 fir::CharBoxValue
 Fortran::lower::CharacterExprHelper::materializeValue(mlir::Value str) {
   assert(needToMaterialize(str));
-  mlir::Type eleTy;
-  fir::SequenceType::Shape shape;
-  if (auto seqTy = str.getType().dyn_cast<fir::SequenceType>()) {
-    // (1) `str` is a sequence type
-    assert(seqTy.getDimension() == 1 && "character is not a scalar");
-    eleTy = seqTy.getEleTy();
-    auto lenVal = seqTy.getShape()[0];
-    assert(lenVal != fir::SequenceType::getUnknownExtent());
-    shape.push_back(lenVal);
-  } else {
-    eleTy = str.getType();
-    if (auto chTy = eleTy.dyn_cast<fir::CharacterType>()) {
-      shape.push_back(chTy.getLen());
-    } else {
-      LLVM_DEBUG(llvm::dbgs() << "cannot materialize: " << str << '\n');
-      llvm_unreachable("must be a !fir.char<N> type");
-    }
+  auto ty = str.getType();
+  assert(isCharacterScalar(ty) && "expected scalar character");
+  auto charTy = ty.dyn_cast<fir::CharacterType>();
+  if (!charTy || charTy.getLen() == fir::CharacterType::unknownLen()) {
+    LLVM_DEBUG(llvm::dbgs() << "cannot materialize: " << str << '\n');
+    llvm_unreachable("must be a !fir.char<N> type");
   }
-  assert(eleTy && shape.size() == 1);
   auto len =
-      builder.createIntegerConstant(loc, builder.getIndexType(), shape[0]);
-  auto charTy = fir::SequenceType::get(shape, eleTy);
+      builder.createIntegerConstant(loc, getLengthType(), charTy.getLen());
   auto temp = builder.create<fir::AllocaOp>(loc, charTy);
   builder.create<fir::StoreOp>(loc, str, temp);
   LLVM_DEBUG(llvm::dbgs() << "materialized as local: " << str << " -> (" << temp
@@ -130,15 +118,9 @@ Fortran::lower::CharacterExprHelper::toExtendedValue(mlir::Value character,
     type = eleType;
 
   if (auto arrayType = type.dyn_cast<fir::SequenceType>()) {
-    auto shape = arrayType.getShape();
-    auto cstLen = shape[0];
-    if (!resultLen && cstLen != fir::SequenceType::getUnknownExtent())
-      resultLen = builder.createIntegerConstant(loc, lenType, cstLen);
-    // FIXME: only allow `?` in last dimension ?
-    auto typeExtents =
-        llvm::ArrayRef<fir::SequenceType::Extent>{shape}.drop_front();
+    type = arrayType;
     auto indexType = builder.getIndexType();
-    for (auto extent : typeExtents) {
+    for (auto extent : arrayType.getShape()) {
       if (extent == fir::SequenceType::getUnknownExtent())
         break;
       extents.emplace_back(
@@ -147,14 +129,15 @@ Fortran::lower::CharacterExprHelper::toExtendedValue(mlir::Value character,
     // Last extent might be missing in case of assumed-size. If more extents
     // could not be deduced from type, that's an error (a fir.box should
     // have been used in the interface).
-    if (extents.size() + 1 < typeExtents.size())
+    if (extents.size() + 1 < arrayType.getShape().size())
       mlir::emitError(loc, "cannot retrieve array extents from type");
-  } else if (type.isa<fir::CharacterType>()) {
-    if (!resultLen)
-      resultLen = builder.createIntegerConstant(loc, lenType, 1);
+  }
+
+  if (auto charTy = type.dyn_cast<fir::CharacterType>()) {
+    if (!resultLen && charTy.getLen() != fir::CharacterType::unknownLen())
+      resultLen = builder.createIntegerConstant(loc, lenType, charTy.getLen());
   } else if (auto boxCharType = type.dyn_cast<fir::BoxCharType>()) {
-    auto refType =
-        builder.getRefType(builder.getVarLenSeqTy(boxCharType.getEleTy()));
+    auto refType = builder.getRefType(boxCharType.getEleTy());
     // If the embox is accessible, use its operand to avoid filling
     // the generated fir with embox/unbox.
     mlir::Value boxCharLen;
@@ -194,44 +177,22 @@ Fortran::lower::CharacterExprHelper::toExtendedValue(mlir::Value character,
   return fir::CharBoxValue{base, resultLen};
 }
 
-/// Get canonical `!fir.ref<!fir.char<kind>>` type.
-mlir::Type
-Fortran::lower::CharacterExprHelper::getReferenceType(mlir::Value str) const {
-  return builder.getRefType(getCharacterType(str));
-}
-
-mlir::Type Fortran::lower::CharacterExprHelper::getReferenceType(
-    const fir::CharBoxValue &box) const {
-  return getReferenceType(box.getBuffer());
-}
-
-/// Get canonical `!fir.array<len x !fir.char<kind>>` type.
-mlir::Type
-Fortran::lower::CharacterExprHelper::getSeqTy(mlir::Value str) const {
-  if (auto ty = str.getType().dyn_cast<fir::SequenceType>())
-    return ty;
-  return builder.getRefType(builder.getVarLenSeqTy(getCharacterType(str)));
-}
-
-mlir::Type Fortran::lower::CharacterExprHelper::getSeqTy(
-    const fir::CharBoxValue &box) const {
-  return getSeqTy(box.getBuffer());
+static mlir::Type getSingletonCharType(mlir::MLIRContext *ctxt, int kind) {
+  return fir::CharacterType::getSingleton(ctxt, kind);
 }
 
 mlir::Value
 Fortran::lower::CharacterExprHelper::createEmbox(const fir::CharBoxValue &box) {
   // BoxChar require a reference. Base CharBoxValue of CharArrayBoxValue
   // are ok here (do not require a scalar type)
-  auto charTy = recoverCharacterType<false /* checkForScalar */>(
-      box.getBuffer().getType());
+  auto charTy = recoverCharacterType(box.getBuffer().getType());
   auto boxCharType =
       fir::BoxCharType::get(builder.getContext(), charTy.getFKind());
-  auto refType = fir::ReferenceType::get(charTy);
+  auto refType = fir::ReferenceType::get(boxCharType.getEleTy());
   auto buff = builder.createConvert(loc, refType, box.getBuffer());
   // Convert in case the provided length is not of the integer type that must
   // be used in boxchar.
-  auto lenType = getLengthType();
-  auto len = builder.createConvert(loc, lenType, box.getLen());
+  auto len = builder.createConvert(loc, getLengthType(), box.getLen());
   return builder.create<fir::EmboxCharOp>(loc, boxCharType, buff, len);
 }
 
@@ -250,10 +211,9 @@ fir::CharBoxValue Fortran::lower::CharacterExprHelper::toScalarCharacter(
 
   // TODO: typeLen can be improved in compiled constant cases
   // TODO: allow bare fir.array<> (no ref) conversion here ?
-  auto typeLen = fir::SequenceType::getUnknownExtent();
-  auto baseType = recoverCharacterType<false /* do not check for scalar arg*/>(
-      box.getBuffer().getType());
-  auto charTy = fir::SequenceType::get({typeLen}, baseType);
+  auto typeLen = fir::CharacterType::unknownLen();
+  auto kind = recoverCharacterType(box.getBuffer().getType()).getFKind();
+  auto charTy = fir::CharacterType::get(builder.getContext(), kind, typeLen);
   auto type = fir::ReferenceType::get(charTy);
   auto buffer = builder.createConvert(loc, type, box.getBuffer());
   return {buffer, len};
@@ -267,6 +227,32 @@ mlir::Value Fortran::lower::CharacterExprHelper::createEmbox(
   return createEmbox(static_cast<const fir::CharBoxValue &>(box));
 }
 
+/// Get the address of the element at position \p index of the scalar character
+/// \p buffer.
+/// \p buffer must be of type !fir.ref<fir.char<k, len>>. The length may be
+/// unknown. \p index must have any integer type, and is zero based. The return
+/// value is a singleton address (!fir.ref<!fir.char<kind>>)
+mlir::Value
+Fortran::lower::CharacterExprHelper::createElementAddr(mlir::Value buffer,
+                                                       mlir::Value index) {
+  // The only way to address an element of a fir.ref<char<kind, len>> is to cast
+  // it to a fir.array<len x fir.char<kind>> and use fir.coordinate_of.
+  auto bufferType = buffer.getType();
+  assert(fir::isa_ref_type(bufferType));
+  assert(isCharacterScalar(bufferType));
+  auto charTy = recoverCharacterType(bufferType);
+  auto singleTy = getSingletonCharType(builder.getContext(), charTy.getFKind());
+  auto singleRefTy = builder.getRefType(singleTy);
+  auto extent = fir::SequenceType::getUnknownExtent();
+  if (charTy.getLen() != fir::CharacterType::unknownLen())
+    extent = charTy.getLen();
+  auto coorTy = builder.getRefType(fir::SequenceType::get({extent}, singleTy));
+
+  auto coor = builder.createConvert(loc, coorTy, buffer);
+  auto i = builder.createConvert(loc, builder.getIndexType(), index);
+  return builder.create<fir::CoordinateOp>(loc, singleRefTy, coor, i);
+}
+
 /// Load a character out of `buff` from offset `index`.
 /// `buff` must be a reference to memory.
 mlir::Value
@@ -274,14 +260,10 @@ Fortran::lower::CharacterExprHelper::createLoadCharAt(mlir::Value buff,
                                                       mlir::Value index) {
   LLVM_DEBUG(llvm::dbgs() << "load a char: " << buff << " type: "
                           << buff.getType() << " at: " << index << '\n');
-  assert(fir::isa_ref_type(buff.getType()));
-  auto coor = builder.createConvert(loc, getSeqTy(buff), buff);
-  auto addr = builder.create<fir::CoordinateOp>(loc, getReferenceType(buff),
-                                                coor, index);
-  return builder.create<fir::LoadOp>(loc, addr);
+  return builder.create<fir::LoadOp>(loc, createElementAddr(buff, index));
 }
 
-/// Store the character `c` to `str` at offset `index`.
+/// Store the singleton character `c` to `str` at offset `index`.
 /// `str` must be a reference to memory.
 void Fortran::lower::CharacterExprHelper::createStoreCharAt(mlir::Value str,
                                                             mlir::Value index,
@@ -289,10 +271,7 @@ void Fortran::lower::CharacterExprHelper::createStoreCharAt(mlir::Value str,
   LLVM_DEBUG(llvm::dbgs() << "store the char: " << c << " into: " << str
                           << " type: " << str.getType() << " at: " << index
                           << '\n');
-  assert(fir::isa_ref_type(str.getType()));
-  auto buff = builder.createConvert(loc, getSeqTy(str), str);
-  auto addr = builder.create<fir::CoordinateOp>(loc, getReferenceType(str),
-                                                buff, index);
+  auto addr = createElementAddr(str, index);
   builder.create<fir::StoreOp>(loc, c, addr);
 }
 
@@ -304,7 +283,7 @@ void Fortran::lower::CharacterExprHelper::createStoreCharAt(mlir::Value str,
 mlir::Value Fortran::lower::CharacterExprHelper::getCharBoxBuffer(
     const fir::CharBoxValue &box) {
   auto buff = box.getBuffer();
-  if (buff.getType().isa<fir::SequenceType>()) {
+  if (buff.getType().isa<fir::CharacterType>()) {
     auto newBuff = builder.create<fir::AllocaOp>(loc, buff.getType());
     builder.create<fir::StoreOp>(loc, buff, newBuff);
     return newBuff;
@@ -343,17 +322,17 @@ void Fortran::lower::CharacterExprHelper::createPadding(
 fir::CharBoxValue
 Fortran::lower::CharacterExprHelper::createCharacterTemp(mlir::Type type,
                                                          mlir::Value len) {
-  if (auto seqTy = type.dyn_cast<fir::SequenceType>())
-    type = seqTy.getEleTy();
-  assert(type.isa<fir::CharacterType>() && "expected fir character type");
-  auto typeLen = fir::SequenceType::getUnknownExtent();
+  auto kind = recoverCharacterType(type).getFKind();
+  auto typeLen = fir::CharacterType::unknownLen();
   // If len is a constant, reflect the length in the type.
-  if (auto lenDefiningOp = len.getDefiningOp())
-    if (auto constantOp = dyn_cast<mlir::ConstantOp>(lenDefiningOp))
-      typeLen = constantOp.getValue().cast<::mlir::IntegerAttr>().getInt();
-  auto charTy = fir::SequenceType::get({typeLen}, type);
-  llvm::SmallVector<mlir::Value, 3> sizes{len};
-  auto ref = builder.allocateLocal(loc, charTy, llvm::StringRef{}, sizes);
+  if (auto cstLen = getIntIfConstant(len))
+    typeLen = *cstLen;
+  auto *ctxt = builder.getContext();
+  auto charTy = fir::CharacterType::get(ctxt, kind, typeLen);
+  llvm::SmallVector<mlir::Value, 1> lenParams;
+  if (typeLen == fir::CharacterType::unknownLen())
+    lenParams.push_back(len);
+  auto ref = builder.allocateLocal(loc, charTy, llvm::StringRef{}, lenParams);
   return {ref, len};
 }
 
@@ -362,17 +341,8 @@ void Fortran::lower::CharacterExprHelper::createLengthOneAssign(
     const fir::CharBoxValue &lhs, const fir::CharBoxValue &rhs) {
   auto addr = lhs.getBuffer();
   mlir::Value val = builder.create<fir::LoadOp>(loc, rhs.getBuffer());
-  auto valTy = val.getType();
-  // Precondition is rhs is size 1, but it may be wrapped in a fir.array.
-  if (auto seqTy = valTy.dyn_cast<fir::SequenceType>()) {
-    auto zero =
-        builder.createIntegerConstant(loc, builder.getIntegerType(32), 0);
-    valTy = seqTy.getEleTy();
-    val = builder.create<fir::ExtractValueOp>(loc, valTy, val, zero);
-  }
-  auto addrTy = fir::ReferenceType::get(valTy);
+  auto addrTy = builder.getRefType(val.getType());
   addr = builder.createConvert(loc, addrTy, addr);
-  assert(fir::dyn_cast_ptrEleTy(addr.getType()) == val.getType());
   builder.create<fir::StoreOp>(loc, val, addr);
 }
 
@@ -457,12 +427,11 @@ fir::CharBoxValue Fortran::lower::CharacterExprHelper::createSubstring(
   // FIR CoordinateOp is zero based but Fortran substring are one based.
   auto one = builder.createIntegerConstant(loc, lowerBound.getType(), 1);
   auto offset = builder.create<mlir::SubIOp>(loc, lowerBound, one).getResult();
-  auto idxType = builder.getIndexType();
-  if (offset.getType() != idxType)
-    offset = builder.createConvert(loc, idxType, offset);
-  auto buff = builder.createConvert(loc, getSeqTy(box), box.getBuffer());
-  auto substringRef = builder.create<fir::CoordinateOp>(
-      loc, getReferenceType(box), buff, offset);
+  auto addr = createElementAddr(box.getBuffer(), offset);
+  auto kind = getCharacterKind(box.getBuffer().getType());
+  auto charTy = fir::CharacterType::getUnknownLen(builder.getContext(), kind);
+  auto resultType = builder.getRefType(charTy);
+  auto substringRef = builder.createConvert(loc, resultType, addr);
 
   // Compute the length.
   mlir::Value substringLen;
@@ -523,13 +492,10 @@ mlir::Value Fortran::lower::CharacterExprHelper::createLenTrim(
 fir::CharBoxValue
 Fortran::lower::CharacterExprHelper::createCharacterTemp(mlir::Type type,
                                                          int len) {
-  if (auto seqTy = type.dyn_cast<fir::SequenceType>())
-    type = seqTy.getEleTy();
-  assert(type.isa<fir::CharacterType>() && "expected fir character type");
   assert(len >= 0 && "expected positive length");
-  fir::SequenceType::Shape shape{len};
-  auto seqType = fir::SequenceType::get(shape, type);
-  auto addr = builder.create<fir::AllocaOp>(loc, seqType);
+  auto kind = recoverCharacterType(type).getFKind();
+  auto charType = fir::CharacterType::get(builder.getContext(), kind, len);
+  auto addr = builder.create<fir::AllocaOp>(loc, charType);
   auto mlirLen = builder.createIntegerConstant(loc, getLengthType(), len);
   return {addr, mlirLen};
 }
@@ -545,7 +511,8 @@ mlir::Value Fortran::lower::CharacterExprHelper::createBlankConstantCode(
 
 mlir::Value Fortran::lower::CharacterExprHelper::createBlankConstant(
     fir::CharacterType type) {
-  return builder.createConvert(loc, type, createBlankConstantCode(type));
+  return createSingletonFromCode(createBlankConstantCode(type),
+                                 type.getFKind());
 }
 
 void Fortran::lower::CharacterExprHelper::createAssign(
@@ -590,50 +557,56 @@ bool Fortran::lower::CharacterExprHelper::isCharacterLiteral(mlir::Type type) {
 bool Fortran::lower::CharacterExprHelper::isCharacterScalar(mlir::Type type) {
   if (type.isa<fir::BoxCharType>())
     return true;
-  if (auto refType = type.dyn_cast<fir::ReferenceType>())
-    type = refType.getEleTy();
+  if (auto pointedType = fir::dyn_cast_ptrEleTy(type))
+    type = pointedType;
+  if (auto boxTy = type.dyn_cast<fir::BoxType>())
+    type = boxTy.getEleTy();
+  if (auto pointedType = fir::dyn_cast_ptrEleTy(type))
+    type = pointedType;
   if (auto seqType = type.dyn_cast<fir::SequenceType>())
-    if (seqType.getShape().size() == 1)
-      type = seqType.getEleTy();
+    return false;
   return type.isa<fir::CharacterType>();
 }
 
 fir::KindTy
 Fortran::lower::CharacterExprHelper::getCharacterKind(mlir::Type type) {
-  return recoverCharacterType<true>(type).getFKind();
+  assert(isCharacterScalar(type) && "expected scalar character");
+  return recoverCharacterType(type).getFKind();
 }
 
 fir::KindTy Fortran::lower::CharacterExprHelper::getCharacterOrSequenceKind(
     mlir::Type type) {
-  return recoverCharacterType<false>(type).getFKind();
+  return recoverCharacterType(type).getFKind();
 }
 
 bool Fortran::lower::CharacterExprHelper::isArray(mlir::Type type) {
-  if (auto boxTy = type.dyn_cast<fir::BoxType>())
-    type = boxTy.getEleTy();
-  if (auto eleTy = fir::dyn_cast_ptrEleTy(type))
-    type = eleTy;
-  if (auto seqTy = type.dyn_cast<fir::SequenceType>()) {
-    auto charTy = seqTy.getEleTy().dyn_cast<fir::CharacterType>();
-    assert(charTy);
-    return (!charTy.singleton()) || (seqTy.getDimension() > 1);
-  }
-  return false;
+  return !isCharacterScalar(type);
 }
 
 bool Fortran::lower::CharacterExprHelper::hasConstantLengthInType(
     const fir::ExtendedValue &exv) {
-  auto type = fir::getBase(exv).getType();
-  if (auto boxTy = type.dyn_cast<fir::BoxType>())
-    type = boxTy.getEleTy();
-  if (auto eleTy = fir::dyn_cast_ptrEleTy(type))
-    type = eleTy;
-  if (auto seqTy = type.dyn_cast<fir::SequenceType>()) {
-    assert(seqTy.getEleTy().isa<fir::CharacterType>() &&
-           "entity is not a character");
-    assert(seqTy.getShape().size() > 0 && "character has empty shape");
-    auto lenVal = seqTy.getShape()[0];
-    return lenVal != fir::SequenceType::getUnknownExtent();
-  }
-  return false;
+  auto charTy = recoverCharacterType(fir::getBase(exv).getType());
+  return charTy.getLen() != fir::CharacterType::unknownLen();
+}
+
+mlir::Value
+Fortran::lower::CharacterExprHelper::createSingletonFromCode(mlir::Value code,
+                                                             int kind) {
+  auto charType = fir::CharacterType::get(builder.getContext(), kind, 1);
+  auto bits = builder.getKindMap().getCharacterBitsize(kind);
+  auto intType = builder.getIntegerType(bits);
+  auto cast = builder.createConvert(loc, intType, code);
+  auto undef = builder.create<fir::UndefOp>(loc, charType);
+  auto zero = builder.createIntegerConstant(loc, builder.getIndexType(), 0);
+  return builder.create<fir::InsertValueOp>(loc, charType, undef, cast, zero);
+}
+
+mlir::Value Fortran::lower::CharacterExprHelper::extractCodeFromSingleton(
+    mlir::Value singleton) {
+  auto type = getCharacterType(singleton);
+  assert(type.getLen() == 1);
+  auto bits = builder.getKindMap().getCharacterBitsize(type.getFKind());
+  auto intType = builder.getIntegerType(bits);
+  auto zero = builder.createIntegerConstant(loc, builder.getIndexType(), 0);
+  return builder.create<fir::ExtractValueOp>(loc, intType, singleton, zero);
 }

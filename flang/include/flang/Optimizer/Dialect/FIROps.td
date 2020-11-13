@@ -64,7 +64,8 @@ def fir_SequenceType : Type<CPred<"$_self.isa<fir::SequenceType>()">,
 // Composable types
 def AnyCompositeLike : TypeConstraint<Or<[fir_RecordType.predicate,
     fir_SequenceType.predicate, fir_ComplexType.predicate,
-    fir_VectorType.predicate, IsTupleTypePred]>, "any composite">;
+    fir_VectorType.predicate, IsTupleTypePred, fir_CharacterType.predicate]>,
+      "any composite">;
 
 // Reference to an entity type
 def fir_ReferenceType : Type<CPred<"$_self.isa<fir::ReferenceType>()">,
@@ -1127,21 +1128,22 @@ def fir_EmboxOp : fir_Op<"embox", [NoSideEffect, AttrSizedOperandSegments]> {
     auto eleTy = fir::dyn_cast_ptrEleTy(memref().getType());
     if (!eleTy)
       return emitOpError("must embox a memory reference type");
+    bool isArray = false;
+    if (auto seqTy = eleTy.dyn_cast<fir::SequenceType>()) {
+      eleTy = seqTy.getEleTy();
+      isArray = true;
+    }
     if (hasLenParams()) {
       auto lenPs = numLenParams();
       if (auto rt = eleTy.dyn_cast<fir::RecordType>()) {
         if (lenPs != rt.getNumLenParams())
           return emitOpError("number of LEN params does not correspond"
                              " to the !fir.type type");
+      } else if (auto strTy = eleTy.dyn_cast<fir::CharacterType>()) {
+        if (strTy.getLen() != fir::CharacterType::unknownLen())
+          return emitOpError("CHARACTER already has static LEN");
       } else {
-        if (auto strTy = eleTy.dyn_cast<fir::SequenceType>()) {
-          if (!strTy.getEleTy().isa<fir::CharacterType>())
-            return emitOpError("LEN parameters require CHARACTER type");
-          if (strTy.getShape()[0] != fir::SequenceType::getUnknownExtent())
-            return emitOpError("CHARACTER already has static LEN");
-        } else {
-          return emitOpError("LEN parameters require !fir.type type");
-        }
+          return emitOpError("LEN parameters require CHARACTER or derived type");
       }
       for (auto lp : lenParams())
         if (!fir::isa_integer(lp.getType()))
@@ -1151,11 +1153,15 @@ def fir_EmboxOp : fir_Op<"embox", [NoSideEffect, AttrSizedOperandSegments]> {
       auto shapeTy = getShape().getType();
       if (!(shapeTy.isa<fir::ShapeType>() || shapeTy.isa<ShapeShiftType>()))
         return emitOpError("must be shape or shapeshift type");
+      if (!isArray)
+        return emitOpError("shape must not be provided for a scalar");
     }
     if (getSlice()) {
       auto sliceTy = getSlice().getType();
       if (!sliceTy.isa<fir::SliceType>())
         return emitOpError("must be a slice type");
+      if (!isArray)
+        return emitOpError("slice must not be provided for a scalar");
     }
     return mlir::success();
   }];
@@ -1989,6 +1995,8 @@ def fir_ExtractValueOp : fir_OneResultOp<"extract_value", [NoSideEffect]> {
     Extract a value from an entity with a type composed of tuples, arrays,
     and/or derived types. Returns the value from entity with the type of the
     specified component. Cannot be used on values of `!fir.box` type.
+    It can also be used to access complex parts and elements of a character
+    string.
 
     Note that the entity ssa-value must be of compile-time known size in order
     to use this operation.
@@ -2227,6 +2235,8 @@ def fir_InsertValueOp : fir_OneResultOp<"insert_value", [NoSideEffect]> {
     Insert a value into an entity with a type composed of tuples, arrays,
     and/or derived types. Returns a new ssa value with the same type as the
     original entity. Cannot be used on values of `!fir.box` type.
+    It can also be used to set complex parts and elements of a character
+    string.
 
     Note that the entity ssa-value must be of compile-time known size in order
     to use this operation.
@@ -2759,7 +2769,7 @@ def fir_StringLitOp : fir_Op<"string_lit", [NoSideEffect]> {
     ```
   }];
 
-  let results = (outs fir_SequenceType);
+  let results = (outs fir_CharacterType);
 
   let parser = [{
     auto &builder = parser.getBuilder();
@@ -2781,10 +2791,11 @@ def fir_StringLitOp : fir_Op<"string_lit", [NoSideEffect]> {
         parser.parseRParen() ||
         parser.parseColonType(type))
       return mlir::failure();
-    if (!(type.isa<fir::CharacterType>() || type.isa<mlir::IntegerType>()))
+    auto charTy = type.dyn_cast<fir::CharacterType>();
+    if (!charTy)
       return parser.emitError(parser.getCurrentLocation(),
                               "must have character type");
-    type = fir::SequenceType::get({sz.getInt()}, type);
+    type = fir::CharacterType::get(builder.getContext(), charTy.getFKind(), sz.getInt());
     if (!type || parser.addTypesToList(type, result.types))
       return mlir::failure();
     return mlir::success();
@@ -2793,15 +2804,12 @@ def fir_StringLitOp : fir_Op<"string_lit", [NoSideEffect]> {
   let printer = [{
     p << getOperationName() << ' ' << getValue() << '(';
     p << getSize().cast<mlir::IntegerAttr>().getValue() << ") : ";
-    p.printType(getType().cast<fir::SequenceType>().getEleTy());
+    p.printType(getType());
   }];
 
   let verifier = [{
     if (getSize().cast<mlir::IntegerAttr>().getValue().isNegative())
       return emitOpError("size must be non-negative");
-    auto eleTy = getType().cast<fir::SequenceType>().getEleTy();
-    if (!eleTy.isa<fir::CharacterType>())
-      return emitOpError("must have !fir.char type");
     if (auto xl = (*this)->getAttr(xlist())) {
       auto xList = xl.cast<mlir::ArrayAttr>();
       for (auto a : xList)

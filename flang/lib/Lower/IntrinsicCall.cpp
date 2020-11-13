@@ -1102,15 +1102,10 @@ IntrinsicLibrary::genChar(mlir::Type type,
   if (!arg)
     mlir::emitError(loc, "CHAR intrinsic argument not unboxed");
   Fortran::lower::CharacterExprHelper helper{builder, loc};
-  auto eleType = helper.getCharacterType(type);
-  auto cast = builder.createConvert(loc, eleType, *arg);
-  auto charType = fir::SequenceType::get({1}, eleType);
-  auto undef = builder.create<fir::UndefOp>(loc, charType);
-  auto zero = builder.createIntegerConstant(loc, builder.getIndexType(), 0);
-  auto val =
-      builder.create<fir::InsertValueOp>(loc, charType, undef, cast, zero);
+  auto kind = helper.getCharacterType(type).getFKind();
+  auto cast = helper.createSingletonFromCode(*arg, kind);
   auto len = builder.createIntegerConstant(loc, helper.getLengthType(), 1);
-  return fir::CharBoxValue{val, len};
+  return fir::CharBoxValue{cast, len};
 }
 
 // CONJG
@@ -1203,29 +1198,30 @@ IntrinsicLibrary::genIchar(mlir::Type resultType,
   if (!charBox)
     llvm::report_fatal_error("expected character scalar");
 
+  Fortran::lower::CharacterExprHelper helper{builder, loc};
   auto buffer = charBox->getBuffer();
   auto bufferTy = buffer.getType();
   mlir::Value charVal;
   if (auto charTy = bufferTy.dyn_cast<fir::CharacterType>()) {
     assert(charTy.singleton());
     charVal = buffer;
-  } else if (auto seqTy = bufferTy.dyn_cast<fir::SequenceType>()) {
-    auto zero =
-        builder.createIntegerConstant(loc, builder.getIntegerType(32), 0);
-    charVal = builder.create<fir::ExtractValueOp>(loc, seqTy.getEleTy(), buffer,
-                                                  mlir::ValueRange{zero});
   } else {
     // Character is in memory, cast to fir.ref<char> and load.
     auto ty = fir::dyn_cast_ptrEleTy(bufferTy);
     if (!ty)
       llvm::report_fatal_error("expected memory type");
-    auto toTy = builder.getRefType(
-        Fortran::lower::CharacterExprHelper::getCharacterType(ty));
+    // The length of in the character type may be unknown. Casting
+    // to a singleton ref is required before loading.
+    auto eleType = helper.getCharacterType(ty);
+    auto charType =
+        fir::CharacterType::get(builder.getContext(), eleType.getFKind(), 1);
+    auto toTy = builder.getRefType(charType);
     auto cast = builder.createConvert(loc, toTy, buffer);
     charVal = builder.create<fir::LoadOp>(loc, cast);
   }
   LLVM_DEBUG(llvm::dbgs() << "ichar(" << charVal << ")\n");
-  return builder.createConvert(loc, resultType, charVal);
+  auto code = helper.extractCodeFromSingleton(charVal);
+  return builder.createConvert(loc, resultType, code);
 }
 
 // IEOR
