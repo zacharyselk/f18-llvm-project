@@ -57,7 +57,7 @@ def FirLoopResultOpt : FunctionPass<"fir-loop-result-opt"> {
   let constructor = "::fir::createFirLoopResultOptPass()";
 }
 
-def MemRefDataFlowOpt : FunctionPass<"flang-memref-dataflow-opt"> {
+def MemRefDataFlowOpt : FunctionPass<"fir-memref-dataflow-opt"> {
   let summary = "Perform store/load forwarding and potentially removing dead stores.";
   let description = [{
     This pass performs store to load forwarding to eliminate memory accesses and

@@ -95,31 +95,35 @@ compileFIR(const mlir::PassPipelineCLParser &passPipeline) {
   fir::setTargetTriple(*owningRef, triple);
   fir::setNameUniquer(*owningRef, uniquer);
   fir::setKindMapping(*owningRef, kindMap);
-  mlir::PassManager pm{&context};
+  mlir::PassManager pm(&context, mlir::OpPassManager::Nesting::Implicit);
+  pm.enableVerifier(/*verifyPasses=*/true);
   mlir::applyPassManagerCLOptions(pm);
   if (emitFir) {
     // parse the input and pretty-print it back out
     // -emit-fir intentionally disables all the passes
   } else if (passPipeline.hasAnyOccurrences()) {
-    passPipeline.addToPipeline(pm);
+    passPipeline.addToPipeline(pm, [&](const Twine &msg) {
+      mlir::emitError(mlir::UnknownLoc::get(&context)) << msg;
+      return mlir::failure();
+    });
   } else {
     // simplify the IR
-    pm.addPass(fir::createArrayValueCopyPass());
+    pm.addNestedPass<mlir::FuncOp>(fir::createArrayValueCopyPass());
     pm.addPass(mlir::createCanonicalizerPass());
-    pm.addPass(fir::createCSEPass());
+    pm.addNestedPass<mlir::FuncOp>(fir::createCSEPass());
     pm.addPass(mlir::createInlinerPass());
     pm.addPass(mlir::createCSEPass());
 
     // convert control flow to CFG form
-    pm.addPass(fir::createFirToCfgPass());
-    pm.addPass(fir::createControlFlowLoweringPass());
+    pm.addNestedPass<mlir::FuncOp>(fir::createFirToCfgPass());
+    pm.addNestedPass<mlir::FuncOp>(fir::createControlFlowLoweringPass());
     pm.addPass(mlir::createLowerToCFGPass());
 
     pm.addPass(mlir::createCanonicalizerPass());
-    pm.addPass(fir::createCSEPass());
+    pm.addNestedPass<mlir::FuncOp>(fir::createCSEPass());
 
     // pm.addPass(fir::createMemToRegPass());
-    pm.addPass(fir::createFirCodeGenRewritePass());
+    pm.addNestedPass<mlir::FuncOp>(fir::createFirCodeGenRewritePass());
     pm.addPass(fir::createFirTargetRewritePass());
     pm.addPass(fir::createFIRToLLVMPass(uniquer));
     pm.addPass(fir::createLLVMDialectToLLVMPass(out.os()));
@@ -145,7 +149,7 @@ int main(int argc, char **argv) {
   fir::registerOptPasses();
 
   [[maybe_unused]] InitLLVM y(argc, argv);
-  llvm::InitializeAllTargets();
+  InitializeAllTargets();
   mlir::registerAsmPrinterCLOptions();
   mlir::registerMLIRContextCLOptions();
   mlir::registerPassManagerCLOptions();
