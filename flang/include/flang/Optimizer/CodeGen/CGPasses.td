@@ -16,7 +16,7 @@
 
 include "mlir/Pass/PassBase.td"
 
-def CodeGenRewrite : FunctionPass<"cg-rewrite"> {
+def CodeGenRewrite : Pass<"cg-rewrite", "mlir::ModuleOp"> {
   let summary = "Rewrite some FIR ops into their code-gen forms.";
   let description = [{
     Fuse specific subgraphs into single Ops for code generation.

@@ -511,8 +511,8 @@ def fir_StoreOp : fir_Op<"store", []> {
   let verifier = [{
     if (value().getType() != fir::dyn_cast_ptrEleTy(memref().getType()))
       return emitOpError("store value type must match memory reference type");
-    if (fir::isa_box_type(value().getType()))
-      return emitOpError("!fir.box cannot be stored");
+    if (fir::isa_unknown_size_box(value().getType()))
+      return emitOpError("cannot store !fir.box of unknown rank or type");
     return mlir::success();
   }];
 
