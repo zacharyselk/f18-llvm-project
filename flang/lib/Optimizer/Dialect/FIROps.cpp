@@ -1824,7 +1824,9 @@ mlir::FuncOp fir::createFuncOp(mlir::Location loc, mlir::ModuleOp module,
     return f;
   mlir::OpBuilder modBuilder(module.getBodyRegion());
   modBuilder.setInsertionPoint(module.getBody()->getTerminator());
-  return modBuilder.create<mlir::FuncOp>(loc, name, type, attrs);
+  auto result = modBuilder.create<mlir::FuncOp>(loc, name, type, attrs);
+  result.setVisibility(mlir::SymbolTable::Visibility::Private);
+  return result;
 }
 
 fir::GlobalOp fir::createGlobalOp(mlir::Location loc, mlir::ModuleOp module,
@@ -1833,7 +1835,9 @@ fir::GlobalOp fir::createGlobalOp(mlir::Location loc, mlir::ModuleOp module,
   if (auto g = module.lookupSymbol<fir::GlobalOp>(name))
     return g;
   mlir::OpBuilder modBuilder(module.getBodyRegion());
-  return modBuilder.create<fir::GlobalOp>(loc, name, type, attrs);
+  auto result = modBuilder.create<fir::GlobalOp>(loc, name, type, attrs);
+  result.setVisibility(mlir::SymbolTable::Visibility::Private);
+  return result;
 }
 
 // Tablegen operators
