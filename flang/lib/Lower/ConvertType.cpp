@@ -203,11 +203,18 @@ struct TypeBuilder {
                            bool isAlloc = false, bool isPtr = false) {
     auto loc = converter.genLocation(symbol.name());
     mlir::Type ty;
-    if (auto *type{symbol.GetType()}) {
+    // If the symbol is not the same as the ultimate one (i.e, it is host or use
+    // associated), all the symbol properties are the ones of the ultimate
+    // symbol but the volatile and asynchronous attributes that may differ. To
+    // avoid issues with helper functions that would not follow association
+    // links, the fir type is built based on the ultimate symbol. This relies
+    // on the fact volatile and asynchronous are not reflected in fir types.
+    const auto &ultimate = symbol.GetUltimate();
+    if (auto *type{ultimate.GetType()}) {
       if (auto *tySpec{type->AsIntrinsic()}) {
         int kind = toInt64(Fortran::common::Clone(tySpec->kind())).value();
         llvm::SmallVector<Fortran::lower::LenParameterTy, 2> params;
-        translateLenParameters(params, tySpec->category(), symbol);
+        translateLenParameters(params, tySpec->category(), ultimate);
         ty = genFIRType(context, tySpec->category(), kind, params);
       } else if (auto *tySpec = type->AsDerived()) {
         std::vector<std::pair<std::string, mlir::Type>> ps;
@@ -228,9 +235,9 @@ struct TypeBuilder {
       mlir::emitError(loc, "symbol must have a type");
       return {};
     }
-    if (symbol.IsObjectArray()) {
+    if (ultimate.IsObjectArray()) {
       auto shapeExpr = Fortran::evaluate::GetShapeHelper{
-          converter.getFoldingContext()}(symbol);
+          converter.getFoldingContext()}(ultimate);
       if (!shapeExpr)
         TODO("assumed rank symbol type lowering");
       fir::SequenceType::Shape shape;
@@ -238,9 +245,9 @@ struct TypeBuilder {
       ty = fir::SequenceType::get(shape, ty);
     }
 
-    if (isPtr || Fortran::semantics::IsPointer(symbol))
+    if (isPtr || Fortran::semantics::IsPointer(ultimate))
       ty = fir::PointerType::get(ty);
-    else if (isAlloc || Fortran::semantics::IsAllocatable(symbol))
+    else if (isAlloc || Fortran::semantics::IsAllocatable(ultimate))
       ty = fir::HeapType::get(ty);
     return ty;
   }
