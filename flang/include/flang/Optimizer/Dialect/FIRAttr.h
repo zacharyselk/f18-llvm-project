@@ -13,7 +13,7 @@
 #ifndef OPTIMIZER_DIALECT_FIRATTR_H
 #define OPTIMIZER_DIALECT_FIRATTR_H
 
-#include "mlir/IR/Attributes.h"
+#include "mlir/IR/BuiltinAttributes.h"
 
 namespace mlir {
 class DialectAsmParser;

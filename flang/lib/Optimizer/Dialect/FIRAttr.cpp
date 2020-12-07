@@ -15,7 +15,7 @@
 #include "flang/Optimizer/Support/KindMapping.h"
 #include "mlir/IR/AttributeSupport.h"
 #include "mlir/IR/DialectImplementation.h"
-#include "mlir/IR/Types.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/SmallString.h"
 
 using namespace fir;

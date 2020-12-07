@@ -9,7 +9,7 @@
 #include "flang/Optimizer/Support/InternalNames.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
 #include "mlir/IR/Diagnostics.h"
-#include "mlir/IR/StandardTypes.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "llvm/Support/CommandLine.h"
 
 static llvm::cl::opt<std::string> mainEntryName(

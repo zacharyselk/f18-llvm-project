@@ -470,7 +470,7 @@ static ParseResult parseGlobalOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   if (mlir::succeeded(parser.parseOptionalKeyword(&linkage))) {
     if (fir::GlobalOp::verifyValidLinkage(linkage))
-      return failure();
+      return mlir::failure();
     mlir::StringAttr linkAttr = builder.getStringAttr(linkage);
     result.addAttribute(fir::GlobalOp::linkageAttrName(), linkAttr);
   }
@@ -479,7 +479,7 @@ static ParseResult parseGlobalOp(OpAsmParser &parser, OperationState &result) {
   mlir::SymbolRefAttr nameAttr;
   if (parser.parseAttribute(nameAttr, fir::GlobalOp::symbolAttrName(),
                             result.attributes))
-    return failure();
+    return mlir::failure();
   result.addAttribute(mlir::SymbolTable::getSymbolAttrName(),
                       builder.getStringAttr(nameAttr.getRootReference()));
 
@@ -489,7 +489,7 @@ static ParseResult parseGlobalOp(OpAsmParser &parser, OperationState &result) {
     if (parser.parseAttribute(attr, fir::GlobalOp::initValAttrName(),
                               result.attributes) ||
         parser.parseRParen())
-      return failure();
+      return mlir::failure();
     simpleInitializer = true;
   }
 
@@ -501,7 +501,7 @@ static ParseResult parseGlobalOp(OpAsmParser &parser, OperationState &result) {
 
   mlir::Type globalType;
   if (parser.parseColonType(globalType))
-    return failure();
+    return mlir::failure();
 
   result.addAttribute(fir::GlobalOp::typeAttrName(),
                       mlir::TypeAttr::get(globalType));
@@ -510,11 +510,13 @@ static ParseResult parseGlobalOp(OpAsmParser &parser, OperationState &result) {
     result.addRegion();
   } else {
     // Parse the optional initializer body.
-    if (parser.parseOptionalRegion(*result.addRegion(), llvm::None, llvm::None))
-      return failure();
+    auto parseResult = parser.parseOptionalRegion(
+        *result.addRegion(), /*arguments=*/llvm::None, /*argTypes=*/llvm::None);
+    if (parseResult.hasValue() && mlir::failed(*parseResult))
+      return mlir::failure();
   }
 
-  return success();
+  return mlir::success();
 }
 
 void fir::GlobalOp::appendInitialValue(mlir::Operation *op) {
@@ -1160,7 +1162,7 @@ static constexpr llvm::StringRef getTargetOffsetAttr() {
 template <typename A, typename... AdditionalArgs>
 static A getSubOperands(unsigned pos, A allArgs,
                         mlir::DenseIntElementsAttr ranges,
-                        AdditionalArgs &&... additionalArgs) {
+                        AdditionalArgs &&...additionalArgs) {
   unsigned start = 0;
   for (unsigned i = 0; i < pos; ++i)
     start += (*(ranges.begin() + i)).getZExtValue();
