@@ -546,6 +546,24 @@ def fir_UndefOp : fir_OneResultOp<"undefined", [NoSideEffect]> {
   }];
 }
 
+def fir_ZeroOp : fir_OneResultOp<"zero_bits", [NoSideEffect]> {
+  let summary = "explicit polymorphic zero value of some type";
+  let description = [{
+    Constructs an ssa-value of the specified type with a value of zero for all
+    bits.
+
+    ```mlir
+      %a = fir.zero_bits !fir.box<!fir.array<10 x !fir.type<T>>>
+    ```
+
+    The example creates a value of type box where all bits are zero.
+  }];
+
+  let results = (outs AnyType:$intype);
+
+  let assemblyFormat = "type($intype) attr-dict";
+}
+
 def fir_AllocMemOp : fir_AllocatableOp<"allocmem", DefaultResource> {
   let summary = "allocate storage on the heap for an object of a given type";
 
@@ -2105,6 +2123,7 @@ def fir_FieldIndexOp : fir_OneResultOp<"field_index", [NoSideEffect]> {
   let extraClassDeclaration = [{
     static constexpr llvm::StringRef fieldAttrName() { return "field_id"; }
     static constexpr llvm::StringRef typeAttrName() { return "on_type"; }
+    llvm::StringRef getFieldName() { return field_id(); }
   }];
 }
 
@@ -2189,6 +2208,15 @@ def fir_ShapeShiftOp : fir_Op<"shape_shift", [NoSideEffect]> {
   }];
 
   let extraClassDeclaration = [{
+    // Logically unzip the origins from the extent values.
+    std::vector<mlir::Value> getOrigins() {
+      std::vector<mlir::Value> result;
+      for (auto i : llvm::enumerate(pairs()))
+        if (!(i.index() & 1))
+          result.push_back(i.value());
+      return result;
+    }
+
     // Logically unzip the extents from the origin values.
     std::vector<mlir::Value> getExtents() {
       std::vector<mlir::Value> result;
@@ -2200,36 +2228,48 @@ def fir_ShapeShiftOp : fir_Op<"shape_shift", [NoSideEffect]> {
   }];
 }
 
-def fir_SliceOp : fir_Op<"slice", [NoSideEffect]> {
+def fir_SliceOp : fir_Op<"slice", [NoSideEffect, AttrSizedOperandSegments]> {
 
   let summary = "generate an abstract slice vector of type `!fir.slice`";
 
   let description = [{
-    The arguments are an ordered list of integral type values that is a
-    multiple of 3 in length.  Each such triple is defined as: the lower
-    bound, the upper bound, and the stride for that dimension. Both bounds are
-    inclusive. The slice information is given in the same row-to-column order
-    as Fortran. This abstract slice value must be applied to a reified object,
-    so all slice information must be specified.  The extent must be nonnegative
-    and the stride must not be zero.
+    The array slicing arguments are an ordered list of integral type values
+    that must be a multiple of 3 in length.  Each such triple is defined as:
+    the lower bound, the upper bound, and the stride for that dimension, as in
+    Fortran syntax. Both bounds are inclusive. The array slice information is
+    given in the same row-to-column order as Fortran. This abstract slice value
+    must be applied to a reified object, so all slice information must be
+    specified.  The extent must be nonnegative and the stride must not be zero.
 
     ```mlir
       %d = fir.slice %lo, %hi, %step : (index, index, index) -> !fir.slice<1>
     ```
+
+    To support generalized slicing of Fortran's dynamic derived types, a slice
+    op can be given a component path (narrowing from the product type of the
+    original array to the specific elemental type of the sliced projection).
+    
+    ```mlir
+      %fld = fir.field_index component, !fir.type<t{...component:ct...}>
+      %d = fir.slice %lo, %hi, %step path %fld : (index, index, index, !fir.field) -> !fir.slice<1>
+    ```
   }];
 
-  let arguments = (ins Variadic<AnyIntegerType>:$triples);
+  let arguments = (ins
+    Variadic<AnyIntegerType>:$triples,
+    Variadic<AnyComponentType>:$fields
+  );
 
   let results = (outs fir_SliceType);
 
   let assemblyFormat = [{
-    operands attr-dict `:` functional-type(operands, results)
+    $triples (`path` $fields^)? attr-dict `:` functional-type(operands, results)
   }];
 
   let verifier = [{
     auto size = triples().size();
     if (size < 3 || size > 16 * 3)
-      return emitOpError("incorrect number of args");
+      return emitOpError("incorrect number of args for triple");
     if (size % 3 != 0)
       return emitOpError("requires a multiple of 3 args");
     auto sliceTy = getType().dyn_cast<fir::SliceType>();
@@ -3541,7 +3581,7 @@ def fir_DTEntryOp : fir_Op<"dt_entry", []> {
 // Do not use these directly. They are special ops used for code gen.
 //===----------------------------------------------------------------------===//
 
-def fir_XEmboxOp : fir_Op<"ext_embox", []> {
+def fir_XEmboxOp : fir_Op<"ext_embox", [AttrSizedOperandSegments]> {
   let summary = "for internal conversion only";
 
   let description = [{
@@ -3549,39 +3589,46 @@ def fir_XEmboxOp : fir_Op<"ext_embox", []> {
     be converted to an extended embox. This op will have the following sets of
     arguments.
 
+       - memref: The memory reference being emboxed.
        - shape: A vector that is the runtime shape of the underlying array.
        - shift: A vector that is the runtime origin of the first element.
          The default is a vector of the value 1.
        - slice: A vector of triples that describe an array slice.
+       - subcomponent: A vector of indices for subobject slicing.
        - LEN type parameters: A vector of runtime LEN type parameters that
          describe an correspond to the elemental derived type.
+
+    The memref and shape arguments are mandatory. The rest are optional.
   }];
 
-  let skipDefaultBuilders = 1;
-  let builders = [OpBuilderDAG<(ins "mlir::Type":$type, "mlir::Value":$memref,
-    "mlir::ValueRange":$shape,"mlir::ValueRange":$shift,
-    "mlir::ValueRange":$slice, "mlir::ValueRange":$lenParams,
-    "llvm::ArrayRef<mlir::NamedAttribute>":$attrs)>];
-
-  let arguments = (ins Variadic<AnyType>);
+  let arguments = (ins
+    AnyReferenceLike:$memref,
+    Variadic<AnyIntegerType>:$shape,
+    Variadic<AnyIntegerType>:$shift,
+    Variadic<AnyIntegerType>:$slice,
+    Variadic<AnyCoordinateType>:$subcomponent,
+    Variadic<AnyIntegerType>:$lenParams
+  );
   let results = (outs fir_BoxType);
 
+  let assemblyFormat = [{
+    $memref (`(`$shape^`)`)? (`origin` $shift^)? (`[`$slice^`]`)? (`path` $subcomponent^)? (`typeparams` $lenParams^)? attr-dict `:` functional-type(operands, results)
+  }];
+
   let extraClassDeclaration = [{
-    static constexpr llvm::StringRef lenParamAttrName() { return "lenparam"; }
-    static constexpr llvm::StringRef rankAttrName() { return "rank"; }
-    static constexpr llvm::StringRef shapeAttrName() { return "shape"; }
-    static constexpr llvm::StringRef shiftAttrName() { return "shift"; }
-    static constexpr llvm::StringRef sliceAttrName() { return "slice"; }
-    std::size_t lenParamOffset();
-    mlir::Operation::operand_range lenParamOperands();
-    mlir::Operation::operand_range shapeOperands();
-    mlir::Operation::operand_range shiftOperands();
-    mlir::Operation::operand_range sliceOperands();
-    unsigned getRank();
+    mlir::Operation::operand_range lenParamOperands() { return lenParams(); }
+    mlir::Operation::operand_range shapeOperands() { return shape(); }
+    mlir::Operation::operand_range shiftOperands() { return shift(); }
+    mlir::Operation::operand_range sliceOperands() { return slice(); }
+    unsigned getRank() { return shape().size(); }
+    unsigned lenParamOffset() {
+      return 1 + shape().size() + shift().size() + slice().size() +
+        subcomponent().size();
+    }
   }];
 }
 
-def fir_XArrayCoorOp : fir_Op<"ext_array_coor", []> {
+def fir_XArrayCoorOp : fir_Op<"ext_array_coor", [AttrSizedOperandSegments]> {
   let summary = "for internal conversion only";
 
   let description = [{
@@ -3589,38 +3636,43 @@ def fir_XArrayCoorOp : fir_Op<"ext_array_coor", []> {
     be converted to an extended embox. This op will have the following sets of
     arguments.
 
+       - memref: The memory reference of the array's data.
        - shape: A vector that is the runtime shape of the underlying array.
        - shift: A vector that is the runtime origin of the first element.
          The default is a vector of the value 1.
        - slice: A vector of triples that describe an array slice.
+       - subcomponent: A vector of indices that describe subobject slicing.
        - indices: A vector of runtime values that describe the coordinate of
          the element of the array to be computed.
        - LEN type parameters: A vector of runtime LEN type parameters that
          describe an correspond to the elemental derived type.
+
+    The memref, shape, and indices arguments are mandatory. The rest are
+    optional.
   }];
 
-let skipDefaultBuilders = 1;
-  let builders = [OpBuilderDAG<(ins "mlir::Type":$type, "mlir::Value":$memref,
-    "mlir::ValueRange":$shape, "mlir::ValueRange":$shift, "mlir::ValueRange":
-    $slice, "mlir::ValueRange":$indices, "mlir::ValueRange":$lenParams,
-    "llvm::ArrayRef<mlir::NamedAttribute>":$attrs)>];
-
-  let arguments = (ins Variadic<AnyType>);
+  let arguments = (ins
+    AnyReferenceLike:$memref,
+    Variadic<AnyIntegerType>:$shape,
+    Variadic<AnyIntegerType>:$shift,
+    Variadic<AnyIntegerType>:$slice,
+    Variadic<AnyCoordinateType>:$subcomponent,
+    Variadic<AnyCoordinateType>:$indices,
+    Variadic<AnyIntegerType>:$lenParams
+  );
   let results = (outs fir_ReferenceType);
 
+  let assemblyFormat = [{
+    $memref (`(`$shape^`)`)? (`origin` $shift^)? (`[`$slice^`]`)? (`path` $subcomponent^)? `<`$indices`>` (`typeparams` $lenParams^)? attr-dict `:` functional-type(operands, results)
+  }];
+
   let extraClassDeclaration = [{
-    static constexpr llvm::StringRef indexAttrName() { return "indices"; }
-    static constexpr llvm::StringRef lenParamAttrName() { return "lenparam"; }
-    static constexpr llvm::StringRef rankAttrName() { return "rank"; }
-    static constexpr llvm::StringRef shapeAttrName() { return "shape"; }
-    static constexpr llvm::StringRef shiftAttrName() { return "shift"; }
-    static constexpr llvm::StringRef sliceAttrName() { return "slice"; }
-    mlir::Operation::operand_range indexOperands();
-    mlir::Operation::operand_range lenParamOperands();
-    mlir::Operation::operand_range shapeOperands();
-    mlir::Operation::operand_range shiftOperands();
-    mlir::Operation::operand_range sliceOperands();
-    unsigned getRank();
+    mlir::Operation::operand_range indexOperands() { return indices(); }
+    mlir::Operation::operand_range lenParamOperands() { return lenParams(); }
+    mlir::Operation::operand_range shapeOperands() { return shape(); }
+    mlir::Operation::operand_range shiftOperands() { return shift(); }
+    mlir::Operation::operand_range sliceOperands() { return slice(); }
+    unsigned getRank() { return shape().size(); }
   }];
 }
 
