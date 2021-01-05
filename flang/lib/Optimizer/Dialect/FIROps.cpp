@@ -182,8 +182,8 @@ mlir::Type fir::BoxDimsOp::getTupleType() {
 //===----------------------------------------------------------------------===//
 
 mlir::FunctionType fir::CallOp::getFunctionType() {
-  return mlir::FunctionType::get(getOperandTypes(), getResultTypes(),
-                                 getContext());
+  return mlir::FunctionType::get(getContext(), getOperandTypes(),
+                                 getResultTypes());
 }
 
 static void printCallOp(mlir::OpAsmPrinter &p, fir::CallOp &op) {
@@ -436,8 +436,8 @@ void fir::CoordinateOp::build(OpBuilder &builder, OperationState &result,
 //===----------------------------------------------------------------------===//
 
 mlir::FunctionType fir::DispatchOp::getFunctionType() {
-  return mlir::FunctionType::get(getOperandTypes(), getResultTypes(),
-                                 getContext());
+  return mlir::FunctionType::get(getContext(), getOperandTypes(),
+                                 getResultTypes());
 }
 
 //===----------------------------------------------------------------------===//
