@@ -55,15 +55,15 @@ static mlir::Type genIntegerType(mlir::MLIRContext *context, int kind) {
           Fortran::common::TypeCategory::Integer, kind)) {
     switch (kind) {
     case 1:
-      return mlir::IntegerType::get(getIntegerBits<1>(), context);
+      return mlir::IntegerType::get(context, getIntegerBits<1>());
     case 2:
-      return mlir::IntegerType::get(getIntegerBits<2>(), context);
+      return mlir::IntegerType::get(context, getIntegerBits<2>());
     case 4:
-      return mlir::IntegerType::get(getIntegerBits<4>(), context);
+      return mlir::IntegerType::get(context, getIntegerBits<4>());
     case 8:
-      return mlir::IntegerType::get(getIntegerBits<8>(), context);
+      return mlir::IntegerType::get(context, getIntegerBits<8>());
     case 16:
-      return mlir::IntegerType::get(getIntegerBits<16>(), context);
+      return mlir::IntegerType::get(context, getIntegerBits<16>());
     }
   }
   llvm_unreachable("INTEGER type translation not implemented");

@@ -596,14 +596,14 @@ static mlir::FunctionType
 getFunctionType(llvm::Optional<mlir::Type> resultType,
                 llvm::ArrayRef<mlir::Value> arguments,
                 Fortran::lower::FirOpBuilder &builder) {
-  llvm::SmallVector<mlir::Type, 2> argumentTypes;
+  llvm::SmallVector<mlir::Type, 2> argTypes;
   for (auto &arg : arguments)
-    argumentTypes.push_back(arg.getType());
-  llvm::SmallVector<mlir::Type, 1> resultTypes;
+    argTypes.push_back(arg.getType());
+  llvm::SmallVector<mlir::Type, 1> resTypes;
   if (resultType)
-    resultTypes.push_back(*resultType);
-  return mlir::FunctionType::get(builder.getModule().getContext(),
-                                 argumentTypes, resultType);
+    resTypes.push_back(*resultType);
+  return mlir::FunctionType::get(builder.getModule().getContext(), argTypes,
+                                 resTypes);
 }
 
 /// fir::ExtendedValue to mlir::Value translation layer

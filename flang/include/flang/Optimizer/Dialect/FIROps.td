@@ -2726,10 +2726,11 @@ def fir_DispatchOp : fir_Op<"dispatch", []> {
     llvm::StringRef calleeName;
     if (failed(parser.parseOptionalKeyword(&calleeName))) {
       mlir::StringAttr calleeAttr;
-      if (parser.parseAttribute(calleeAttr, "method", result.attributes))
+      if (parser.parseAttribute(calleeAttr, methodAttrName(),
+                                result.attributes))
         return mlir::failure();
     } else {
-      result.addAttribute("method",
+      result.addAttribute(methodAttrName(),
           parser.getBuilder().getStringAttr(calleeName));
     }
     if (parser.parseOperandList(operands,
@@ -2744,13 +2745,15 @@ def fir_DispatchOp : fir_Op<"dispatch", []> {
   }];
 
   let printer = [{
-    p << getOperationName() << ' ' << (*this)->getAttr("method") << '(';
+    p << getOperationName() << ' ' << (*this)->getAttr(methodAttrName()) << '(';
     p.printOperand(object());
-    if (arg_operand_begin() != arg_operand_end()) {
+    if (!args().empty()) {
       p << ", ";
       p.printOperands(args());
     }
-    p << ')';
+    p << ") : ";
+    p.printFunctionalType((*this)->getOperandTypes(),
+        (*this)->getResultTypes());
   }];
 
   let extraClassDeclaration = [{
@@ -2758,9 +2761,13 @@ def fir_DispatchOp : fir_Op<"dispatch", []> {
     operand_range getArgOperands() {
       return {arg_operand_begin(), arg_operand_end()};
     }
+    // operand[0] is the object (of box type)
     operand_iterator arg_operand_begin() { return operand_begin() + 1; }
     operand_iterator arg_operand_end() { return operand_end(); }
-    llvm::StringRef passArgAttrName() { return "pass_arg_pos"; }
+    static constexpr llvm::StringRef passArgAttrName() {
+      return "pass_arg_pos";
+    }
+    static constexpr llvm::StringRef methodAttrName() { return "method"; }
     unsigned passArgPos();
   }];
 }
