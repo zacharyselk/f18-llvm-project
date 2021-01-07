@@ -110,10 +110,11 @@ genOMP(Fortran::lower::AbstractConverter &converter,
                     std::get<std::optional<Fortran::parser::OmpObjectList>>(
                         flushConstruct.t))
               genObjectList(*ompObjectList, converter, operandRange);
-            if (std::get<std::optional<
-                    std::list<Fortran::parser::OmpMemoryOrderClause>>>(
-                    flushConstruct.t))
-              TODO("Handle OmpMemoryOrderClause");
+            // FIXME: Add support for handling memory order clause. Adding
+            // a TODO will invoke a crash, so commented it for now.
+            // if (std::get<std::optional<
+            //        std::list<Fortran::parser::OmpMemoryOrderClause>>>(
+            //        flushConstruct.t))
             converter.getFirOpBuilder().create<mlir::omp::FlushOp>(
                 converter.getCurrentLocation(), operandRange);
           },
@@ -182,20 +183,20 @@ genOMP(Fortran::lower::AbstractConverter &converter,
                          &clause.u)) {
         const Fortran::parser::OmpObjectList &ompObjectList = copyinClause->v;
         genObjectList(ompObjectList, converter, copyinClauseOperands);
-      }
-#if 0 // FIXME: hacked out due to compilation failures
-      else if (const auto &allocateClause =
-                     std::get_if<Fortran::parser::OmpAllocateClause>(
+      } else if (const auto &allocateClause =
+                     std::get_if<Fortran::parser::OmpClause::Allocate>(
                          &clause.u)) {
         mlir::Value allocatorOperand;
+        const Fortran::parser::OmpAllocateClause &ompAllocateClause =
+            allocateClause->v;
         const Fortran::parser::OmpObjectList &ompObjectList =
-            std::get<Fortran::parser::OmpObjectList>(allocateClause->t);
+            std::get<Fortran::parser::OmpObjectList>(ompAllocateClause.t);
         // Check if allocate clause has allocator specified. If so, add it
         // to list of allocators, otherwise, add default allocator to
         // list of allocators.
         const auto &allocatorValue = std::get<
             std::optional<Fortran::parser::OmpAllocateClause::Allocator>>(
-            allocateClause->t);
+            ompAllocateClause.t);
         if (allocatorValue) {
           allocatorOperand = fir::getBase(converter.genExprValue(
               *Fortran::semantics::GetExpr(allocatorValue->v), stmtCtx));
@@ -209,7 +210,6 @@ genOMP(Fortran::lower::AbstractConverter &converter,
         }
         genObjectList(ompObjectList, converter, allocateOperands);
       }
-#endif
     }
     // Create and insert the operation.
     auto parallelOp = firOpBuilder.create<mlir::omp::ParallelOp>(
