@@ -3616,10 +3616,6 @@ def fir_XEmboxOp : fir_Op<"ext_embox", [AttrSizedOperandSegments]> {
   }];
 
   let extraClassDeclaration = [{
-    mlir::Operation::operand_range lenParamOperands() { return lenParams(); }
-    mlir::Operation::operand_range shapeOperands() { return shape(); }
-    mlir::Operation::operand_range shiftOperands() { return shift(); }
-    mlir::Operation::operand_range sliceOperands() { return slice(); }
     unsigned getRank() { return shape().size(); }
     unsigned lenParamOffset() {
       return 1 + shape().size() + shift().size() + slice().size() +
@@ -3667,11 +3663,6 @@ def fir_XArrayCoorOp : fir_Op<"ext_array_coor", [AttrSizedOperandSegments]> {
   }];
 
   let extraClassDeclaration = [{
-    mlir::Operation::operand_range indexOperands() { return indices(); }
-    mlir::Operation::operand_range lenParamOperands() { return lenParams(); }
-    mlir::Operation::operand_range shapeOperands() { return shape(); }
-    mlir::Operation::operand_range shiftOperands() { return shift(); }
-    mlir::Operation::operand_range sliceOperands() { return slice(); }
     unsigned getRank() { return shape().size(); }
   }];
 }
