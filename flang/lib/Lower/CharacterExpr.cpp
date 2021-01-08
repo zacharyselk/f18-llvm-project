@@ -332,7 +332,8 @@ Fortran::lower::CharacterExprHelper::createCharacterTemp(mlir::Type type,
   llvm::SmallVector<mlir::Value, 1> lenParams;
   if (typeLen == fir::CharacterType::unknownLen())
     lenParams.push_back(len);
-  auto ref = builder.allocateLocal(loc, charTy, llvm::StringRef{}, lenParams);
+  auto ref = builder.allocateLocal(loc, charTy, llvm::StringRef{}, llvm::None,
+                                   lenParams);
   return {ref, len};
 }
 
