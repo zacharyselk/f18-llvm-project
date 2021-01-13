@@ -245,10 +245,17 @@ struct TypeBuilder {
       ty = fir::SequenceType::get(shape, ty);
     }
 
-    if (isPtr || Fortran::semantics::IsPointer(ultimate))
-      ty = fir::PointerType::get(ty);
-    else if (isAlloc || Fortran::semantics::IsAllocatable(ultimate))
-      ty = fir::HeapType::get(ty);
+    if (Fortran::semantics::IsPointer(symbol))
+      return fir::BoxType::get(fir::PointerType::get(ty));
+    if (Fortran::semantics::IsAllocatable(symbol))
+      return fir::BoxType::get(fir::HeapType::get(ty));
+    // isPtr and isAlloc are variable that were promoted to be on the
+    // heap or to be pointers, but they do not have Fortran allocatable
+    // or pointer semantics, so do not use box for them.
+    if (isPtr)
+      return fir::PointerType::get(ty);
+    if (isAlloc)
+      return fir::HeapType::get(ty);
     return ty;
   }
 

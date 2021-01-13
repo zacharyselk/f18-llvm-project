@@ -1104,7 +1104,8 @@ IntrinsicLibrary::genChar(mlir::Type type,
   Fortran::lower::CharacterExprHelper helper{builder, loc};
   auto kind = helper.getCharacterType(type).getFKind();
   auto cast = helper.createSingletonFromCode(*arg, kind);
-  auto len = builder.createIntegerConstant(loc, helper.getLengthType(), 1);
+  auto len =
+      builder.createIntegerConstant(loc, builder.getCharacterLengthType(), 1);
   return fir::CharBoxValue{cast, len};
 }
 

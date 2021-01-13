@@ -96,8 +96,8 @@ Fortran::lower::CharacterExprHelper::materializeValue(mlir::Value str) {
     LLVM_DEBUG(llvm::dbgs() << "cannot materialize: " << str << '\n');
     llvm_unreachable("must be a !fir.char<N> type");
   }
-  auto len =
-      builder.createIntegerConstant(loc, getLengthType(), charTy.getLen());
+  auto len = builder.createIntegerConstant(
+      loc, builder.getCharacterLengthType(), charTy.getLen());
   auto temp = builder.create<fir::AllocaOp>(loc, charTy);
   builder.create<fir::StoreOp>(loc, str, temp);
   LLVM_DEBUG(llvm::dbgs() << "materialized as local: " << str << " -> (" << temp
@@ -108,7 +108,7 @@ Fortran::lower::CharacterExprHelper::materializeValue(mlir::Value str) {
 fir::ExtendedValue
 Fortran::lower::CharacterExprHelper::toExtendedValue(mlir::Value character,
                                                      mlir::Value len) {
-  auto lenType = getLengthType();
+  auto lenType = builder.getCharacterLengthType();
   auto type = character.getType();
   auto base = fir::isa_passbyref_type(type) ? character : mlir::Value{};
   auto resultLen = len;
@@ -192,7 +192,8 @@ Fortran::lower::CharacterExprHelper::createEmbox(const fir::CharBoxValue &box) {
   auto buff = builder.createConvert(loc, refType, box.getBuffer());
   // Convert in case the provided length is not of the integer type that must
   // be used in boxchar.
-  auto len = builder.createConvert(loc, getLengthType(), box.getLen());
+  auto len = builder.createConvert(loc, builder.getCharacterLengthType(),
+                                   box.getLen());
   return builder.create<fir::EmboxCharOp>(loc, boxCharType, buff, len);
 }
 
@@ -203,7 +204,7 @@ fir::CharBoxValue Fortran::lower::CharacterExprHelper::toScalarCharacter(
 
   // TODO: add a fast path multiplying new length at compile time if the info is
   // in the array type.
-  auto lenType = getLengthType();
+  auto lenType = builder.getCharacterLengthType();
   auto len = builder.createConvert(loc, lenType, box.getLen());
   for (auto extent : box.getExtents())
     len = builder.create<mlir::MulIOp>(
@@ -392,8 +393,10 @@ void Fortran::lower::CharacterExprHelper::createAssign(
 
 fir::CharBoxValue Fortran::lower::CharacterExprHelper::createConcatenate(
     const fir::CharBoxValue &lhs, const fir::CharBoxValue &rhs) {
-  auto lhsLen = builder.createConvert(loc, getLengthType(), lhs.getLen());
-  auto rhsLen = builder.createConvert(loc, getLengthType(), rhs.getLen());
+  auto lhsLen = builder.createConvert(loc, builder.getCharacterLengthType(),
+                                      lhs.getLen());
+  auto rhsLen = builder.createConvert(loc, builder.getCharacterLengthType(),
+                                      rhs.getLen());
   mlir::Value len = builder.create<mlir::AddIOp>(loc, lhsLen, rhsLen);
   auto temp = createCharacterTemp(getCharacterType(rhs), len);
   createCopy(temp, lhs, lhsLen);
@@ -423,7 +426,8 @@ fir::CharBoxValue Fortran::lower::CharacterExprHelper::createSubstring(
   mlir::SmallVector<mlir::Value, 2> castBounds;
   // Convert bounds to length type to do safe arithmetic on it.
   for (auto bound : bounds)
-    castBounds.push_back(builder.createConvert(loc, getLengthType(), bound));
+    castBounds.push_back(
+        builder.createConvert(loc, builder.getCharacterLengthType(), bound));
   auto lowerBound = castBounds[0];
   // FIR CoordinateOp is zero based but Fortran substring are one based.
   auto one = builder.createIntegerConstant(loc, lowerBound.getType(), 1);
@@ -487,7 +491,7 @@ mlir::Value Fortran::lower::CharacterExprHelper::createLenTrim(
       builder.create<mlir::AddIOp>(loc, iterWhile.getResult(1), one);
   auto result =
       builder.create<SelectOp>(loc, iterWhile.getResult(0), zero, newLen);
-  return builder.createConvert(loc, getLengthType(), result);
+  return builder.createConvert(loc, builder.getCharacterLengthType(), result);
 }
 
 fir::CharBoxValue
@@ -497,7 +501,8 @@ Fortran::lower::CharacterExprHelper::createCharacterTemp(mlir::Type type,
   auto kind = recoverCharacterType(type).getFKind();
   auto charType = fir::CharacterType::get(builder.getContext(), kind, len);
   auto addr = builder.create<fir::AllocaOp>(loc, charType);
-  auto mlirLen = builder.createIntegerConstant(loc, getLengthType(), len);
+  auto mlirLen =
+      builder.createIntegerConstant(loc, builder.getCharacterLengthType(), len);
   return {addr, mlirLen};
 }
 
@@ -610,4 +615,18 @@ mlir::Value Fortran::lower::CharacterExprHelper::extractCodeFromSingleton(
   auto intType = builder.getIntegerType(bits);
   auto zero = builder.createIntegerConstant(loc, builder.getIndexType(), 0);
   return builder.create<fir::ExtractValueOp>(loc, intType, singleton, zero);
+}
+
+mlir::Value
+Fortran::lower::CharacterExprHelper::readLengthFromBox(mlir::Value box) {
+  auto lenTy = builder.getCharacterLengthType();
+  auto size = builder.create<fir::BoxEleSizeOp>(loc, lenTy, box);
+  auto charTy = recoverCharacterType(box.getType());
+  auto bits = builder.getKindMap().getCharacterBitsize(charTy.getFKind());
+  auto width = bits / 8;
+  if (width > 1) {
+    auto widthVal = builder.createIntegerConstant(loc, lenTy, width);
+    return builder.create<mlir::SignedDivIOp>(loc, size, widthVal);
+  }
+  return size;
 }

@@ -17,6 +17,7 @@
 #include "flang/Evaluate/fold.h"
 #include "flang/Evaluate/real.h"
 #include "flang/Evaluate/traverse.h"
+#include "flang/Lower/Allocatable.h"
 #include "flang/Lower/Bridge.h"
 #include "flang/Lower/CallInterface.h"
 #include "flang/Lower/CharacterExpr.h"
@@ -135,6 +136,23 @@ public:
     return genScalarLit<1>(str.str(), static_cast<int64_t>(len));
   }
 
+  fir::MutableBoxValue
+  genMutableBoxValue(const Fortran::lower::SomeExpr &expr) {
+    // TODO: GetLastSymbol is not the right thing to do if expr if an
+    // allocatable or pointer derived type component.
+    auto *sym = Fortran::evaluate::GetLastSymbol(expr);
+    if (!sym)
+      fir::emitFatalError(getLoc(), "trying to get descriptor address of an "
+                                    "expression that is not a variable");
+    return symMap.lookupSymbol(*sym).match(
+        [&](const Fortran::lower::SymbolBox::PointerOrAllocatable &boxAddr)
+            -> fir::MutableBoxValue { return boxAddr; },
+        [&](auto &) -> fir::MutableBoxValue {
+          fir::emitFatalError(getLoc(),
+                              "symbol was not lowered to MutableBoxValue");
+        });
+  }
+
   mlir::Location getLoc() { return location; }
 
   template <typename A>
@@ -216,48 +234,20 @@ public:
     return createCharCompare(pred, genval(ex.left()), genval(ex.right()));
   }
 
-  fir::ExtendedValue
-  genAllocatableOrPointerUnbox(Fortran::semantics::SymbolRef sym) {
-    auto boxAddr = symMap.lookupSymbol(sym).getAddr();
-    if (Fortran::semantics::IsAssumedRankArray(sym))
-      TODO("Assumed rank allocatables or pointers");
-    if (Fortran::semantics::IsPointer(sym))
-      TODO("pointer"); // deal with non contiguity;
-    auto rank = sym->Rank();
-    // TODO: only intrinsic types other than CHARACTER
-    if (!boxAddr)
-      TODO("Allocatable type not lowered yet");
-    auto boxType = fir::dyn_cast_ptrEleTy(boxAddr.getType());
-    if (!boxType || !boxType.isa<fir::BoxType>())
-      llvm_unreachable("bad allocatable or pointer type in symbol map");
-
-    auto varAddrType = boxType.cast<fir::BoxType>().getEleTy();
-    auto loc = getLoc();
-
-    auto box = builder.create<fir::LoadOp>(loc, boxAddr);
-    auto addr = builder.create<fir::BoxAddrOp>(loc, varAddrType, box);
-    if (rank == 0)
-      return addr;
-    auto idxTy = builder.getIndexType();
-    llvm::SmallVector<mlir::Value, 4> lbounds;
-    llvm::SmallVector<mlir::Value, 4> extents;
-    for (decltype(rank) dim = 0; dim < rank; ++dim) {
-      auto dimVal = builder.createIntegerConstant(loc, idxTy, dim);
-      auto dimInfo =
-          builder.create<fir::BoxDimsOp>(loc, idxTy, idxTy, idxTy, box, dimVal);
-      lbounds.push_back(dimInfo.getResult(0));
-      extents.push_back(dimInfo.getResult(1));
-    }
-    return fir::ArrayBoxValue{addr, extents, lbounds};
+  Fortran::lower::SymbolBox
+  genAllocatableOrPointerUnbox(const fir::MutableBoxValue &box) {
+    return Fortran::lower::genMutableBoxRead(builder, getLoc(), box);
   }
 
   /// Returns a reference to a symbol or its box/boxChar descriptor if it has
   /// one.
   fir::ExtendedValue gen(Fortran::semantics::SymbolRef sym) {
-    if (Fortran::semantics::IsAllocatableOrPointer(sym))
-      return genAllocatableOrPointerUnbox(sym);
     if (auto val = symMap.lookupSymbol(sym))
-      return val.toExtendedValue();
+      return val.match(
+          [&](const Fortran::lower::SymbolBox::PointerOrAllocatable &boxAddr) {
+            return genAllocatableOrPointerUnbox(boxAddr).toExtendedValue();
+          },
+          [&val](auto &) { return val.toExtendedValue(); });
     llvm_unreachable("all symbols should be in the map");
     auto addr = builder.createTemporary(getLoc(), converter.genType(sym),
                                         toStringRef(sym->name()));
@@ -651,9 +641,7 @@ public:
     };
 
     auto lenp = builder.createIntegerConstant(
-        getLoc(),
-        Fortran::lower::CharacterExprHelper{builder, getLoc()}.getLengthType(),
-        len);
+        getLoc(), builder.getCharacterLengthType(), len);
     // When in an initializer context, construct the literal op itself and do
     // not construct another constant object in rodata.
     if (inInitializer)
@@ -1025,6 +1013,7 @@ public:
     auto genFullDim = [&](const auto &arr, mlir::Value delta) -> mlir::Value {
       mlir::Value total = zero;
       assert(arr.getExtents().size() == aref.subscript().size());
+      delta = builder.createConvert(loc, idxTy, delta);
       unsigned dim = 0;
       for (auto [ext, sub] : llvm::zip(arr.getExtents(), aref.subscript())) {
         auto subVal = genComponent(sub);
@@ -1138,15 +1127,12 @@ public:
       if (generateArrayCoordinate)
         return genArrayCoorOp(gen(symbol), aref);
       auto si = symMap.lookupSymbol(symbol);
-      if (Fortran::semantics::IsAllocatableOrPointer(symbol))
-        si = gen(symbol).match(
-            [&](const fir::ArrayBoxValue &x) -> Fortran::lower::SymbolBox {
-              return x;
-            },
-            [&](const auto &) -> Fortran::lower::SymbolBox {
-              TODO("character and derived intrinsic allocatables");
-              return {};
-            });
+      si = si.match(
+          [&](const Fortran::lower::SymbolBox::PointerOrAllocatable &x)
+              -> Fortran::lower::SymbolBox {
+            return genAllocatableOrPointerUnbox(x);
+          },
+          [](const auto &x) -> Fortran::lower::SymbolBox { return x; });
       if (!si.hasConstantShape())
         return gen(si, aref);
       auto box = gen(symbol);
@@ -1326,11 +1312,11 @@ public:
     if (isStatementFunctionCall(procRef))
       return genStmtFunctionRef(procRef, resultType);
 
-    // Implicit interface implementation only
-    // TODO: Explicit interface, we need to use Characterize here,
-    // evaluate::IntrinsicProcTable is required to use it.
+    auto loc = getLoc();
     Fortran::lower::CallerInterface caller(procRef, converter);
     using PassBy = Fortran::lower::CallerInterface::PassEntityBy;
+
+    llvm::SmallVector<fir::MutableBoxValue, 1> mutableModifiedByCall;
 
     for (const auto &arg : caller.getPassedArguments()) {
       const auto *actual = arg.entity;
@@ -1351,9 +1337,18 @@ public:
         continue;
       }
 
+      if (arg.passBy == PassBy::MutableBox) {
+        auto mutableBox = genMutableBoxValue(*expr);
+        auto IRbox = Fortran::lower::getMutableIRBox(builder, loc, mutableBox);
+        caller.placeInput(arg, IRbox);
+        // TODO: no need to add this to the list if intent(in)
+        mutableModifiedByCall.emplace_back(std::move(mutableBox));
+        continue;
+      }
+
       auto argRef = genExtAddr(*expr);
 
-      auto helper = Fortran::lower::CharacterExprHelper{builder, getLoc()};
+      auto helper = Fortran::lower::CharacterExprHelper{builder, loc};
       if (arg.passBy == PassBy::BaseAddress) {
         caller.placeInput(arg, fir::getBase(argRef));
       } else if (arg.passBy == PassBy::BoxChar) {
@@ -1368,8 +1363,8 @@ public:
               TODO("lowering actual arguments descriptor to boxchar");
             },
             [&](const auto &x) {
-              mlir::emitError(getLoc(), "Lowering internal error: actual "
-                                        "argument is not a character");
+              mlir::emitError(loc, "Lowering internal error: actual "
+                                   "argument is not a character");
               return mlir::Value{};
             });
         caller.placeInput(arg, boxChar);
@@ -1389,7 +1384,7 @@ public:
         if (resultArg->passBy == PassBy::AddressAndLength) {
           // allocate and pass character result
           auto len = caller.getResultLength();
-          Fortran::lower::CharacterExprHelper helper{builder, getLoc()};
+          Fortran::lower::CharacterExprHelper helper{builder, loc};
           auto temp = helper.createCharacterTemp(resultType[0], len);
           caller.placeAddressAndLengthInput(*resultArg, temp.getBuffer(),
                                             temp.getLen());
@@ -1425,19 +1420,19 @@ public:
         // if the function is not defined here and it was first passed as an
         // argument without any more information.
         funcPointer =
-            builder.create<fir::AddrOfOp>(getLoc(), funcOpType, symbolAttr);
+            builder.create<fir::AddrOfOp>(loc, funcOpType, symbolAttr);
       } else if (callSiteType.getResults() != funcOpType.getResults()) {
         // Implicit interface result type mismatch are not standard Fortran,
         // but some compilers are not complaining about it.
         // The front-end is not protecting lowering from this currently. Support
         // this with a discouraging warning.
-        mlir::emitWarning(getLoc(),
+        mlir::emitWarning(loc,
                           "return type mismatches were never standard"
                           " compliant and may lead to undefined behavior.");
         // Cast the actual function to the current caller implicit type because
         // that is the behavior we would get if we could not see the definition.
         funcPointer =
-            builder.create<fir::AddrOfOp>(getLoc(), funcOpType, symbolAttr);
+            builder.create<fir::AddrOfOp>(loc, funcOpType, symbolAttr);
       } else {
         funcSymbolAttr = symbolAttr;
       }
@@ -1450,8 +1445,7 @@ public:
     // compatible interface in Fortran, but that have different signatures in
     // FIR.
     if (funcPointer)
-      operands.push_back(
-          builder.createConvert(getLoc(), funcType, funcPointer));
+      operands.push_back(builder.createConvert(loc, funcType, funcPointer));
 
     // Deal with potential mismatches in arguments types. Passing an array to
     // a scalar argument should for instance be tolerated here.
@@ -1461,8 +1455,11 @@ public:
       operands.push_back(cast);
     }
 
-    auto call = builder.create<fir::CallOp>(getLoc(), funcType.getResults(),
+    auto call = builder.create<fir::CallOp>(loc, funcType.getResults(),
                                             funcSymbolAttr, operands);
+    // Sync pointers and allocatables that may have been modified the call.
+    for (const auto &mutableBox : mutableModifiedByCall)
+      Fortran::lower::syncMutableBoxFromIRBox(builder, loc, mutableBox);
     // Handle case where result was passed as argument
     if (caller.getPassedResult()) {
       return resRef.getValue();
@@ -2617,4 +2614,17 @@ fir::ExtendedValue Fortran::lower::createStringLiteral(
   LLVM_DEBUG(llvm::dbgs() << "string-lit: \"" << str << "\"\n");
   return ScalarExprLowering{loc, converter, dummySymbolMap, dummyStmtCtx}
       .genStringLit(str, len);
+}
+
+fir::MutableBoxValue Fortran::lower::createSomeMutableBox(
+    mlir::Location loc, Fortran::lower::AbstractConverter &converter,
+    const Fortran::evaluate::Expr<Fortran::evaluate::SomeType> &expr,
+    Fortran::lower::SymMap &symMap) {
+  // MutableBox lowering StatementContext does not need to be propagated
+  // to the caller because the result value is a variable, not a temporary
+  // expression. The StatementContext clean-up can occur before using the
+  // resulting MutableBoxValue.
+  Fortran::lower::StatementContext dummyStmtCtx;
+  return ScalarExprLowering{loc, converter, symMap, dummyStmtCtx}
+      .genMutableBoxValue(expr);
 }
