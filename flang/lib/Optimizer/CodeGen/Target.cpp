@@ -205,6 +205,55 @@ struct TargetAArch64 : public GenericTarget<TargetAArch64> {
 };
 } // namespace
 
+//===----------------------------------------------------------------------===//
+// PPC64le (PowerPC 64 bit little endean) linux target specifics.
+//===----------------------------------------------------------------------===//
+
+namespace {
+struct TargetPPC64le : public GenericTarget<TargetAArch64> {
+  using GenericTarget::GenericTarget;
+
+  static constexpr int defaultWidth = 64;
+
+  CodeGenSpecifics::Marshalling
+  complexArgumentType(mlir::Type eleTy) const override {
+    CodeGenSpecifics::Marshalling marshal;
+    const auto *sem = &floatToSemantics(kindMap, eleTy);
+    if (sem == &llvm::APFloat::IEEEsingle()) {
+      // <2 x t>   vector of 2 eleTy
+      marshal.emplace_back(fir::VectorType::get(2, eleTy), AT{});
+    } else if (sem == &llvm::APFloat::IEEEdouble()) {
+      // two distinct double arguments
+      marshal.emplace_back(eleTy, AT{});
+      marshal.emplace_back(eleTy, AT{});
+    } else {
+      llvm_unreachable("not implemented");
+    }
+    return marshal;
+  }
+
+  CodeGenSpecifics::Marshalling
+  complexReturnType(mlir::Type eleTy) const override {
+    CodeGenSpecifics::Marshalling marshal;
+    const auto *sem = &floatToSemantics(kindMap, eleTy);
+    if (sem == &llvm::APFloat::IEEEsingle()) {
+      // <2 x t>   vector of 2 eleTy
+      marshal.emplace_back(fir::VectorType::get(2, eleTy), AT{});
+    } else if (sem == &llvm::APFloat::IEEEdouble()) {
+      // { double, double }   struct of 2 double
+      mlir::TypeRange range = {eleTy, eleTy};
+      marshal.emplace_back(mlir::TupleType::get(eleTy.getContext(), range),
+                           AT{});
+    } else {
+      llvm_unreachable("not implemented");
+    }
+    return marshal;
+  }
+};
+} // namespace
+
+
+
 // Instantiate the overloaded target instance based on the triple value.
 // Currently, the implementation only instantiates `i386-unknown-linux-gnu` and
 // `x86_64-unknown-linux-gnu` like triples. Other targets should be added to
@@ -242,6 +291,15 @@ fir::CodeGenSpecifics::get(mlir::MLIRContext *ctx, llvm::Triple &trp,
       return std::make_unique<TargetAArch64>(ctx, trp, kindMap);
     }
     break;
-  }
+  case llvm::Triple::ArchType::ppc64le:
+    switch (trp.getOS()) {
+    default:
+      break;
+    case llvm::Triple::OSType::Linux:
+      return std::make_unique<TargetPPC64le>(ctx, trp, kindMap);
+    }
+    break;
+ }
+
   llvm::report_fatal_error("target not implemented");
 }

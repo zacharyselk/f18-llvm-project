@@ -1,6 +1,6 @@
 // RUN: cc -c %S/print_complex.c
 // RUN: tco --target=x86_64-unknown-linux-gnu %s | FileCheck %s --check-prefix=LLVMIR
-// RUN: tco --target=x86_64-unknown-linux-gnu %s | llc | as -o %t
+// RUN: tco --target=x86_64-unknown-linux-gnu %s | llc -filetype=obj -o %t
 // RUN: cc %t print_complex.o
 // RUN: ./a.out | FileCheck %s --check-prefix=EXECHECK
 
