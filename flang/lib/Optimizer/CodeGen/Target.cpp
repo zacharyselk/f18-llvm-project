@@ -206,11 +206,11 @@ struct TargetAArch64 : public GenericTarget<TargetAArch64> {
 } // namespace
 
 //===----------------------------------------------------------------------===//
-// PPC64le (PowerPC 64 bit little endean) linux target specifics.
+// PPC64le (PowerPC 64 bit little endian) linux target specifics.
 //===----------------------------------------------------------------------===//
 
 namespace {
-struct TargetPPC64le : public GenericTarget<TargetAArch64> {
+struct TargetPPC64le : public GenericTarget<TargetPPC64le> {
   using GenericTarget::GenericTarget;
 
   static constexpr int defaultWidth = 64;
